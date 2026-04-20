@@ -4,6 +4,44 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.2.2] - 2026-04-20
+
+### Changed - Scope de `clone` simplificado
+
+Filosofia de diseño: el CLI debe saber migrar bien por si mismo, sin necesidad
+de copiar cada vez desde un servicio-ejemplo. El conocimiento destilado del
+0024 (REST gold) y 0015 (SOAP gold) ya vive en los prompts canonicos
+(`migrate-rest-full.md`, `migrate-soap-full.md`, `checklist-rules.md`).
+
+`capamedia clone` ahora solo trae lo especifico del servicio:
+
+```
+workspace/
+  legacy/sqb-msa-<svc>/
+  umps/sqb-msa-umpclientes<NNNN>/
+  tx/sqb-cfg-<NNNNNN>-TX/
+  COMPLEXITY_<svc>.md
+```
+
+### Removed
+
+- `catalogs/` — se quitaron los clones de `sqb-cfg-codigosBackend-config` y
+  `sqb-cfg-errores-errors`. Son catalogos globales que no cambian entre
+  servicios; clonarlos 40 veces era desperdicio. Si en algun servicio hace
+  falta validar un TX code contra el catalogo, el dev puede clonarlo manual.
+- `gold-ref/` — se quito el clone de `tnd-msa-sp-wsclientes0024` y
+  `tnd-msa-sp-wsclientes0015`. Los patrones del gold ya viven dentro del CLI.
+- Flags `--skip-catalogs` y `--skip-gold` eliminadas (no aplican).
+- Referencias a proyecto `tpl-middleware` (solo se usaba para gold).
+
+### Testing
+
+Probado sobre `wsclientes0007`: workspace queda con **solo 3 carpetas**
+(legacy, umps, tx) + COMPLEXITY report. Todos los clones exitosos.
+30/30 tests passed.
+
+---
+
 ## [0.2.1] - 2026-04-19
 
 ### Added - TX repos + multi-project support

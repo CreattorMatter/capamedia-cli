@@ -1,4 +1,4 @@
-# capamedia-cli · v0.2.1
+# capamedia-cli · v0.2.2
 
 CLI multi-harness para la migración de servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 

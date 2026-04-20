@@ -1,17 +1,20 @@
-"""capamedia clone <servicio> - clonado determinista de legacy + UMPs + TX + gold.
+"""capamedia clone <servicio> - clonado determinista de legacy + UMPs + TX.
 
-Version shell del slash command /clone. Hace exactamente lo mismo que la AI haria,
-pero sin AI - solo git, grep y regex.
-
-Estructura generada:
+Trae solo lo especifico del servicio:
   CWD/
-    legacy/sqb-msa-<servicio>/
-    umps/sqb-msa-umpclientes<NNNN>/
-    tx/sqb-cfg-<NNNNNN>-TX/               <- NUEVO en v0.2.1: repo por cada TX code
-    catalogs/sqb-cfg-codigosBackend-config/  <- antes era tx/, renombrado
-    catalogs/sqb-cfg-errores-errors/
-    gold-ref/tnd-msa-sp-wsclientes0024/   (o 0015)
-    COMPLEXITY_<servicio>.md
+    legacy/sqb-msa-<servicio>/            (codigo legacy IIB o WAS)
+    umps/sqb-msa-umpclientes<NNNN>/       (dependencias directas)
+    tx/sqb-cfg-<NNNNNN>-TX/               (contratos BANCS de cada TX invocado)
+    COMPLEXITY_<servicio>.md              (reporte de analisis)
+
+Decision de diseño (v0.2.2):
+- NO se traen catalogos globales (codigosBackend, errores).
+- NO se trae gold reference (wsclientes0024/0015).
+El conocimiento de esos referentes ya esta embebido en los prompts canonicos
+del CLI (migrate-rest-full.md, migrate-soap-full.md, checklist-rules.md).
+El CLI debe saber migrar bien por si mismo, sin copiar de un servicio-ejemplo
+cada vez. Si en algun servicio particular hace falta un catalogo, el usuario
+puede clonarlo manual una vez.
 """
 
 from __future__ import annotations
@@ -32,11 +35,10 @@ console = Console()
 
 AZURE_ORG = "BancoPichinchaEC"
 
-# Mapeo de tipo de repo -> proyecto Azure DevOps (verificado sobre repos reales del banco)
+# Mapeo de tipo de repo -> proyecto Azure DevOps
 AZURE_PROJECTS = {
-    "bus": "tpl-bus-omnicanal",          # legacy + UMPs (IIB)
-    "config": "tpl-integrationbus-config",  # TX repos + catalogos
-    "middleware": "tpl-middleware",      # gold references (tnd-msa-sp-*)
+    "bus": "tpl-bus-omnicanal",            # legacy + UMPs (IIB)
+    "config": "tpl-integrationbus-config",  # TX repos
 }
 
 
@@ -44,11 +46,6 @@ def _azure_url(project_key: str, repo_name: str) -> str:
     """Build the Azure DevOps clone URL for a given project key."""
     project = AZURE_PROJECTS[project_key]
     return f"https://dev.azure.com/{AZURE_ORG}/{project}/_git/{repo_name}"
-
-
-CATALOG_REPOS = ["sqb-cfg-codigosBackend-config", "sqb-cfg-errores-errors"]
-GOLD_REST = "tnd-msa-sp-wsclientes0024"
-GOLD_SOAP = "tnd-msa-sp-wsclientes0015"
 
 
 @dataclass
@@ -65,7 +62,7 @@ class TxCloneResult:
 def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bool = False) -> tuple[bool, str]:
     """Clone a repo from Azure DevOps. Returns (success, error_msg).
 
-    `project_key` debe ser "bus" | "config" | "middleware" segun donde vive el repo.
+    `project_key` debe ser "bus" | "config" segun donde vive el repo.
     """
     if dest.exists() and any(dest.iterdir()):
         return (True, "already cloned")
@@ -94,8 +91,7 @@ def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bo
 
 def _resolve_legacy_repo_name(service_name: str) -> str:
     """Map service name to Azure DevOps repo name."""
-    svc = service_name.lower()
-    return f"sqb-msa-{svc}"
+    return f"sqb-msa-{service_name.lower()}"
 
 
 def _clone_tx_repos(tx_codes: set[str], workspace: Path, shallow: bool = True) -> list[TxCloneResult]:
@@ -124,7 +120,7 @@ def _write_complexity_report(
     dest = workspace / f"COMPLEXITY_{service_name}.md"
     lines: list[str] = []
     lines.append(f"# Complexity Report: {service_name}\n")
-    lines.append("Generado por `capamedia clone` (v0.2.1). Sin AI - solo analisis determinista.\n")
+    lines.append("Generado por `capamedia clone` (v0.2.2). Sin AI - solo analisis determinista.\n")
     lines.append("")
     lines.append("## Resumen")
     lines.append("")
@@ -157,7 +153,7 @@ def _write_complexity_report(
                 tx_str = "-"
                 extraido = "NO"
                 fuente = "-"
-                nota = "No visto en ESQL. Mirar `deploy-*-config.bat` o `catalogs/sqb-cfg-codigosBackend-config/`"
+                nota = "No visto en ESQL. Mirar `deploy-*-config.bat` del UMP o pedir el TX al equipo"
             lines.append(f"| {u.name} | {tx_str} | {extraido} | {fuente} | {nota} |")
         lines.append("")
 
@@ -220,20 +216,12 @@ def clone_service(
         bool,
         typer.Option("--shallow", help="Clone superficial (--depth 1) para ahorrar tiempo"),
     ] = False,
-    skip_catalogs: Annotated[
-        bool,
-        typer.Option("--skip-catalogs", help="No clonar los catalogos (codigosBackend, errores)"),
-    ] = False,
     skip_tx: Annotated[
         bool,
         typer.Option("--skip-tx", help="No clonar los repos de TX individuales (sqb-cfg-<TX>-TX)"),
     ] = False,
-    skip_gold: Annotated[
-        bool,
-        typer.Option("--skip-gold", help="No clonar el gold standard reference"),
-    ] = False,
 ) -> None:
-    """Clona el legacy + UMPs + TX repos + catalogos + gold reference y analiza complejidad."""
+    """Clona el legacy + UMPs + TX repos y analiza complejidad del servicio."""
     ws = workspace or Path.cwd()
     ws.mkdir(parents=True, exist_ok=True)
 
@@ -291,9 +279,12 @@ def clone_service(
     all_tx_codes: set[str] = set()
     for u in analysis.umps:
         all_tx_codes.update(u.tx_codes)
-    console.print(f"  [green]OK[/green] {len(all_tx_codes)} TX code(s) extraidos: {', '.join(sorted(all_tx_codes)) or '(ninguno)'}")
+    console.print(
+        f"  [green]OK[/green] {len(all_tx_codes)} TX code(s) extraidos: "
+        f"{', '.join(sorted(all_tx_codes)) or '(ninguno)'}"
+    )
 
-    # --- Step 5: Clone TX repos (nuevo en v0.2.1) ---
+    # --- Step 5: Clone TX repos ---
     tx_results: list[TxCloneResult] = []
     if not skip_tx and all_tx_codes:
         console.print(f"\n[bold]5. Clonando repos de TX individuales[/bold] ({len(all_tx_codes)} repos)...")
@@ -310,33 +301,9 @@ def clone_service(
     else:
         console.print("\n[dim]5. No hay TX codes extraidos para clonar[/dim]")
 
-    # --- Step 6: Clone catalogs (renamed from tx/ in v0.2.1) ---
-    if not skip_catalogs:
-        console.print("\n[bold]6. Clonando catalogos comunes (codigosBackend, errores)...[/bold]")
-        for cat in CATALOG_REPOS:
-            cat_dest = ws / "catalogs" / cat
-            ok, err = _git_clone(cat, cat_dest, project_key="config", shallow=True)
-            if ok:
-                console.print(f"  [green]OK[/green] {cat}")
-            else:
-                console.print(f"  [yellow]SKIP[/yellow] {cat}: {err}")
-    else:
-        console.print("\n[dim]6. Catalogos saltados (--skip-catalogs)[/dim]")
-
-    # --- Step 7: Gold reference ---
-    if not skip_gold and analysis.framework_recommendation:
-        gold = GOLD_REST if analysis.framework_recommendation == "rest" else GOLD_SOAP
-        gold_dest = ws / "gold-ref" / gold
-        console.print(f"\n[bold]7. Clonando gold reference[/bold] {gold}...")
-        ok, err = _git_clone(gold, gold_dest, project_key="middleware", shallow=True)
-        if ok:
-            console.print(f"  [green]OK[/green] {gold}")
-        else:
-            console.print(f"  [yellow]SKIP[/yellow] {gold}: {err}")
-
-    # --- Step 8: Report ---
+    # --- Step 6: Report ---
     report = _write_complexity_report(analysis, service_name, ws, tx_results)
-    console.print(f"\n[bold]8. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
+    console.print(f"\n[bold]6. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
 
     # --- Final summary table ---
     console.print()
