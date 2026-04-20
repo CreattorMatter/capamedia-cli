@@ -7,15 +7,17 @@ Estructura generada:
   CWD/
     legacy/sqb-msa-<servicio>/
     umps/sqb-msa-umpclientes<NNNN>/
-    tx/sqb-cfg-codigosBackend-config/
-    tx/sqb-cfg-errores-errors/
-    gold-ref/tnd-msa-sp-wsclientes0024/  (o 0015)
+    tx/sqb-cfg-<NNNNNN>-TX/               <- NUEVO en v0.2.1: repo por cada TX code
+    catalogs/sqb-cfg-codigosBackend-config/  <- antes era tx/, renombrado
+    catalogs/sqb-cfg-errores-errors/
+    gold-ref/tnd-msa-sp-wsclientes0024/   (o 0015)
     COMPLEXITY_<servicio>.md
 """
 
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -29,20 +31,46 @@ from capamedia_cli.core.legacy_analyzer import analyze_legacy
 console = Console()
 
 AZURE_ORG = "BancoPichinchaEC"
-AZURE_PROJECT = "tpl-bus-omnicanal"
-AZURE_BASE = f"https://dev.azure.com/{AZURE_ORG}/{AZURE_PROJECT}/_git"
+
+# Mapeo de tipo de repo -> proyecto Azure DevOps (verificado sobre repos reales del banco)
+AZURE_PROJECTS = {
+    "bus": "tpl-bus-omnicanal",          # legacy + UMPs (IIB)
+    "config": "tpl-integrationbus-config",  # TX repos + catalogos
+    "middleware": "tpl-middleware",      # gold references (tnd-msa-sp-*)
+}
+
+
+def _azure_url(project_key: str, repo_name: str) -> str:
+    """Build the Azure DevOps clone URL for a given project key."""
+    project = AZURE_PROJECTS[project_key]
+    return f"https://dev.azure.com/{AZURE_ORG}/{project}/_git/{repo_name}"
+
 
 CATALOG_REPOS = ["sqb-cfg-codigosBackend-config", "sqb-cfg-errores-errors"]
 GOLD_REST = "tnd-msa-sp-wsclientes0024"
 GOLD_SOAP = "tnd-msa-sp-wsclientes0015"
 
 
-def _git_clone(repo_name: str, dest: Path, shallow: bool = False) -> tuple[bool, str]:
-    """Clone a repo from Azure DevOps. Returns (success, error_msg)."""
+@dataclass
+class TxCloneResult:
+    """Resultado de clonar un repo de TX especifico."""
+
+    tx_code: str
+    repo_name: str
+    status: str  # "cloned" | "not_found" | "error" | "skipped"
+    path: Path | None = None
+    error: str = ""
+
+
+def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bool = False) -> tuple[bool, str]:
+    """Clone a repo from Azure DevOps. Returns (success, error_msg).
+
+    `project_key` debe ser "bus" | "config" | "middleware" segun donde vive el repo.
+    """
     if dest.exists() and any(dest.iterdir()):
         return (True, "already cloned")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    url = f"{AZURE_BASE}/{repo_name}"
+    url = _azure_url(project_key, repo_name)
     cmd = ["git", "clone"]
     if shallow:
         cmd += ["--depth", "1"]
@@ -67,16 +95,36 @@ def _git_clone(repo_name: str, dest: Path, shallow: bool = False) -> tuple[bool,
 def _resolve_legacy_repo_name(service_name: str) -> str:
     """Map service name to Azure DevOps repo name."""
     svc = service_name.lower()
-    # Prefix-based mapping (most common in Banco Pichincha)
     return f"sqb-msa-{svc}"
 
 
-def _write_complexity_report(analysis, service_name: str, workspace: Path) -> Path:
+def _clone_tx_repos(tx_codes: set[str], workspace: Path, shallow: bool = True) -> list[TxCloneResult]:
+    """Clone sqb-cfg-<TX>-TX repos for each TX code detected. Viven en tpl-integrationbus-config."""
+    results: list[TxCloneResult] = []
+    for tx_code in sorted(tx_codes):
+        repo_name = f"sqb-cfg-{tx_code}-TX"
+        dest = workspace / "tx" / repo_name
+        ok, err = _git_clone(repo_name, dest, project_key="config", shallow=shallow)
+        if ok:
+            results.append(TxCloneResult(tx_code=tx_code, repo_name=repo_name, status="cloned", path=dest))
+        elif "not found" in err.lower() or "does not exist" in err.lower() or "404" in err:
+            results.append(TxCloneResult(tx_code=tx_code, repo_name=repo_name, status="not_found", error=err))
+        else:
+            results.append(TxCloneResult(tx_code=tx_code, repo_name=repo_name, status="error", error=err))
+    return results
+
+
+def _write_complexity_report(
+    analysis,
+    service_name: str,
+    workspace: Path,
+    tx_results: list[TxCloneResult],
+) -> Path:
     """Write COMPLEXITY_<service>.md with the deterministic analysis."""
     dest = workspace / f"COMPLEXITY_{service_name}.md"
     lines: list[str] = []
     lines.append(f"# Complexity Report: {service_name}\n")
-    lines.append(f"Generado por `capamedia clone` (v0.2.0). Sin AI - solo analisis determinista.\n")
+    lines.append("Generado por `capamedia clone` (v0.2.1). Sin AI - solo analisis determinista.\n")
     lines.append("")
     lines.append("## Resumen")
     lines.append("")
@@ -93,14 +141,41 @@ def _write_complexity_report(analysis, service_name: str, workspace: Path) -> Pa
     lines.append(f"- **Complejidad:** `{analysis.complexity.upper()}`")
     lines.append("")
 
+    # UMPs con columna de extraccion
     if analysis.umps:
         lines.append("## UMPs y TX codes")
         lines.append("")
-        lines.append("| UMP | TX codes |")
-        lines.append("|---|---|")
+        lines.append("| UMP | TX code | Extraido | Fuente | Nota |")
+        lines.append("|---|---|---|---|---|")
         for u in analysis.umps:
-            tx = ", ".join(u.tx_codes) if u.tx_codes else "(no extraido)"
-            lines.append(f"| {u.name} | {tx} |")
+            if u.tx_codes:
+                tx_str = ", ".join(u.tx_codes)
+                extraido = "SI"
+                fuente = "ESQL"
+                nota = ""
+            else:
+                tx_str = "-"
+                extraido = "NO"
+                fuente = "-"
+                nota = "No visto en ESQL. Mirar `deploy-*-config.bat` o `catalogs/sqb-cfg-codigosBackend-config/`"
+            lines.append(f"| {u.name} | {tx_str} | {extraido} | {fuente} | {nota} |")
+        lines.append("")
+
+    # TX repos clonados
+    if tx_results:
+        lines.append("## TX repos clonados")
+        lines.append("")
+        lines.append("| TX code | Repo | Status | Path |")
+        lines.append("|---|---|---|---|")
+        for tr in tx_results:
+            status_label = {
+                "cloned": "clonado",
+                "not_found": "no existe repo",
+                "error": "error",
+                "skipped": "saltado",
+            }.get(tr.status, tr.status)
+            path_str = str(tr.path.relative_to(workspace)) if tr.path else "-"
+            lines.append(f"| {tr.tx_code} | {tr.repo_name} | {status_label} | {path_str} |")
         lines.append("")
 
     if analysis.has_database and analysis.db_evidence:
@@ -121,7 +196,7 @@ def _write_complexity_report(analysis, service_name: str, workspace: Path) -> Pa
     lines.append("")
     lines.append("- Abri este workspace en Claude Code / Cursor / Windsurf")
     lines.append("- Ejecuta `/fabric` en el chat para generar el arquetipo")
-    lines.append("- Alternativamente, corre `capamedia fabric generate` en shell para armar el prompt")
+    lines.append("- Alternativamente, corre `capamedia fabrics generate` en shell para armar el prompt")
     lines.append("")
 
     dest.write_text("\n".join(lines), encoding="utf-8")
@@ -149,12 +224,16 @@ def clone_service(
         bool,
         typer.Option("--skip-catalogs", help="No clonar los catalogos (codigosBackend, errores)"),
     ] = False,
+    skip_tx: Annotated[
+        bool,
+        typer.Option("--skip-tx", help="No clonar los repos de TX individuales (sqb-cfg-<TX>-TX)"),
+    ] = False,
     skip_gold: Annotated[
         bool,
         typer.Option("--skip-gold", help="No clonar el gold standard reference"),
     ] = False,
 ) -> None:
-    """Clona el legacy + UMPs + TX catalogs + gold reference y analiza complejidad."""
+    """Clona el legacy + UMPs + TX repos + catalogos + gold reference y analiza complejidad."""
     ws = workspace or Path.cwd()
     ws.mkdir(parents=True, exist_ok=True)
 
@@ -169,7 +248,7 @@ def clone_service(
     legacy_repo = _resolve_legacy_repo_name(service_name)
     legacy_dest = ws / "legacy" / legacy_repo
     console.print(f"\n[bold]1. Clonando legacy[/bold] {legacy_repo}...")
-    ok, err = _git_clone(legacy_repo, legacy_dest, shallow=shallow)
+    ok, err = _git_clone(legacy_repo, legacy_dest, project_key="bus", shallow=shallow)
     if not ok:
         console.print(f"[red]FAIL[/red] clone legacy: {err}")
         console.print(
@@ -195,53 +274,69 @@ def clone_service(
         for ump in ump_names:
             ump_repo = f"sqb-msa-{ump.lower()}"
             ump_dest = ws / "umps" / ump_repo
-            ok, err = _git_clone(ump_repo, ump_dest, shallow=shallow)
+            ok, err = _git_clone(ump_repo, ump_dest, project_key="bus", shallow=shallow)
             if ok:
                 console.print(f"  [green]OK[/green] {ump_repo}")
             else:
                 console.print(f"  [yellow]SKIP[/yellow] {ump_repo}: {err}")
 
-    # --- Step 4: Clone catalogs ---
-    if not skip_catalogs:
-        console.print("\n[bold]4. Clonando catalogos (TX/errores)...[/bold]")
-        for cat in CATALOG_REPOS:
-            cat_dest = ws / "tx" / cat
-            ok, err = _git_clone(cat, cat_dest, shallow=True)
-            if ok:
-                console.print(f"  [green]OK[/green] {cat}")
-            else:
-                console.print(f"  [yellow]SKIP[/yellow] {cat}: {err}")
-    else:
-        console.print("\n[dim]4. Catalogos saltados (--skip-catalogs)[/dim]")
-
-    # --- Step 5: Analyze to decide REST vs SOAP, then clone gold ---
-    console.print("\n[bold]5. Analizando WSDL para elegir gold reference...[/bold]")
+    # --- Step 4: Analyze (UMPs -> TX codes) ---
+    console.print("\n[bold]4. Analizando WSDL + extrayendo TX codes de UMPs clonados...[/bold]")
     analysis = analyze_legacy(
         legacy_dest,
         service_name=service_name,
         umps_root=ws / "umps" if ump_names else None,
     )
-    if analysis.wsdl:
-        console.print(
-            f"  operaciones={analysis.wsdl.operation_count} -> "
-            f"framework={analysis.framework_recommendation.upper()}"
-        )
-    else:
-        console.print("  [yellow]WARN[/yellow] no se pudo contar operaciones (WSDL no encontrado)")
 
+    all_tx_codes: set[str] = set()
+    for u in analysis.umps:
+        all_tx_codes.update(u.tx_codes)
+    console.print(f"  [green]OK[/green] {len(all_tx_codes)} TX code(s) extraidos: {', '.join(sorted(all_tx_codes)) or '(ninguno)'}")
+
+    # --- Step 5: Clone TX repos (nuevo en v0.2.1) ---
+    tx_results: list[TxCloneResult] = []
+    if not skip_tx and all_tx_codes:
+        console.print(f"\n[bold]5. Clonando repos de TX individuales[/bold] ({len(all_tx_codes)} repos)...")
+        tx_results = _clone_tx_repos(all_tx_codes, ws, shallow=True)
+        for tr in tx_results:
+            if tr.status == "cloned":
+                console.print(f"  [green]OK[/green] sqb-cfg-{tr.tx_code}-TX")
+            elif tr.status == "not_found":
+                console.print(f"  [yellow]NO EXISTE[/yellow] sqb-cfg-{tr.tx_code}-TX (posible legacy sin repo propio)")
+            else:
+                console.print(f"  [red]ERROR[/red] sqb-cfg-{tr.tx_code}-TX: {tr.error[:50]}")
+    elif skip_tx:
+        console.print("\n[dim]5. TX repos saltados (--skip-tx)[/dim]")
+    else:
+        console.print("\n[dim]5. No hay TX codes extraidos para clonar[/dim]")
+
+    # --- Step 6: Clone catalogs (renamed from tx/ in v0.2.1) ---
+    if not skip_catalogs:
+        console.print("\n[bold]6. Clonando catalogos comunes (codigosBackend, errores)...[/bold]")
+        for cat in CATALOG_REPOS:
+            cat_dest = ws / "catalogs" / cat
+            ok, err = _git_clone(cat, cat_dest, project_key="config", shallow=True)
+            if ok:
+                console.print(f"  [green]OK[/green] {cat}")
+            else:
+                console.print(f"  [yellow]SKIP[/yellow] {cat}: {err}")
+    else:
+        console.print("\n[dim]6. Catalogos saltados (--skip-catalogs)[/dim]")
+
+    # --- Step 7: Gold reference ---
     if not skip_gold and analysis.framework_recommendation:
         gold = GOLD_REST if analysis.framework_recommendation == "rest" else GOLD_SOAP
         gold_dest = ws / "gold-ref" / gold
-        console.print(f"\n[bold]6. Clonando gold reference[/bold] {gold}...")
-        ok, err = _git_clone(gold, gold_dest, shallow=True)
+        console.print(f"\n[bold]7. Clonando gold reference[/bold] {gold}...")
+        ok, err = _git_clone(gold, gold_dest, project_key="middleware", shallow=True)
         if ok:
             console.print(f"  [green]OK[/green] {gold}")
         else:
             console.print(f"  [yellow]SKIP[/yellow] {gold}: {err}")
 
-    # --- Step 6: Write report ---
-    report = _write_complexity_report(analysis, service_name, ws)
-    console.print(f"\n[bold]7. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
+    # --- Step 8: Report ---
+    report = _write_complexity_report(analysis, service_name, ws, tx_results)
+    console.print(f"\n[bold]8. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
 
     # --- Final summary table ---
     console.print()
@@ -251,11 +346,14 @@ def clone_service(
     table.add_row("Tipo de fuente", analysis.source_kind.upper())
     table.add_row("Operaciones WSDL", str(analysis.wsdl.operation_count) if analysis.wsdl else "?")
     table.add_row("Framework recomendado", analysis.framework_recommendation.upper() or "?")
-    table.add_row("UMPs", str(len(analysis.umps)))
+    table.add_row("UMPs detectados", str(len(analysis.umps)))
+    table.add_row("UMPs con TX extraido", f"{sum(1 for u in analysis.umps if u.tx_codes)}/{len(analysis.umps)}")
+    table.add_row("TX codes unicos", str(len(all_tx_codes)))
+    table.add_row("TX repos clonados", f"{sum(1 for t in tx_results if t.status == 'cloned')}/{len(tx_results)}")
     table.add_row("BD presente", "SI" if analysis.has_database else "NO")
     table.add_row("Complejidad", analysis.complexity.upper())
     console.print(table)
 
     console.print("\n[bold]Siguiente paso:[/bold]")
     console.print("  Abri el workspace en tu IDE (Claude Code, Cursor, Windsurf)")
-    console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabric generate[/cyan] en shell")
+    console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabrics generate[/cyan] en shell")

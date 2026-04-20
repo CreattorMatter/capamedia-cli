@@ -4,6 +4,39 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.2.1] - 2026-04-19
+
+### Added - TX repos + multi-project support
+
+- **Clone de repos de TX individuales.** Para cada TX code detectado en los ESQL de los UMPs clonados, `capamedia clone` ahora clona el repo `sqb-cfg-<TX>-TX` (contiene el XML con el contrato request/response del TX BANCS). Ejemplo: TX `060480` -> clona `sqb-cfg-060480-TX` en `./tx/`.
+- **Separacion `catalogs/` vs `tx/`.** Los catalogos comunes (`sqb-cfg-codigosBackend-config`, `sqb-cfg-errores-errors`) se clonan ahora en `./catalogs/` — antes iban mezclados en `./tx/`. El `./tx/` queda para los repos de TX especificos del servicio.
+- **Multi-project support en `_git_clone`.** Parametro `project_key` permite elegir el proyecto Azure DevOps correcto segun el tipo de repo:
+  - `bus` -> `tpl-bus-omnicanal` (legacy + UMPs)
+  - `config` -> `tpl-integrationbus-config` (TX repos + catalogos)
+  - `middleware` -> `tpl-middleware` (gold references `tnd-msa-sp-*`)
+- **Reporte de complejidad enriquecido.** `COMPLEXITY_<svc>.md` ahora tiene:
+  - Columna `Extraido` (SI/NO) por UMP indicando si se pudo sacar el TX de ESQL
+  - Columna `Fuente` (ESQL / config externa / catalogo) para cada UMP
+  - Columna `Nota` con pista de donde mirar si el TX no se pudo extraer
+  - Nueva seccion "TX repos clonados" con status por cada TX (clonado / no existe / error)
+- **Nueva flag `--skip-tx`** para saltear el clone de repos TX individuales.
+
+### Fixed
+
+- Los catalogos y el gold reference antes fallaban con `repository not found` porque estaban en proyectos Azure DevOps equivocados. Ahora cada tipo apunta al proyecto correcto.
+
+### Testing end-to-end
+
+Probado sobre `wsclientes0007` real:
+- 5 UMPs detectados y clonados (0002, 0003, 0005, 0020, 0028)
+- 3 TX codes unicos extraidos (060480, 067050, 067186)
+- 4/5 UMPs con TX desde ESQL; 1 UMP (0028) marcado como "no extraido" con nota para investigacion manual (TX vive en `Environment.cache.*Config`, no hardcoded)
+- 3/3 TX repos clonados OK
+- 2/2 catalogos clonados OK
+- Gold reference (tnd-msa-sp-wsclientes0024) clonado OK
+
+---
+
 ## [0.2.0] - 2026-04-19
 
 ### Added - Shell parity
