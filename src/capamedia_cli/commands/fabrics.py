@@ -138,6 +138,169 @@ def setup(
         )
 
 
+@app.command("generate")
+def generate(
+    service_name: str = typer.Argument(..., help="Nombre del servicio (ej: wsclientes0008)"),
+    workspace: Path | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace root (default: CWD)",
+    ),
+    no_clipboard: bool = typer.Option(
+        False,
+        "--no-clipboard",
+        help="No copiar al clipboard (solo escribir archivo)",
+    ),
+) -> None:
+    """Arma el prompt listo para pegar en Claude Code que invoca el MCP Fabrics.
+
+    Hace preflight, analiza el legacy clonado, deduce los parametros del MCP
+    (projectType, webFramework, wsdlPath), y genera FABRICS_PROMPT_<svc>.md +
+    clipboard con el prompt completo.
+    """
+    from capamedia_cli.core.legacy_analyzer import analyze_legacy
+
+    ws = (workspace or Path.cwd()).resolve()
+
+    console.print(
+        Panel.fit(
+            f"[bold]CapaMedia fabric generate[/bold]\n"
+            f"Servicio: [cyan]{service_name}[/cyan]\n"
+            f"Workspace: [cyan]{ws}[/cyan]",
+            border_style="cyan",
+        )
+    )
+
+    # Step 1: Find legacy folder
+    legacy_root = ws / "legacy" / f"sqb-msa-{service_name.lower()}"
+    if not legacy_root.exists():
+        # Try to find any legacy subfolder
+        candidates = list((ws / "legacy").glob("*")) if (ws / "legacy").exists() else []
+        if candidates:
+            legacy_root = candidates[0]
+        else:
+            console.print(f"[red]FAIL[/red] no se encontro legacy en {ws / 'legacy'}")
+            console.print("[yellow]Tip:[/yellow] corre 'capamedia clone <servicio>' antes")
+            raise typer.Exit(1)
+
+    console.print(f"  [green]OK[/green] legacy encontrado: {legacy_root}")
+
+    # Step 2: Analyze
+    umps_root = ws / "umps" if (ws / "umps").exists() else None
+    analysis = analyze_legacy(legacy_root, service_name=service_name, umps_root=umps_root)
+
+    if not analysis.wsdl:
+        console.print("[red]FAIL[/red] no se pudo analizar el WSDL del legacy")
+        raise typer.Exit(1)
+
+    # Step 3: Deduce MCP params
+    web_framework = "webflux" if analysis.framework_recommendation == "rest" else "mvc"
+    project_type = analysis.framework_recommendation or "soap"
+    wsdl_abs = analysis.wsdl.path.resolve()
+
+    console.print()
+    console.print(f"  Operaciones WSDL : [bold]{analysis.wsdl.operation_count}[/bold]")
+    console.print(f"  projectType      : [bold]{project_type}[/bold]")
+    console.print(f"  webFramework     : [bold]{web_framework}[/bold]")
+    console.print(f"  wsdlPath         : [dim]{wsdl_abs}[/dim]")
+    console.print(f"  UMPs detectados  : [bold]{len(analysis.umps)}[/bold]")
+    console.print(f"  BD presente      : [bold]{'SI' if analysis.has_database else 'NO'}[/bold]")
+    console.print(f"  Complejidad      : [bold]{analysis.complexity.upper()}[/bold]")
+
+    # Step 4: Build prompt
+    prompt_lines: list[str] = []
+    prompt_lines.append(f"Invocar el MCP Fabrics para generar el arquetipo de `{service_name}`.")
+    prompt_lines.append("")
+    prompt_lines.append("## Parametros deducidos")
+    prompt_lines.append("")
+    prompt_lines.append("```")
+    prompt_lines.append(f"wsdlPath     : {wsdl_abs}")
+    prompt_lines.append(f"projectType  : {project_type}")
+    prompt_lines.append(f"webFramework : {web_framework}")
+    prompt_lines.append(f"serviceName  : {service_name}")
+    prompt_lines.append(f"groupId      : com.pichincha.sp")
+    prompt_lines.append(f"artifactId   : tnd-msa-sp-{service_name.lower()}")
+    prompt_lines.append(f"javaVersion  : 21")
+    prompt_lines.append(f"outputDir    : ./destino")
+    prompt_lines.append("```")
+    prompt_lines.append("")
+    prompt_lines.append("## Pasos (ejecutar en orden)")
+    prompt_lines.append("")
+    prompt_lines.append("1. **Preflight**: confirmar que el tool `mcp__fabrics__create_project_with_wsdl` esta disponible.")
+    prompt_lines.append("   Si no, detener y avisar al usuario que corra `capamedia fabrics preflight` en shell.")
+    prompt_lines.append("")
+    prompt_lines.append("2. **Invocar MCP** con los parametros de arriba.")
+    prompt_lines.append("")
+    prompt_lines.append("3. **Aplicar workarounds** conocidos (ver `prompts/migrate-soap-full.md` o `migrate-rest-full.md`):")
+    if project_type == "soap":
+        prompt_lines.append("   - Gap 1: agregar `spring-boot-starter-webflux` a `build.gradle` si falta")
+        prompt_lines.append("   - Gap 2: agregar `com.sun.xml.ws:jaxws-rt:4.0.3` a `build.gradle`")
+        prompt_lines.append("   - Gap 3: sincronizar versiones con `gold-ref/tnd-msa-sp-wsclientes0015/build.gradle`")
+    else:
+        prompt_lines.append("   - Sincronizar versiones con `gold-ref/tnd-msa-sp-wsclientes0024/build.gradle`")
+    prompt_lines.append("")
+    prompt_lines.append("4. **Completar scaffolding** copiando desde el workspace:")
+    prompt_lines.append("   ```bash")
+    prompt_lines.append("   cp -r .claude destino/tnd-msa-sp-" + service_name.lower() + "/")
+    prompt_lines.append("   cp CLAUDE.md destino/tnd-msa-sp-" + service_name.lower() + "/")
+    prompt_lines.append("   cp .mcp.json destino/tnd-msa-sp-" + service_name.lower() + "/")
+    prompt_lines.append("   cp -r .sonarlint destino/tnd-msa-sp-" + service_name.lower() + "/ 2>/dev/null || true")
+    prompt_lines.append("   ```")
+    prompt_lines.append("")
+    prompt_lines.append("5. **Registrar contexto** en `destino/tnd-msa-sp-" + service_name.lower() + "/migration-context.json`:")
+    prompt_lines.append("   ```json")
+    prompt_lines.append("   {")
+    prompt_lines.append(f'     "service": "{service_name}",')
+    prompt_lines.append(f'     "sourceKind": "{analysis.source_kind}",')
+    prompt_lines.append(f'     "projectType": "{project_type}",')
+    prompt_lines.append(f'     "webFramework": "{web_framework}",')
+    prompt_lines.append(f'     "dbUsage": {str(analysis.has_database).lower()},')
+    prompt_lines.append(f'     "operationsCount": {analysis.wsdl.operation_count},')
+    prompt_lines.append(f'     "umps": [{", ".join(f'{{"name": "{u.name}", "tx": {u.tx_codes}}}' for u in analysis.umps)}],')
+    prompt_lines.append('     "scaffolding": {')
+    prompt_lines.append('       "mcp_version": "<pedir al usuario>",')
+    prompt_lines.append('       "scaffold_date": "<ISO8601 ahora>",')
+    prompt_lines.append('       "gaps_fixed_by_mcp": [],')
+    prompt_lines.append('       "workarounds_applied": []')
+    prompt_lines.append("     }")
+    prompt_lines.append("   }")
+    prompt_lines.append("   ```")
+    prompt_lines.append("")
+    prompt_lines.append("6. **Responder conversacionalmente** con un resumen de lo que hizo el MCP, que workarounds aplicaste, y la ruta del destino generado.")
+
+    prompt_text = "\n".join(prompt_lines)
+
+    # Step 5: Write file
+    prompt_file = ws / f"FABRICS_PROMPT_{service_name}.md"
+    prompt_file.write_text(prompt_text + "\n", encoding="utf-8")
+    console.print(f"\n  [green]OK[/green] prompt escrito en [cyan]{prompt_file}[/cyan]")
+
+    # Step 6: Clipboard
+    if not no_clipboard:
+        try:
+            import pyperclip
+
+            pyperclip.copy(prompt_text)
+            console.print("  [green]OK[/green] prompt copiado al clipboard (pegalo en Claude Code)")
+        except (ImportError, Exception) as e:  # noqa: BLE001
+            console.print(f"  [yellow]SKIP[/yellow] clipboard no disponible: {e}")
+
+    console.print()
+    console.print(
+        Panel(
+            "Proximo paso:\n"
+            "  1. Abri Claude Code en este workspace\n"
+            "  2. Pega el prompt (Ctrl+V) en el chat\n"
+            "  3. Claude ejecuta el MCP y genera destino/\n"
+            "\n"
+            "Alternativa: abri FABRICS_PROMPT_<svc>.md y pegalo manualmente.",
+            border_style="green",
+            title="Listo",
+        )
+    )
+
+
 @app.command("preflight")
 def preflight() -> None:
     """Verifica que el MCP Fabrics este configurado y accesible.

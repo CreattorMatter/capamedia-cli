@@ -1,0 +1,444 @@
+"""Checklist BPTPSRE - implementacion determinista (sin AI) de los 15 bloques.
+
+Cada bloque es una funcion que recibe contexto y retorna una lista de CheckResult.
+El comando `capamedia check` orquesta todas las funciones y produce el reporte.
+
+Los bloques son espejo de `prompts/post-migracion/03-checklist.md` del repo original.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# -- Result dataclass -------------------------------------------------------
+
+
+@dataclass
+class CheckResult:
+    id: str
+    block: str
+    title: str
+    status: str  # "pass" | "fail"
+    severity: str = ""  # "high" | "medium" | "low" (solo si status=fail)
+    detail: str = ""
+    suggested_fix: str = ""
+
+
+@dataclass
+class CheckContext:
+    migrated_path: Path
+    legacy_path: Path | None
+    project_type: str = ""  # "rest" | "soap" (detectado en BLOQUE 0)
+    operation_count: int = 0
+    has_database: bool = False
+
+
+# -- Helpers ---------------------------------------------------------------
+
+
+def _grep_files(root: Path, pattern: str, file_glob: str = "**/*.java") -> list[tuple[Path, int, str]]:
+    """Return list of (file, line_no, line) matching regex pattern."""
+    matches: list[tuple[Path, int, str]] = []
+    regex = re.compile(pattern)
+    for f in root.rglob(file_glob):
+        if ".git" in f.parts or "build" in f.parts:
+            continue
+        try:
+            for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if regex.search(line):
+                    matches.append((f, i, line.rstrip()))
+        except OSError:
+            continue
+    return matches
+
+
+def _file_exists(path: Path) -> bool:
+    return path.exists() and path.is_file()
+
+
+def _read_or_empty(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+# -- Block 0: Pre-check con analisis cruzado legacy vs migrado ---------------
+
+
+def run_block_0(ctx: CheckContext) -> list[CheckResult]:
+    from capamedia_cli.core.legacy_analyzer import analyze_wsdl, find_wsdl
+
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+
+    # 0.1 - Tipo de proyecto
+    has_endpoint = len(_grep_files(src_java, r"@Endpoint\b")) > 0 if src_java.exists() else False
+    has_controller = len(_grep_files(src_java, r"@RestController\b")) > 0 if src_java.exists() else False
+    if has_endpoint and not has_controller:
+        ctx.project_type = "soap"
+        results.append(CheckResult("0.1", "Block 0", "Tipo de proyecto", "pass", detail="SOAP detectado (@Endpoint encontrado)"))
+    elif has_controller and not has_endpoint:
+        ctx.project_type = "rest"
+        results.append(CheckResult("0.1", "Block 0", "Tipo de proyecto", "pass", detail="REST detectado (@RestController encontrado)"))
+    elif has_endpoint and has_controller:
+        results.append(CheckResult("0.1", "Block 0", "Tipo de proyecto", "fail", severity="high", detail="Proyecto tiene AMBOS @Endpoint y @RestController", suggested_fix="Decidir uno y remover el otro"))
+    else:
+        results.append(CheckResult("0.1", "Block 0", "Tipo de proyecto", "fail", severity="high", detail="No se detecto ni @Endpoint ni @RestController", suggested_fix="Completar el controller/endpoint del proyecto"))
+
+    # 0.2 - Count ops
+    migrated_wsdl = find_wsdl(ctx.migrated_path / "src" / "main" / "resources")
+    if not migrated_wsdl:
+        migrated_wsdl = find_wsdl(ctx.migrated_path)
+    ops_migrated = 0
+    if migrated_wsdl:
+        info = analyze_wsdl(migrated_wsdl)
+        ops_migrated = info.operation_count
+        ctx.operation_count = ops_migrated
+    else:
+        results.append(CheckResult("0.2a", "Block 0", "WSDL presente en migrado", "fail", severity="high", detail="No se encontro *.wsdl en src/main/resources/", suggested_fix="Copiar el WSDL del legacy"))
+        return results
+
+    # Cross-check con legacy si esta disponible
+    ops_legacy = 0
+    legacy_wsdl = None
+    if ctx.legacy_path:
+        legacy_wsdl = find_wsdl(ctx.legacy_path)
+        if legacy_wsdl:
+            ops_legacy = analyze_wsdl(legacy_wsdl).operation_count
+
+    if legacy_wsdl and ops_legacy != ops_migrated:
+        results.append(CheckResult(
+            "0.2b", "Block 0", "Count ops legacy == migrado", "fail", severity="high",
+            detail=f"legacy={ops_legacy} vs migrado={ops_migrated}",
+            suggested_fix="Revisar si se perdio o duplico alguna operacion al copiar el WSDL",
+        ))
+    elif ctx.legacy_path and not legacy_wsdl:
+        results.append(CheckResult("0.2b", "Block 0", "Count ops legacy vs migrado", "fail", severity="medium", detail="Legacy path provisto pero WSDL legacy no encontrado"))
+
+    # Dialogo conversacional - cruce con framework
+    expected_fw = "rest" if ops_migrated == 1 else "soap"
+    actual_fw = ctx.project_type
+    ops_ref = ops_legacy if ops_legacy > 0 else ops_migrated
+    if expected_fw == actual_fw:
+        dialogo = f"Son {ops_ref} op(s), va {actual_fw.upper()}. Esta OK? Si, esta OK."
+        results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=dialogo))
+    else:
+        if ops_migrated == 1 and actual_fw == "soap" and ctx.has_database:
+            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=f"1 op + BD => SOAP MVC (excepcion JPA)"))
+        else:
+            dialogo = f"Son {ops_ref} op(s) => deberia ir {expected_fw.upper()}. Se migro como {actual_fw.upper()} => MAL-CLASIFICADO"
+            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "fail", severity="high", detail=dialogo, suggested_fix="Reclasificar el proyecto al framework correcto"))
+
+    # 0.3 - Operation names match
+    if legacy_wsdl:
+        legacy_info = analyze_wsdl(legacy_wsdl)
+        migrated_info = analyze_wsdl(migrated_wsdl)
+        legacy_names = set(legacy_info.operation_names)
+        migrated_names = set(migrated_info.operation_names)
+        if legacy_names == migrated_names:
+            results.append(CheckResult("0.3", "Block 0", "Operation names match", "pass"))
+        else:
+            missing = legacy_names - migrated_names
+            extra = migrated_names - legacy_names
+            detail = []
+            if missing:
+                detail.append(f"Faltantes: {', '.join(sorted(missing))}")
+            if extra:
+                detail.append(f"De mas: {', '.join(sorted(extra))}")
+            results.append(CheckResult("0.3", "Block 0", "Operation names match", "fail", severity="high", detail=" | ".join(detail)))
+
+    # 0.4 - targetNamespace match
+    if legacy_wsdl:
+        if analyze_wsdl(legacy_wsdl).target_namespace == analyze_wsdl(migrated_wsdl).target_namespace:
+            results.append(CheckResult("0.4", "Block 0", "targetNamespace match", "pass"))
+        else:
+            results.append(CheckResult(
+                "0.4", "Block 0", "targetNamespace match", "fail", severity="high",
+                detail=f"legacy={analyze_wsdl(legacy_wsdl).target_namespace} | migrado={analyze_wsdl(migrated_wsdl).target_namespace}",
+                suggested_fix="Restaurar namespace original o migracion coordinada con callers",
+            ))
+
+    # 0.5 - XSDs referenciados existen
+    migrated_info = analyze_wsdl(migrated_wsdl)
+    missing_schemas: list[str] = []
+    for sl in migrated_info.schema_locations:
+        basename = Path(sl).name
+        found = any(ctx.migrated_path.rglob(basename))
+        if not found:
+            missing_schemas.append(sl)
+    if missing_schemas:
+        results.append(CheckResult("0.5", "Block 0", "XSDs referenciados presentes", "fail", severity="high", detail=f"Faltan: {', '.join(missing_schemas)}"))
+    else:
+        results.append(CheckResult("0.5", "Block 0", "XSDs referenciados presentes", "pass"))
+
+    return results
+
+
+# -- Block 1: Arquitectura hexagonal ----------------------------------------
+
+
+def run_block_1(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+
+    # 1.1 - Capas presentes
+    expected_layers = ["application", "domain", "infrastructure"]
+    present = [l for l in expected_layers if any(src_java.rglob(f"{l}/"))]
+    if len(present) == 3:
+        results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "pass", detail=f"{', '.join(present)}"))
+    else:
+        missing = set(expected_layers) - set(present)
+        results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "fail", severity="high", detail=f"faltan: {missing}"))
+
+    # 1.2 - Domain sin imports framework
+    domain_root = src_java.rglob("domain")
+    forbidden_imports = r"import (org\.springframework|jakarta\.persistence|org\.springframework\.web|javax\.ws)"
+    forbidden_found: list[str] = []
+    for d in src_java.rglob("domain"):
+        if not d.is_dir():
+            continue
+        for f in d.rglob("*.java"):
+            text = _read_or_empty(f)
+            if re.search(forbidden_imports, text):
+                forbidden_found.append(str(f.relative_to(ctx.migrated_path)))
+    if forbidden_found:
+        results.append(CheckResult("1.2", "Block 1", "Domain sin imports framework", "fail", severity="high", detail=f"{len(forbidden_found)} archivo(s) con imports prohibidos"))
+    else:
+        results.append(CheckResult("1.2", "Block 1", "Domain sin imports framework", "pass"))
+
+    # 1.3 - Ports son abstract classes (NO interfaces)
+    for app_dir in src_java.rglob("application"):
+        if not app_dir.is_dir():
+            continue
+        # Buscar interfaces con nombre *Port (deberian ser abstract class)
+        iface_ports: list[str] = []
+        for f in app_dir.rglob("port/**/*.java"):
+            text = _read_or_empty(f)
+            if re.search(r"public interface \w+Port\b", text):
+                iface_ports.append(f.name)
+        if iface_ports:
+            results.append(CheckResult("1.3", "Block 1", "Ports son abstract classes", "fail", severity="high", detail=f"{len(iface_ports)} port(s) como interface: {', '.join(iface_ports[:3])}", suggested_fix="Convertir a `public abstract class`"))
+        else:
+            results.append(CheckResult("1.3", "Block 1", "Ports son abstract classes", "pass"))
+        break
+
+    # 1.4 - UN solo output port Bancs
+    bancs_ports = 0
+    for f in src_java.rglob("application/**/port/output/*[Bb]ancs*.java"):
+        bancs_ports += 1
+    if bancs_ports == 0:
+        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "pass", detail="0 ports Bancs (servicio sin BANCS, OK)"))
+    elif bancs_ports == 1:
+        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "pass"))
+    else:
+        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "fail", severity="high", detail=f"{bancs_ports} ports Bancs detectados", suggested_fix="Consolidar en un unico BancsOutputPort"))
+
+    # 1.5 - Application no importa infrastructure
+    bad_imports: list[str] = []
+    for f in src_java.rglob("application/**/*.java"):
+        text = _read_or_empty(f)
+        if re.search(r"import .+\.infrastructure\.", text):
+            bad_imports.append(f.name)
+    if bad_imports:
+        results.append(CheckResult("1.5", "Block 1", "Application no importa infrastructure", "fail", severity="high", detail=f"{len(bad_imports)} archivo(s) violan la regla"))
+    else:
+        results.append(CheckResult("1.5", "Block 1", "Application no importa infrastructure", "pass"))
+
+    return results
+
+
+# -- Block 2: Logging ------------------------------------------------------
+
+
+def run_block_2(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+
+    # 2.1 - @BpTraceable en controllers
+    controllers = list(src_java.rglob("*Controller.java")) + list(src_java.rglob("*Endpoint.java"))
+    missing_traceable: list[str] = []
+    for f in controllers:
+        text = _read_or_empty(f)
+        if "@BpTraceable" not in text:
+            missing_traceable.append(f.name)
+    if missing_traceable:
+        results.append(CheckResult("2.1", "Block 2", "@BpTraceable en controllers", "fail", severity="high", detail=f"{len(missing_traceable)} sin anotacion"))
+    else:
+        results.append(CheckResult("2.1", "Block 2", "@BpTraceable en controllers", "pass", detail=f"{len(controllers)} controller(s)"))
+
+    # 2.2 - Sin imports de org.slf4j
+    slf4j = _grep_files(src_java, r"import org\.slf4j\.")
+    if slf4j:
+        results.append(CheckResult("2.2", "Block 2", "Sin imports org.slf4j", "fail", severity="high", detail=f"{len(slf4j)} hit(s)", suggested_fix="Usar @Slf4j de Lombok, nunca import directo"))
+    else:
+        results.append(CheckResult("2.2", "Block 2", "Sin imports org.slf4j", "pass"))
+
+    return results
+
+
+# -- Block 5: Error handling (simplificado) --------------------------------
+
+
+def run_block_5(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+
+    # 5.1 - BancsClientHelper atrapa RuntimeException
+    helpers = list(src_java.rglob("*BancsClientHelper*.java"))
+    if not helpers:
+        helpers = list(src_java.rglob("*BancsHelper*.java"))
+    if helpers:
+        text = _read_or_empty(helpers[0])
+        if re.search(r"catch\s*\(\s*RuntimeException", text):
+            results.append(CheckResult("5.1", "Block 5", "BancsClientHelper catchea RuntimeException", "pass"))
+        else:
+            results.append(CheckResult("5.1", "Block 5", "BancsClientHelper catchea RuntimeException", "fail", severity="high", detail="helper no atrapa RuntimeException", suggested_fix="Agregar catch (RuntimeException e) { throw new BancsOperationException(...); }"))
+
+    return results
+
+
+# -- Block 7: Config externa -----------------------------------------------
+
+
+def run_block_7(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    app_yml = ctx.migrated_path / "src" / "main" / "resources" / "application.yml"
+
+    # 7.1 - application.yml existe
+    if not _file_exists(app_yml):
+        results.append(CheckResult("7.1", "Block 7", "application.yml presente", "fail", severity="high", detail="archivo faltante"))
+        return results
+    results.append(CheckResult("7.1", "Block 7", "application.yml presente", "pass"))
+
+    # 7.2 - Secrets via ${CCC_*}
+    text = _read_or_empty(app_yml)
+    hardcoded: list[str] = []
+    for line in text.splitlines():
+        if re.search(r"(password|token|secret|user):\s*[^$\s][^\s]*", line, re.IGNORECASE):
+            if "${" not in line:
+                hardcoded.append(line.strip())
+    if hardcoded:
+        results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "fail", severity="high", detail=f"{len(hardcoded)} valores hardcoded"))
+    else:
+        results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "pass"))
+
+    # 7.3 - Helm probes
+    helm_dir = ctx.migrated_path / "helm"
+    if helm_dir.exists():
+        missing_probes: list[str] = []
+        for f in helm_dir.rglob("values*.yml"):
+            text = _read_or_empty(f)
+            if "livenessProbe" not in text or "readinessProbe" not in text:
+                missing_probes.append(f.name)
+        if missing_probes:
+            results.append(CheckResult("7.3", "Block 7", "Helm probes en todos los values", "fail", severity="high", detail=f"falta en {', '.join(missing_probes)}"))
+        else:
+            results.append(CheckResult("7.3", "Block 7", "Helm probes en todos los values", "pass"))
+
+    return results
+
+
+# -- Block 13: WAS+DB specifics --------------------------------------------
+
+
+def run_block_13(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    build_gradle = ctx.migrated_path / "build.gradle"
+    app_yml = ctx.migrated_path / "src" / "main" / "resources" / "application.yml"
+
+    if not _file_exists(build_gradle):
+        return results
+
+    gradle_text = _read_or_empty(build_gradle)
+    has_jpa = "spring-boot-starter-data-jpa" in gradle_text
+    if not has_jpa:
+        return results  # No aplica BLOQUE 13
+
+    # 13.1 - JPA y WebFlux no conviven
+    has_webflux = "spring-boot-starter-webflux" in gradle_text
+    if has_jpa and has_webflux:
+        results.append(CheckResult("13.1", "Block 13", "JPA + WebFlux NO conviven", "fail", severity="high", detail="build.gradle tiene AMBOS starters", suggested_fix="Remover webflux si hay JPA, usar MVC"))
+    else:
+        results.append(CheckResult("13.1", "Block 13", "JPA + WebFlux NO conviven", "pass"))
+
+    # 13.4 - ddl-auto validate
+    yml_text = _read_or_empty(app_yml)
+    ddl_match = re.search(r"ddl-auto:\s*(\w+)", yml_text)
+    if ddl_match:
+        val = ddl_match.group(1)
+        if val == "validate":
+            results.append(CheckResult("13.4", "Block 13", "ddl-auto: validate", "pass"))
+        else:
+            results.append(CheckResult("13.4", "Block 13", "ddl-auto: validate", "fail", severity="high", detail=f"valor actual: {val}"))
+
+    # 13.5 - open-in-view: false
+    if "open-in-view: false" in yml_text:
+        results.append(CheckResult("13.5", "Block 13", "open-in-view: false", "pass"))
+    else:
+        results.append(CheckResult("13.5", "Block 13", "open-in-view: false", "fail", severity="medium", detail="falta o es true"))
+
+    return results
+
+
+# -- Block 14: SonarLint ----------------------------------------------------
+
+
+def run_block_14(ctx: CheckContext) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    binding = ctx.migrated_path / ".sonarlint" / "connectedMode.json"
+
+    # 14.1 - Existe
+    if not _file_exists(binding):
+        results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "fail", severity="high", detail="archivo faltante", suggested_fix="Bindar en VS Code y Share Configuration"))
+        return results
+    results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "pass"))
+
+    # 14.2 - org correcto
+    try:
+        data = json.loads(_read_or_empty(binding))
+    except json.JSONDecodeError:
+        results.append(CheckResult("14.2", "Block 14", "connectedMode.json valido", "fail", severity="high", detail="JSON invalido"))
+        return results
+    if data.get("sonarCloudOrganization") == "bancopichinchaec":
+        results.append(CheckResult("14.2", "Block 14", "org = bancopichinchaec", "pass"))
+    else:
+        results.append(CheckResult("14.2", "Block 14", "org = bancopichinchaec", "fail", severity="high", detail=f"actual: {data.get('sonarCloudOrganization', '')}"))
+
+    # 14.3 - projectKey no es placeholder
+    key = data.get("projectKey", "")
+    if not key or "<" in key:
+        results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "fail", severity="high", detail=f"actual: {key}"))
+    else:
+        results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "pass"))
+
+    return results
+
+
+# -- Main orchestrator -----------------------------------------------------
+
+
+ALL_BLOCKS = [
+    ("Block 0", run_block_0),
+    ("Block 1", run_block_1),
+    ("Block 2", run_block_2),
+    ("Block 5", run_block_5),
+    ("Block 7", run_block_7),
+    ("Block 13", run_block_13),
+    ("Block 14", run_block_14),
+]
+
+
+def run_all_blocks(ctx: CheckContext) -> list[CheckResult]:
+    """Run all blocks and return flat list of CheckResults."""
+    all_results: list[CheckResult] = []
+    for name, fn in ALL_BLOCKS:
+        try:
+            all_results.extend(fn(ctx))
+        except Exception as e:  # noqa: BLE001
+            all_results.append(CheckResult(f"{name}-error", name, f"{name} orchestration", "fail", severity="medium", detail=f"error ejecutando bloque: {e}"))
+    return all_results

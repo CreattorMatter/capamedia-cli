@@ -20,7 +20,9 @@ from rich.console import Console
 
 from capamedia_cli import __version__
 from capamedia_cli.commands import (
+    check,
     check_install,
+    clone,
     doctor,
     fabrics,
     init,
@@ -64,6 +66,8 @@ def main(
 app.command("install")(install.install_toolchain)
 app.command("check-install")(check_install.check_install)
 app.command("init")(init.init_project)
+app.command("clone")(clone.clone_service)
+app.command("check")(check.check_project)
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.command("doctor")(doctor.doctor)
 app.command("upgrade")(upgrade.upgrade_project)

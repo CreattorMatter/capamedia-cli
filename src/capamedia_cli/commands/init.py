@@ -127,8 +127,8 @@ def _copy_templates(target_dir: Path, service_name: str, artifact_token_placehol
         "cli_version": __version__,
     }
 
-    # Nota: CLAUDE.md lo genera el adapter Claude Code concatenando los context files.
-    # Aca solo rendereamos los templates que NO son cubiertos por adapters.
+    # Nota: CLAUDE.md / AGENTS.md lo generan los adapters. Aca renderizamos
+    # solo los templates que NO son cubiertos por adapters.
     rendered_map = {
         "mcp.json.j2": ".mcp.json",
         "sonarlint-connectedMode.json.j2": ".sonarlint/connectedMode.json",
@@ -140,6 +140,33 @@ def _copy_templates(target_dir: Path, service_name: str, artifact_token_placehol
         dest = target_dir / dest_rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(env.get_template(src_name).render(**ctx), encoding="utf-8")
+
+
+def _post_process_agent_docs(target_dir: Path, service_name: str, cli_version: str) -> None:
+    """Prepend service-specific metadata header to CLAUDE.md / AGENTS.md.
+
+    Los adapters (Claude/Codex/opencode) generan CLAUDE.md o AGENTS.md concatenando
+    los archivos de context. Aca le agregamos al principio un header con el nombre
+    del servicio y el flujo esperado, para que cada proyecto tenga su identidad.
+    """
+    header = (
+        f"# {service_name} - Migracion CapaMedia OLA1\n\n"
+        f"Proyecto generado por `capamedia init` (v{cli_version}).\n\n"
+        f"- **Servicio:** `{service_name}`\n"
+        f"- **Flujo esperado:** `/clone {service_name}` -> `/fabric` -> `/migrate` -> `/check`\n\n"
+        f"El contenido siguiente es contexto comun para toda migracion CapaMedia.\n\n"
+        f"---\n\n"
+    )
+
+    for candidate in ("CLAUDE.md", "AGENTS.md"):
+        path = target_dir / candidate
+        if not path.exists():
+            continue
+        existing = path.read_text(encoding="utf-8")
+        # Avoid duplicating header on repeated runs
+        if existing.startswith(f"# {service_name} - Migracion CapaMedia OLA1"):
+            continue
+        path.write_text(header + existing, encoding="utf-8")
 
 
 def _save_config(target_dir: Path, service_name: str, harnesses: list[str]) -> None:
@@ -243,6 +270,8 @@ def init_project(
         )
         total_files += len(written)
         all_warnings.extend(warnings)
+
+    _post_process_agent_docs(target_dir, service_name, __version__)
 
     _save_config(target_dir, service_name, harnesses)
 
