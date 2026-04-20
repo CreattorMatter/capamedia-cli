@@ -1,4 +1,4 @@
-# capamedia-cli · v0.2.4
+# capamedia-cli · v0.3.0
 
 CLI multi-harness para la migración de servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -182,8 +182,9 @@ capamedia-cli/
 ## Roadmap
 
 - [x] v0.1.0 — MVP: `install`, `check-install`, `init` interactivo, `fabrics setup`, 4 slash commands canónicos, 6 adapters
-- [x] v0.2.0 — Shell parity: `clone`, `check`, `fabrics generate` como comandos shell deterministas (sin AI). `migrate` queda solo como slash command (requiere AI). Tests: 30/30 ✅
-- [ ] v0.3.0 — Batch mode: procesar N servicios en paralelo, reporte agregado en XLSX/CSV
+- [x] v0.2.0 — Shell parity: `clone`, `check`, `fabrics generate` como comandos shell deterministas (sin AI). `migrate` queda solo como slash command (requiere AI)
+- [x] v0.2.4 — `fabrics generate` invoca el MCP Fabrics real y deja `destino/` con clases JAXB generadas
+- [x] v0.3.0 — Batch mode: `batch complexity` / `clone` / `check` / `init` en paralelo con ThreadPool + BLOQUE 15 del checklist (Estructura de error oficial). Tests: 35/35 ✅
 - [ ] v0.4.0 — Integración con Jira / Azure Boards / Confluence / Slack
 
 ## Licencia

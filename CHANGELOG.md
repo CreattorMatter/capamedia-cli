@@ -4,6 +4,67 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.3.0] - 2026-04-20
+
+### Added - Batch mode + BLOQUE 15 del checklist
+
+**Batch mode (procesar N servicios en paralelo):**
+
+- **`capamedia batch complexity --from services.txt --workers 4 [--shallow] [--csv]`**
+  - Clone superficial del legacy de cada servicio + analisis determinista
+  - ThreadPool con N workers (default 4)
+  - Output: tabla stdout + `batch-complexity-<timestamp>.md` (y opcional `.csv`)
+  - Columnas: tipo, ops, framework, umps, bd, complejidad
+
+- **`capamedia batch clone --from services.txt --workers 4 [--shallow]`**
+  - Clone completo (legacy + UMPs + TX) de N servicios en paralelo
+  - Cada servicio queda en `<root>/<service>/`
+
+- **`capamedia batch check <root> --glob "*/destino/*" --workers 4`**
+  - Audita todos los proyectos Spring Boot migrados bajo un path
+  - Auto-descubre el legacy hermano (`../legacy/`)
+  - Tabla agregada: servicio, verdict, pass, HIGH, MEDIUM, LOW
+  - Ideal para dashboard del frente ("como estan los 40 servicios hoy")
+
+- **`capamedia batch init --from services.txt --ai claude`**
+  - Crea N workspaces con `.claude/` + `CLAUDE.md` + `.mcp.json` + `.sonarlint/`
+  - Secuencial (no-threadsafe por CWD/prompts)
+
+Helpers comunes:
+- `_read_services_file(path)` parsea txt con soporte de comentarios `#`
+- `_write_markdown_report(cmd, rows, ...)` genera reporte estructurado
+- `_write_csv_report(cmd, rows, ...)` genera CSV para importar a Excel
+- `_render_table()` con rich.Table coloreada
+
+**BLOQUE 15 al checklist — Estructura de error (PDF BPTPSRE oficial):**
+
+4 checks nuevos basados en el PDF `BPTPSRE-Estructura de error-200426-212629.pdf`:
+
+- **Check 15.1** — `mensajeNegocio` NO debe setearse desde el codigo (lo setea DataPower). HIGH si hay `setMensajeNegocio("...")`.
+- **Check 15.2** — `recurso` con formato `<NOMBRE_SERVICIO>/<METODO>`. MEDIUM si falta el `/`.
+- **Check 15.3** — `componente` con valor reconocido:
+  - Para IIB: `<nombre-servicio>` / `ApiClient` / `TX<6-digitos>`
+  - Para WAS: `<nombre-servicio>`, `<metodo>`, `<valor-archivo-config>`
+- **Check 15.4** — `backend` codes del catalogo oficial, no hardcoded arbitrario (`00045`, `00638`, `00640`...). HIGH si detecta `00000` o `999`.
+
+### Testing
+
+- **35/35 tests PASS** (+5 tests nuevos en `test_batch.py`)
+- `batch complexity --from services.txt` probado end-to-end con 2 servicios reales
+  (wsclientes0007 + wsclientes0030) — ambos analizados en paralelo
+- `batch check` probado sobre el proyecto migrado en `007-test/destino/`
+- `wsclientes0007` pasa de 18/18 (v0.2.4) a 20/22 PASS (v0.3.0) con 2 MEDIUM del BLOQUE 15 —
+  son los esperados: mapper del controller no setea `recurso`/`componente` con los formatos oficiales
+
+### Other
+
+- Read en detalle los 3 PDFs nuevos del banco:
+  - `BPTPSRE-Archivos de configuracion` → ya cubierto por `capamedia clone` (TX repos)
+  - `BPTPSRE-Estructura de error` → integrado al BLOQUE 15 del checklist
+  - `BPTPSRE-Servicios Configurables` → ya marcado TBD (fuente en SharePoint XLSX inaccesible)
+
+---
+
 ## [0.2.4] - 2026-04-20
 
 ### Fixed - 4 mitigaciones de descubrimientos del día anterior

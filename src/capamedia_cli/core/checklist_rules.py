@@ -385,6 +385,172 @@ def run_block_13(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+# -- Block 15: Estructura de error (PDF BPTPSRE oficial) -------------------
+
+
+def run_block_15(ctx: CheckContext) -> list[CheckResult]:
+    """Valida la estructura del bloque <error> del PDF oficial BPTPSRE.
+
+    8 campos contractuales: codigo, mensaje, mensajeNegocio, tipo, recurso,
+    componente, backend, severidad. Reglas:
+    - mensajeNegocio: NUNCA lo setea el microservicio (lo pone DataPower)
+    - recurso: formato <NOMBRE_SERVICIO>/<METODO>
+    - componente IIB: <NOMBRE_SERVICIO> / ApiClient / TX<NNNNNN>
+    - componente WAS: <NOMBRE_SERVICIO>, <METODO>, <VALOR_ARCHIVO_CONFIG>
+    - backend: viene del catalogo codigosBackend.xml, NO hardcoded arbitrario
+    """
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+    if not src_java.exists():
+        return results
+
+    # 15.1 - mensajeNegocio NUNCA debe ser seteado desde el codigo
+    bad = _grep_files(src_java, r"setMensajeNegocio\s*\(\s*[\"']")
+    if bad:
+        results.append(
+            CheckResult(
+                "15.1",
+                "Block 15",
+                "mensajeNegocio NO debe setearse desde el codigo",
+                "fail",
+                severity="high",
+                detail=f"{len(bad)} hit(s): el PDF oficial dice que mensajeNegocio lo setea DataPower",
+                suggested_fix="Dejar mensajeNegocio = null o no llamar al setter en el mapper",
+            )
+        )
+    else:
+        results.append(
+            CheckResult("15.1", "Block 15", "mensajeNegocio NO se setea desde el codigo", "pass")
+        )
+
+    # 15.2 - recurso con formato <service>/<method>
+    recurso_matches = _grep_files(src_java, r"setRecurso\s*\(\s*[\"']")
+    if not recurso_matches:
+        results.append(
+            CheckResult(
+                "15.2",
+                "Block 15",
+                "recurso populado en algun mapper/resolver",
+                "fail",
+                severity="medium",
+                detail="No se encontro setRecurso(...) en ningun archivo",
+                suggested_fix="El mapper del error debe setear recurso = 'service-name/method-name'",
+            )
+        )
+    else:
+        # Ver si al menos un hit tiene formato '/'
+        has_slash = False
+        for _f, _ln, line in recurso_matches:
+            if "/" in line:
+                has_slash = True
+                break
+        if has_slash:
+            results.append(
+                CheckResult(
+                    "15.2",
+                    "Block 15",
+                    "recurso con formato service/method",
+                    "pass",
+                    detail=f"{len(recurso_matches)} hit(s), al menos uno con '/'",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "15.2",
+                    "Block 15",
+                    "recurso con formato service/method",
+                    "fail",
+                    severity="medium",
+                    detail="setRecurso encontrado pero ninguno tiene '/' en el valor",
+                    suggested_fix="Formato esperado: '<nombre-servicio>/<metodo>'",
+                )
+            )
+
+    # 15.3 - componente con valor valido (IIB: service/ApiClient/TXnnnnnn)
+    comp_matches = _grep_files(src_java, r"setComponente\s*\(\s*[\"']")
+    if comp_matches:
+        valid_patterns = (
+            re.compile(r"TX\d{6}"),  # TX plus 6 digits
+            re.compile(r"ApiClient"),
+        )
+        has_valid = False
+        for _f, _ln, line in comp_matches:
+            if any(p.search(line) for p in valid_patterns):
+                has_valid = True
+                break
+            # Tambien vale literal service-name (ej 'WSClientes0007')
+            if re.search(r"[\"']WS\w+\d+[\"']|[\"']ORQ\w+\d+[\"']|[\"']tnd-msa-", line):
+                has_valid = True
+                break
+        if has_valid:
+            results.append(
+                CheckResult(
+                    "15.3",
+                    "Block 15",
+                    "componente con valor reconocido (service/ApiClient/TX)",
+                    "pass",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "15.3",
+                    "Block 15",
+                    "componente con valor reconocido (service/ApiClient/TX)",
+                    "fail",
+                    severity="medium",
+                    detail="setComponente encontrado pero sin valor valido reconocido",
+                    suggested_fix="Usar uno de: <nombre-servicio>, 'ApiClient', 'TX<6-digitos>'",
+                )
+            )
+    else:
+        results.append(
+            CheckResult(
+                "15.3",
+                "Block 15",
+                "componente populado en algun mapper",
+                "fail",
+                severity="medium",
+                detail="No se encontro setComponente(...) en ningun archivo",
+            )
+        )
+
+    # 15.4 - backend no hardcoded arbitrario (debe venir del catalogo, codigos tipicos de 5 digitos)
+    backend_matches = _grep_files(src_java, r"setBackend\s*\(\s*[\"']([0-9]+)[\"']")
+    if backend_matches:
+        # Codigos conocidos del catalogo: 00045 (Bancs), 00638 (IIB/Bus), 00640 (DataPower), etc.
+        # Warning si vemos un codigo que parece inventado (ej "00000" o ""999")
+        suspect = [
+            (f, ln, line) for f, ln, line in backend_matches if '"00000"' in line or '"999"' in line
+        ]
+        if suspect:
+            results.append(
+                CheckResult(
+                    "15.4",
+                    "Block 15",
+                    "backend codes del catalogo (no inventados)",
+                    "fail",
+                    severity="high",
+                    detail=f"{len(suspect)} hit(s) con codigos sospechosos (00000/999)",
+                    suggested_fix="Usar codigos del catalogo: 00045 (Bancs), 00638 (IIB), 00640 (DataPower)",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "15.4",
+                    "Block 15",
+                    "backend codes del catalogo (no inventados)",
+                    "pass",
+                    detail=f"{len(backend_matches)} hit(s), todos con codigos plausibles",
+                )
+            )
+    # Si no hay setBackend, no penalizamos (puede venir de constants)
+
+    return results
+
+
 # -- Block 14: SonarLint ----------------------------------------------------
 
 
@@ -430,6 +596,7 @@ ALL_BLOCKS = [
     ("Block 7", run_block_7),
     ("Block 13", run_block_13),
     ("Block 14", run_block_14),
+    ("Block 15", run_block_15),
 ]
 
 
