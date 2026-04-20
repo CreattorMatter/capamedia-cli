@@ -15,6 +15,16 @@ no comandos shell. El CLI solo genera los slash commands en la carpeta correcta.
 
 from __future__ import annotations
 
+import sys
+
+# Forzar UTF-8 en stdout/stderr para que emojis y acentos no exploten en Windows cp1252.
+# Esto se ejecuta AL IMPORT, antes de cualquier print.
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, OSError):
+        pass
+
 import typer
 from rich.console import Console
 

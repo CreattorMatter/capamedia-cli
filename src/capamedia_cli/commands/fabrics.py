@@ -16,6 +16,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.table import Table
 
 console = Console()
 
@@ -138,6 +139,9 @@ def setup(
         )
 
 
+NAMESPACE_OPTIONS = ["tnd", "tpr", "csg", "tmp", "tia", "tct"]
+
+
 @app.command("generate")
 def generate(
     service_name: str = typer.Argument(..., help="Nombre del servicio (ej: wsclientes0008)"),
@@ -147,25 +151,37 @@ def generate(
         "-w",
         help="Workspace root (default: CWD)",
     ),
-    no_clipboard: bool = typer.Option(
+    namespace: str | None = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help=f"Namespace del catalogo: {' | '.join(NAMESPACE_OPTIONS)}. Si se omite, se pregunta interactivamente.",
+    ),
+    group_id: str = typer.Option(
+        "com.pichincha.sp",
+        "--group-id",
+        help="Maven groupId del proyecto",
+    ),
+    dry_run: bool = typer.Option(
         False,
-        "--no-clipboard",
-        help="No copiar al clipboard (solo escribir archivo)",
+        "--dry-run",
+        help="No invocar el MCP, solo mostrar los parametros que se usarian",
     ),
 ) -> None:
-    """Arma el prompt listo para pegar en Claude Code que invoca el MCP Fabrics.
+    """Invoca el MCP Fabrics del banco y genera el arquetipo en ./destino/.
 
-    Hace preflight, analiza el legacy clonado, deduce los parametros del MCP
-    (projectType, webFramework, wsdlPath), y genera FABRICS_PROMPT_<svc>.md +
-    clipboard con el prompt completo.
+    Analiza el legacy clonado por `capamedia clone`, deduce los parametros del MCP,
+    lo invoca via stdio JSON-RPC y deja la carpeta `destino/` con el proyecto generado.
     """
     from capamedia_cli.core.legacy_analyzer import analyze_legacy
+    from capamedia_cli.core.mcp_client import MCPClient, MCPError
+    from capamedia_cli.core.mcp_launcher import locate as locate_mcp
 
     ws = (workspace or Path.cwd()).resolve()
 
     console.print(
         Panel.fit(
-            f"[bold]CapaMedia fabric generate[/bold]\n"
+            f"[bold]CapaMedia fabrics generate[/bold]\n"
             f"Servicio: [cyan]{service_name}[/cyan]\n"
             f"Workspace: [cyan]{ws}[/cyan]",
             border_style="cyan",
@@ -175,7 +191,6 @@ def generate(
     # Step 1: Find legacy folder
     legacy_root = ws / "legacy" / f"sqb-msa-{service_name.lower()}"
     if not legacy_root.exists():
-        # Try to find any legacy subfolder
         candidates = list((ws / "legacy").glob("*")) if (ws / "legacy").exists() else []
         if candidates:
             legacy_root = candidates[0]
@@ -184,7 +199,7 @@ def generate(
             console.print("[yellow]Tip:[/yellow] corre 'capamedia clone <servicio>' antes")
             raise typer.Exit(1)
 
-    console.print(f"  [green]OK[/green] legacy encontrado: {legacy_root}")
+    console.print(f"  [green]OK[/green] legacy encontrado en: {legacy_root}")
 
     # Step 2: Analyze
     umps_root = ws / "umps" if (ws / "umps").exists() else None
@@ -195,110 +210,150 @@ def generate(
         raise typer.Exit(1)
 
     # Step 3: Deduce MCP params
-    web_framework = "webflux" if analysis.framework_recommendation == "rest" else "mvc"
     project_type = analysis.framework_recommendation or "soap"
-    wsdl_abs = analysis.wsdl.path.resolve()
+    web_framework = "webflux" if project_type == "rest" else "mvc"
+    tecnologia = "bus" if analysis.source_kind == "iib" else ("was" if analysis.source_kind == "was" else "bus")
+    invoca_bancs = bool(analysis.umps)
+    wsdl_abs = str(analysis.wsdl.path.resolve())
+    project_name = f"tnd-msa-sp-{service_name.lower()}"
+    project_path = str((ws / "destino").resolve())
 
-    console.print()
-    console.print(f"  Operaciones WSDL : [bold]{analysis.wsdl.operation_count}[/bold]")
-    console.print(f"  projectType      : [bold]{project_type}[/bold]")
-    console.print(f"  webFramework     : [bold]{web_framework}[/bold]")
-    console.print(f"  wsdlPath         : [dim]{wsdl_abs}[/dim]")
-    console.print(f"  UMPs detectados  : [bold]{len(analysis.umps)}[/bold]")
-    console.print(f"  BD presente      : [bold]{'SI' if analysis.has_database else 'NO'}[/bold]")
-    console.print(f"  Complejidad      : [bold]{analysis.complexity.upper()}[/bold]")
-
-    # Step 4: Build prompt
-    prompt_lines: list[str] = []
-    prompt_lines.append(f"Invocar el MCP Fabrics para generar el arquetipo de `{service_name}`.")
-    prompt_lines.append("")
-    prompt_lines.append("## Parametros deducidos")
-    prompt_lines.append("")
-    prompt_lines.append("```")
-    prompt_lines.append(f"wsdlPath     : {wsdl_abs}")
-    prompt_lines.append(f"projectType  : {project_type}")
-    prompt_lines.append(f"webFramework : {web_framework}")
-    prompt_lines.append(f"serviceName  : {service_name}")
-    prompt_lines.append(f"groupId      : com.pichincha.sp")
-    prompt_lines.append(f"artifactId   : tnd-msa-sp-{service_name.lower()}")
-    prompt_lines.append(f"javaVersion  : 21")
-    prompt_lines.append(f"outputDir    : ./destino")
-    prompt_lines.append("```")
-    prompt_lines.append("")
-    prompt_lines.append("## Pasos (ejecutar en orden)")
-    prompt_lines.append("")
-    prompt_lines.append("1. **Preflight**: confirmar que el tool `mcp__fabrics__create_project_with_wsdl` esta disponible.")
-    prompt_lines.append("   Si no, detener y avisar al usuario que corra `capamedia fabrics preflight` en shell.")
-    prompt_lines.append("")
-    prompt_lines.append("2. **Invocar MCP** con los parametros de arriba.")
-    prompt_lines.append("")
-    prompt_lines.append("3. **Aplicar workarounds** conocidos (ver `prompts/migrate-soap-full.md` o `migrate-rest-full.md`):")
-    if project_type == "soap":
-        prompt_lines.append("   - Gap 1: agregar `spring-boot-starter-webflux` a `build.gradle` si falta")
-        prompt_lines.append("   - Gap 2: agregar `com.sun.xml.ws:jaxws-rt:4.0.3` a `build.gradle`")
-        prompt_lines.append("   - Gap 3: sincronizar versiones con `gold-ref/tnd-msa-sp-wsclientes0015/build.gradle`")
-    else:
-        prompt_lines.append("   - Sincronizar versiones con `gold-ref/tnd-msa-sp-wsclientes0024/build.gradle`")
-    prompt_lines.append("")
-    prompt_lines.append("4. **Completar scaffolding** copiando desde el workspace:")
-    prompt_lines.append("   ```bash")
-    prompt_lines.append("   cp -r .claude destino/tnd-msa-sp-" + service_name.lower() + "/")
-    prompt_lines.append("   cp CLAUDE.md destino/tnd-msa-sp-" + service_name.lower() + "/")
-    prompt_lines.append("   cp .mcp.json destino/tnd-msa-sp-" + service_name.lower() + "/")
-    prompt_lines.append("   cp -r .sonarlint destino/tnd-msa-sp-" + service_name.lower() + "/ 2>/dev/null || true")
-    prompt_lines.append("   ```")
-    prompt_lines.append("")
-    prompt_lines.append("5. **Registrar contexto** en `destino/tnd-msa-sp-" + service_name.lower() + "/migration-context.json`:")
-    prompt_lines.append("   ```json")
-    prompt_lines.append("   {")
-    prompt_lines.append(f'     "service": "{service_name}",')
-    prompt_lines.append(f'     "sourceKind": "{analysis.source_kind}",')
-    prompt_lines.append(f'     "projectType": "{project_type}",')
-    prompt_lines.append(f'     "webFramework": "{web_framework}",')
-    prompt_lines.append(f'     "dbUsage": {str(analysis.has_database).lower()},')
-    prompt_lines.append(f'     "operationsCount": {analysis.wsdl.operation_count},')
-    prompt_lines.append(f'     "umps": [{", ".join(f'{{"name": "{u.name}", "tx": {u.tx_codes}}}' for u in analysis.umps)}],')
-    prompt_lines.append('     "scaffolding": {')
-    prompt_lines.append('       "mcp_version": "<pedir al usuario>",')
-    prompt_lines.append('       "scaffold_date": "<ISO8601 ahora>",')
-    prompt_lines.append('       "gaps_fixed_by_mcp": [],')
-    prompt_lines.append('       "workarounds_applied": []')
-    prompt_lines.append("     }")
-    prompt_lines.append("   }")
-    prompt_lines.append("   ```")
-    prompt_lines.append("")
-    prompt_lines.append("6. **Responder conversacionalmente** con un resumen de lo que hizo el MCP, que workarounds aplicaste, y la ruta del destino generado.")
-
-    prompt_text = "\n".join(prompt_lines)
-
-    # Step 5: Write file
-    prompt_file = ws / f"FABRICS_PROMPT_{service_name}.md"
-    prompt_file.write_text(prompt_text + "\n", encoding="utf-8")
-    console.print(f"\n  [green]OK[/green] prompt escrito en [cyan]{prompt_file}[/cyan]")
-
-    # Step 6: Clipboard
-    if not no_clipboard:
-        try:
-            import pyperclip
-
-            pyperclip.copy(prompt_text)
-            console.print("  [green]OK[/green] prompt copiado al clipboard (pegalo en Claude Code)")
-        except (ImportError, Exception) as e:  # noqa: BLE001
-            console.print(f"  [yellow]SKIP[/yellow] clipboard no disponible: {e}")
-
-    console.print()
-    console.print(
-        Panel(
-            "Proximo paso:\n"
-            "  1. Abri Claude Code en este workspace\n"
-            "  2. Pega el prompt (Ctrl+V) en el chat\n"
-            "  3. Claude ejecuta el MCP y genera destino/\n"
-            "\n"
-            "Alternativa: abri FABRICS_PROMPT_<svc>.md y pegalo manualmente.",
-            border_style="green",
-            title="Listo",
+    # Step 4: Resolve namespace (enum MCP)
+    if namespace is None:
+        console.print()
+        console.print("[bold yellow]Namespace del catalogo[/bold yellow] (obligatorio, no inferible)")
+        console.print(f"  Opciones: {', '.join(NAMESPACE_OPTIONS)}")
+        namespace = Prompt.ask(
+            "  Elegi el namespace",
+            choices=NAMESPACE_OPTIONS,
+            default="tnd",
         )
-    )
+
+    # Show summary
+    console.print()
+    table = Table(title="Parametros deducidos para el MCP", title_style="bold cyan")
+    table.add_column("Parametro", style="cyan")
+    table.add_column("Valor", style="bold")
+    table.add_column("Origen", style="dim")
+    table.add_row("projectName", project_name, "derivado de service_name")
+    table.add_row("projectPath", project_path, "ws/destino")
+    table.add_row("wsdlFilePath", wsdl_abs, "legacy WSDL")
+    table.add_row("groupId", group_id, "--group-id")
+    table.add_row("namespace", namespace, "interactivo / --namespace")
+    table.add_row("tecnologia", tecnologia, f"source_kind={analysis.source_kind}")
+    table.add_row("projectType", project_type, f"{analysis.wsdl.operation_count} ops")
+    table.add_row("webFramework", web_framework, "matriz oficial")
+    table.add_row("invocaBancs", str(invoca_bancs).lower(), f"{len(analysis.umps)} UMPs")
+    console.print(table)
+
+    mcp_args = {
+        "projectName": project_name,
+        "projectPath": project_path,
+        "wsdlFilePath": wsdl_abs,
+        "groupId": group_id,
+        "namespace": namespace,
+        "tecnologia": tecnologia,
+        "projectType": project_type,
+        "webFramework": web_framework,
+        "invocaBancs": invoca_bancs,
+    }
+
+    if dry_run:
+        console.print("\n[yellow]--dry-run: no invoco el MCP.[/yellow]")
+        console.print("Argumentos que se enviarian:")
+        console.print_json(data=mcp_args)
+        return
+
+    # Step 5: Locate + launch MCP
+    console.print("\n[bold]Arrancando MCP Fabrics...[/bold]")
+    try:
+        spec = locate_mcp(cwd=ws)
+    except FileNotFoundError as e:
+        console.print(f"[red]FAIL[/red] {e}")
+        raise typer.Exit(1) from None
+    console.print(f"  source: [dim]{spec.source}[/dim]")
+
+    mcp_error_msg: str | None = None
+    result: dict = {}
+    try:
+        with MCPClient(spec.command, env=spec.env, cwd=str(ws)) as client:
+            info = client.initialize(client_name="capamedia-cli", client_version="0.2.3")
+            console.print(
+                f"  [green]OK[/green] MCP conectado: {info.get('serverInfo', {}).get('name')} "
+                f"v{info.get('serverInfo', {}).get('version')}"
+            )
+
+            # Step 6: Invoke the tool
+            console.print("\n[bold]Invocando create_project_with_wsdl...[/bold]")
+            try:
+                result = client.call_tool("create_project_with_wsdl", mcp_args)
+            except MCPError as e:
+                # El MCP puede reportar error pero igual haber creado el scaffold.
+                # Lo tratamos como warning si destino/ existe.
+                mcp_error_msg = str(e)
+    except MCPError as e:
+        console.print(f"[red]FAIL[/red] error conectando al MCP: {e}")
+        raise typer.Exit(1) from None
+
+    # Step 7: Parse result
+    content_items = result.get("content", [])
+    text_parts = [c.get("text", "") for c in content_items if c.get("type") == "text"]
+    if text_parts:
+        # Sanitize emojis/unicode that cp1252 (Windows default) cannot encode
+        def _safe_text(s: str) -> str:
+            return s.encode("ascii", errors="replace").decode("ascii")
+
+        console.print("\n[bold]Respuesta del MCP:[/bold]")
+        for part in text_parts:
+            console.print(f"  {_safe_text(part[:600])}")
+
+    destino = ws / "destino"
+    proj_dir = destino / project_name
+    generated_ok = destino.exists() and any(destino.iterdir())
+
+    if generated_ok and mcp_error_msg:
+        # Exito parcial: scaffold existe pero el MCP reporto error (tipicamente
+        # el paso final de `gradlew generateFromWsdl` fallo)
+        console.print()
+        def _safe(s: str) -> str:
+            return s.encode("ascii", errors="replace").decode("ascii")
+        short_err = _safe(mcp_error_msg[:300])
+        console.print(
+            Panel(
+                f"Scaffold generado en [cyan]{proj_dir}[/cyan]\n"
+                f"pero el MCP reporto un error en el paso final:\n\n"
+                f"[dim]{short_err}[/dim]\n\n"
+                f"Esto suele pasar cuando el MCP intenta correr `gradlew generateFromWsdl`\n"
+                f"pero el wrapper todavia no es ejecutable.\n\n"
+                f"Completa el paso manualmente:\n"
+                f"  cd {proj_dir}\n"
+                f"  ./gradlew generateFromWsdl",
+                border_style="yellow",
+                title="Exito parcial",
+            )
+        )
+    elif generated_ok:
+        console.print()
+        console.print(
+            Panel(
+                f"Arquetipo generado en [cyan]{proj_dir}[/cyan]\n\n"
+                f"Proximos pasos:\n"
+                f"  1. Revisa `{proj_dir.name}/build.gradle` y aplica workarounds conocidos.\n"
+                f"  2. Corre `capamedia init --here` dentro de destino/{project_name}/ para sumar .claude/ y CLAUDE.md.\n"
+                f"  3. Abri en Claude Code y corre `/migrate` en el chat.",
+                border_style="green",
+                title="OK",
+            )
+        )
+    else:
+        console.print(
+            f"[red]FAIL[/red] el MCP respondio pero {destino} esta vacio."
+        )
+        if mcp_error_msg:
+            def _safe(s: str) -> str:
+                return s.encode("ascii", errors="replace").decode("ascii")
+            console.print(f"Error MCP: {_safe(mcp_error_msg[:500])}")
+        raise typer.Exit(1)
 
 
 @app.command("preflight")

@@ -4,6 +4,59 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.2.3] - 2026-04-20
+
+### Added - `fabrics generate` ahora invoca el MCP y genera la carpeta destino
+
+Antes generaba un prompt-texto para pegar en Claude Code. Ahora **invoca el MCP
+Fabrics directamente** via JSON-RPC stdio y deja la carpeta `destino/` lista.
+
+- **`core/mcp_client.py`** - cliente JSON-RPC 2.0 sobre stdio con context manager.
+  Implementa `initialize`, `tools/list`, `tools/call` del protocolo MCP 2024-11-05.
+  Maneja UTF-8 en ambas direcciones y drain de stderr en thread aparte.
+
+- **`core/mcp_launcher.py`** - localiza el MCP Fabrics con dos estrategias:
+  1. Cache npx local (`~/AppData/Local/npm-cache/_npx/<hash>/.../fabrics-project/dist/index.js`)
+     - preferido, no requiere `.npmrc` fresco
+  2. Fallback a `.mcp.json` con `cmd /c npx @pichincha/fabrics-project@latest`
+  Inyecta `ARTIFACT_USERNAME` y `ARTIFACT_TOKEN` desde `.mcp.json` al env.
+
+- **`fabrics generate`** refactorizado completo:
+  - Analiza legacy clonado
+  - Deduce 9 parametros del MCP (`projectName`, `projectPath`, `wsdlFilePath`,
+    `groupId`, `namespace`, `tecnologia`, `projectType`, `webFramework`, `invocaBancs`)
+  - Pregunta interactivamente `namespace` del catalogo (enum `tnd/tpr/csg/tmp/tia/tct`)
+    o se puede pasar via `--namespace`
+  - Muestra tabla con los parametros antes de invocar
+  - Invoca `create_project_with_wsdl` via MCPClient
+  - Maneja "exito parcial" cuando el MCP genera el scaffold pero falla en el ultimo
+    paso (tipicamente `gradlew generateFromWsdl`)
+  - Nuevo flag `--dry-run` para ver los parametros sin invocar
+  - Nuevo flag `--group-id` (default `com.pichincha.sp`)
+
+### Fixed
+
+- **UTF-8 forzado en stdout/stderr** desde el arranque del CLI. Antes el output
+  del MCP con emojis explotaba en Windows (cp1252). Fix en `cli.py`.
+- Schema real del MCP descubierto: nombres de params corregidos
+  (`wsdlFilePath` no `wsdlPath`, `projectName` no `serviceName`,
+  `projectPath` no `outputDir`).
+- `namespace` y `tecnologia` son params obligatorios nuevos (antes no se pasaban).
+
+### Testing end-to-end sobre `wsclientes0007`
+
+Probado contra MCP real (`azure-project-manager v1.0.0`):
+- MCP conectado via cache npx sin dependencia de `.npmrc` fresco
+- Parametros deducidos correctos (projectType=rest, webFramework=webflux,
+  tecnologia=bus, invocaBancs=true)
+- Arquetipo generado en `destino/tnd-msa-sp-wsclientes0007/` con: build.gradle,
+  settings.gradle, gradle wrapper, Dockerfile, Helm values, Azure Pipelines,
+  src/main/java/ con Application, ErrorResolver, GlobalErrorException, etc.
+- Error del MCP en paso final (`gradlew generateFromWsdl`) manejado como
+  "exito parcial" con guia al usuario para completarlo manual.
+
+---
+
 ## [0.2.2] - 2026-04-20
 
 ### Changed - Scope de `clone` simplificado
