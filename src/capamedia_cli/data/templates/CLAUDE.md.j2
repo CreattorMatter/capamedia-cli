@@ -1,0 +1,72 @@
+# {{ service_name }} — Migración Capa Media OLA1
+
+Proyecto generado por [capamedia-cli](https://github.com/CreattorMatter/capamedia-cli) v{{ cli_version }}.
+
+## Servicio
+
+- **Nombre:** {{ service_name }}
+- **Tipo legacy:** `<TBD — lo detecta /clone>` (IIB / WAS / ORQ)
+- **Framework target:** `<TBD — lo detecta /clone>` (REST + WebFlux / SOAP + MVC)
+
+## Arquitectura: Hexagonal OLA1
+
+```
+application/
+  port/input/    <- abstract classes (NUNCA interfaces)
+  port/output/   <- abstract classes (NUNCA interfaces)
+  service/       <- @Service @RequiredArgsConstructor @Slf4j
+domain/
+  model/         <- Records puros, CERO imports de Spring
+  exception/     <- Excepciones tipadas
+infrastructure/
+  input/adapter/ <- SOAP controller, DTOs envelope
+  output/adapter/<- BANCS adapters via Core Adapter REST
+  config/        <- @Configuration, @ConfigurationProperties
+  mapper/        <- MapStruct o @Component mappers
+  exception/     <- ErrorResolverHandler
+```
+
+## Build & Test
+
+```bash
+./gradlew generateFromWsdl      # Generar clases JAXB desde WSDL
+./gradlew clean build            # Build completo con tests
+./gradlew test                   # Solo tests
+./gradlew jacocoTestReport       # Reporte de cobertura
+./gradlew bootJar                # Generar JAR para Docker
+```
+
+## Reglas críticas (NUNCA violar)
+
+- Puertos son **abstract classes**, nunca interfaces
+- `domain/` no importa Spring, SOAP, JPA, WebFlux
+- `application/` no importa `infrastructure/`
+- CERO `@Autowired` — solo `@RequiredArgsConstructor`
+- Métodos ≤ 20 líneas, líneas ≤ 100 columnas
+- HTTP 200 para errores de negocio (compatibilidad con IIB caller)
+- HTTP 500 solo para SOAP Faults inesperados
+- Todo el código en **inglés**
+- Config vía `${CCC_*}` env vars, NUNCA hardcodear
+- `livenessProbe` + `readinessProbe` en TODOS los Helm values
+- Producción: `replicaCount >= 2`, `hpa.enabled: true`
+
+## Secrets
+
+Los secrets **nunca se commitean**. Se referencian como `${CCC_*}` env vars en `application.yml` y `helm/*.yml`. El banco provee valores reales ~1 semana antes del deploy productivo.
+
+## Flujo de trabajo
+
+El trabajo se hace desde el chat del IDE (Claude Code, Cursor, Windsurf, Copilot) con los slash commands:
+
+1. `/clone {{ service_name }}` — trae legacy + UMPs + TX + gold reference
+2. `/fabric` — genera arquetipo via MCP Fabrics en `./destino/`
+3. `/migrate` — migra la lógica del legacy al destino
+4. `/check` — ejecuta checklist BPTPSRE post-migración
+
+## SonarLint local
+
+Al primer PR, este proyecto debe tener `.sonarlint/connectedMode.json` versionado apuntando a la organización `bancopichinchaec` en SonarCloud. Ya se generó un template — hay que reemplazar `<PROJECT_KEY_FROM_SONARCLOUD>` con el `projectKey` real del proyecto en SonarCloud.
+
+## Commits
+
+Conventional Commits: `feat|fix|refactor|test|docs|chore|ci|iac: descripcion`

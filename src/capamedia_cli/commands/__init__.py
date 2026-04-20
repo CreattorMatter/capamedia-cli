@@ -1,0 +1,1 @@
+"""CapaMedia CLI commands."""

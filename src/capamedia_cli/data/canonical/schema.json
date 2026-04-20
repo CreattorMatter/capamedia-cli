@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CapaMedia canonical asset schema",
+  "description": "Frontmatter schema for canonical assets (prompts, agents, skills, context) used by CapaMedia CLI adapters.",
+  "type": "object",
+  "required": ["name", "type", "description"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "Slug-safe asset identifier"
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line summary shown in pickers and help"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["prompt", "agent", "skill", "context", "command"],
+      "description": "Canonical asset type"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["project", "user", "global"],
+      "default": "project"
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["setup", "pre-migration", "migration", "post-migration", "cross-cutting"],
+      "description": "Which stage of the CapaMedia flow this asset belongs to"
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": ["iib", "was", "orq", "any"],
+      "description": "Legacy source kind this asset applies to"
+    },
+    "framework": {
+      "type": "string",
+      "enum": ["rest", "soap", "any"],
+      "description": "Target framework this asset applies to"
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "default": "medium"
+    },
+    "preferred_model": {
+      "type": "object",
+      "properties": {
+        "anthropic": { "type": "string" },
+        "openai": { "type": "string" },
+        "google": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "fallback_model": {
+      "type": "string",
+      "enum": ["opus", "sonnet", "haiku"]
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "harness_overrides": {
+      "type": "object",
+      "description": "Per-harness customizations (cursor globs, copilot mode, etc.)",
+      "additionalProperties": { "type": "object" }
+    }
+  },
+  "additionalProperties": true
+}
