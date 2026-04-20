@@ -1,0 +1,650 @@
+<?xml version="1.0" encoding="UTF-8"?><xsd:schema targetNamespace="http://bpichincha.com/servicios" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:bp="http://bpichincha.com/servicios">
+
+
+    <xsd:element name="header" type="xsd:string"></xsd:element>
+
+    <xsd:complexType name="transaccionFinancieraType">
+        <xsd:annotation>
+        	<xsd:documentation>Folder que contiene campos de respuesta de una transacción financiera especificamente utilizados para notificaciones, registro de log transanccional y para
+el reverso manual en caso de ser requerido.</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+        	<xsd:element name="fechaContable" type="xsd:string"
+        		maxOccurs="1" minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>fecha contable de bancs en la cual se impacta la
+transacción financiera Tipo: String Longitud: 8
+Ejemplo: 11022017
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="numeroDocumento" type="xsd:string"
+        		minOccurs="1" maxOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>numero unico de transacción en bancs, este permite rastrear datos y poder reversar una
+transacción financiera Tipo: String Longitud: 9
+Ejemplo: 000061489
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="journals" type="bp:journals" maxOccurs="1" minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>Folder que contiene los journal asociados al journal principal asociados a la transacción</xsd:documentation>
+        		</xsd:annotation></xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+
+    <xsd:complexType name="BancsTeller">
+        <xsd:annotation>
+        	<xsd:documentation>Folder que contiene datos de usuario de bancs asi como canal y aplicación necesarios para consumir las transacciones del core bancs.</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+    		<xsd:element name="teller" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Número de usuario bancs para funcionalidad de transacciones con core Bancs.
+Tipo: String
+Longitud: 8
+Ejemplo: 00070560</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="terminal" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Número de terminal asociada al usuario bancs para funcionalidad de transacciones con core Bancs.
+Tipo: String
+Longitud: 6
+Ejemplo: 000001</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="institucion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código de institución asociado al usuario bancs para funcionalidad de transacciones con core Bancs.
+Tipo: String
+Longitud: 6
+Ejemplo: 000001</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="agencia" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código de agencia de cada institución asociada al usuario bancs para funcionalidad de transacciones con core Bancs.
+Tipo: String
+Longitud: 5
+Ejemplo: 00012</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="estacion" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código de estación de cada agencia asociado al usuario bancs para funcionalidad de transacciones con core Bancs.
+Tipo: String
+Longitud: 3
+Ejemplo: 001</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="aplicacion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código de aplicación perteneciente al legacy que invoca la transacción de Bancs.
+Tipo: String
+Longitud: 3
+Ejemplo: BEP</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="canal" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código de canal perteneciente al legacy que invoca la transacción de Bancs.
+Tipo: String
+Longitud: 1
+Ejemplo: i ( internexo )</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    	</xsd:sequence>
+    </xsd:complexType>
+
+<xsd:complexType name="GenericHeaderIn">
+        <xsd:annotation>
+        	<xsd:documentation>Folder que contiene campos necesarios para el procesamiento de las orquestaciones y de los microservicios como logs, invocaciones 
+a servicios externos, logs transaccionales, notificaciones, etc.</xsd:documentation></xsd:annotation>
+        <xsd:sequence>
+    		<xsd:element name="dispositivo" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Es el identificador único de un dispositivo (laptop, pc, smartphone, tablet). Se debe aplicar sha256 : browser, sistemaOperativo, userAgent, headers, screenDepth. WSO2 enviará en el Claim
+Tipo: String
+Longitud: 32
+Ejemplo: 5CiD3iOF8whuBQEqbct1tlD2mAuclrM=</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="empresa" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código empresa BP definido por arquitectura empresarial, el WSO2 lo enviará en el Claim de la petición
+Tipo: String
+Longitud: N/A
+Ejemplo: 0010</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="canal" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código del canal desde el cual se realizara la petición del microservicio o el orquestador, por ejemplo 02 corresponde a Banca Electrónica.
+Tipo: String
+Longitud: 2
+Ejemplo: 02 (Banca Electrónica)</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="medio" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código del medio perteneciente al canal desde el cual se realizara la petición del microservicio o el orquestador, por ejemplo 020002 corresponde a Banca Electrónica personas.
+Tipo: String
+Longitud: 6
+Ejemplo: 020002 (Banca Electrónica Personas)</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+            <xsd:element name="aplicacion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Aplicación perteneciente al medio que representa el legacy udesde la cual se invocará al microservicio u orquestacón.
+Tipo: String
+Longitud: 5
+Ejemplo: 00270 (CXP)</xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="agencia" type="xsd:string" maxOccurs="1" minOccurs="1">
+            	<xsd:annotation>
+            		<xsd:documentation>Se debe enviar el código de agencia para idientificar el centro de costos, esto aplica para aplicaciones internas o de soporte.
+Tipo: String
+Longitud: N/A
+Ejemplo: 00012</xsd:documentation>
+            	</xsd:annotation></xsd:element>
+            <xsd:element name="tipoTransaccion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Código único de transacción para una orquestación o micro servicio, [acrónicomo capa][dominio][tipo servicio][secuencial][código capacidad][secuencial capacidad]. Cada consumidor deberá generar este código y homologar con bloque y operación de reporte todo1
+Tipo: String
+Longitud: 9
+Ejemplo: 304100111</xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+
+    		<xsd:element name="geolocalizacion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Es la coordenada del lugar geográfico dónde se ejecutó la transacción, esto aplica para medios digitales o aplicaciones de negocio. WSO2 enviará en el Claim. Para primer Release no aplica informará en blanco. Definido con PO. 
+Tipo: String
+Longitud: N/A
+Ejemplo: 6588542</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="usuario" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Para medios digitales este usuario será genérico y único para la aplicación de negocio, además dispondrá de sus propias capacidades sobre los sistemas internos. WSO2 enviará en el Claim. Para el Caso de aplicaciónes de soporte se debe enviar el usuario del dominio.
+Tipo: String
+Longitud: 8
+Ejemplo: USINTERT</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="unicidad" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Se refiere al mecanismo que permite identificar a la transacción como  irrepetible desde el punto de vista de negocio. Esto aplica únicamente para transacciones financieras. Utilizar componente de unicidad. Esto genera cada Aplicación de negocio o soporte. 
+Tipo: String
+Longitud: 44
+Ejemplo: UZhDOa2GXtkAK2/QovFagnnS+nQSGAF/SKyTIIv1axc=
+</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="guid" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Se refiere al mecanismo que permite registrar e identificar a una transacción desde su origen hasta su destino. Esto aplica para todo tipo de transacciones financieras y no financieras. Utilizar componente de trazabilidad. Esto genera cada Aplicación de negocio o soporte. 
+Tipo: String
+Longitud: 32
+Ejemplo: 550e8400e29b41d4a716446655440000</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="fechaHora" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Timestamp del servidor de aplicación que consume las orquestaciones o micro servicios del ESB, se debe utilizar componente de unicidad y trazabilidad con el siguiente formato YYYYMMDDhhmmssnnnn. Se lo utiliza para la trazabilidad en los logs técnicos. 
+Tipo: String
+Longitud: 18
+Ejemplo: 201608161239203000
+</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="filler" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>campo de relleno para uso futuro
+Tipo: String
+Longitud: 50
+Ejemplo: 00000000000000000000000000000000000000000000000000</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="idioma" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Identificará el idioma que el cliente ha seleccionado al accesar a la aplicación. WSO2 enviará en el Claim. Para Omnicanalidad el default será español.  Considerar estándar internacional
+Tipo: String
+Longitud: 2
+Ejemplo: es</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+
+    		<xsd:element name="sesion" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Indica la sesión activa en la que el usuario se encuentra transaccionando. WSO2 enviará en el Claim
+Tipo: String
+Longitud: N/A
+Ejemplo: ASDASD77R01YH</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="ip" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Dirección IP que esta usando la aplicación de negocio o de soporte. WSO2 enviará en el Claim
+Tipo: String
+Longitud: 15
+Ejemplo: 192.168.123.111</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+
+    		<xsd:element name="idCliente" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Se refiere a la identificación del cliente que se encuentra transaccionando, aplica únicamente para medio digitales o aplicaciones de negocio. WSO2 enviará en el Claim
+Tipo: String
+Longitud: N/A
+Ejemplo: 1711089364</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="tipoIdCliente" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Se refiere al tipo identificación del cliente que se encuentra transaccionando, aplica únicamente para medio digitales o aplicaciones de negocio. WSO2 enviará en el Claim.
+Tipo: String
+Longitud: 4
+Ejemplo: 0001</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="bancs" type="bp:BancsTeller"
+    			maxOccurs="1" minOccurs="0">
+                <xsd:annotation>
+                	<xsd:documentation>Folder que contiene datos de usuario de bancs asi como canal y aplicación necesarios para consumir las transacciones del core bancs.</xsd:documentation></xsd:annotation>
+    		</xsd:element>
+
+
+    	</xsd:sequence>
+    </xsd:complexType>
+    
+    <xsd:complexType name="GenericHeaderOut">
+    	<xsd:sequence>
+    		<xsd:element name="dispositivo" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Es el identificador único de un dispositivo
+    					(laptop, pc, smartphone, tablet). Se debe
+    					aplicar sha256 : browser, sistemaOperativo,
+    					userAgent, headers, screenDepth. WSO2 enviará en
+    					el Claim Tipo: String Longitud: 32 Ejemplo:
+    					5CiD3iOF8whuBQEqbct1tlD2mAuclrM=
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="empresa" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Código empresa BP definido por arquitectura
+    					empresarial, el WSO2 lo enviará en el Claim de
+    					la petición Tipo: String Longitud: N/A Ejemplo:
+    					0010
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="canal" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Código del canal desde el cual se realizara la
+    					petición del microservicio o el orquestador, por
+    					ejemplo 02 corresponde a Banca Electrónica.
+    					Tipo: String Longitud: 2 Ejemplo: 02 (Banca
+    					Electrónica)
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="medio" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Código del medio perteneciente al canal desde el
+    					cual se realizara la petición del microservicio
+    					o el orquestador, por ejemplo 020002 corresponde
+    					a Banca Electrónica personas. Tipo: String
+    					Longitud: 6 Ejemplo: 020002 (Banca Electrónica
+    					Personas)
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="aplicacion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Aplicación perteneciente al medio que representa
+    					el legacy udesde la cual se invocará al
+    					microservicio u orquestacón. Tipo: String
+    					Longitud: 5 Ejemplo: 00270 (CXP)
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="agencia" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Se debe enviar el código de agencia para
+    					idientificar el centro de costos, esto aplica
+    					para aplicaciones internas o de soporte. Tipo:
+    					String Longitud: N/A Ejemplo: 00012
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="tipoTransaccion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Código único de transacción para una
+    					orquestación o micro servicio, [acrónicomo
+    					capa][dominio][tipo servicio][secuencial][código
+    					capacidad][secuencial capacidad]. Cada
+    					consumidor deberá generar este código y
+    					homologar con bloque y operación de reporte
+    					todo1 Tipo: String Longitud: 9 Ejemplo:
+    					304100111
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+
+    		<xsd:element name="geolocalizacion" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Es la coordenada del lugar geográfico dónde se
+    					ejecutó la transacción, esto aplica para medios
+    					digitales o aplicaciones de negocio. WSO2
+    					enviará en el Claim. Para primer Release no
+    					aplica informará en blanco. Definido con PO.
+    					Tipo: String Longitud: N/A Ejemplo: 6588542
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="usuario" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Para medios digitales este usuario será genérico
+    					y único para la aplicación de negocio, además
+    					dispondrá de sus propias capacidades sobre los
+    					sistemas internos. WSO2 enviará en el Claim.
+    					Para el Caso de aplicaciónes de soporte se debe
+    					enviar el usuario del dominio. Tipo: String
+    					Longitud: 8 Ejemplo: USINTERT
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="unicidad" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Se refiere al mecanismo que permite identificar
+    					a la transacción como irrepetible desde el punto
+    					de vista de negocio. Esto aplica únicamente para
+    					transacciones financieras. Utilizar componente
+    					de unicidad. Esto genera cada Aplicación de
+    					negocio o soporte. Tipo: String Longitud: 44
+    					Ejemplo:
+    					UZhDOa2GXtkAK2/QovFagnnS+nQSGAF/SKyTIIv1axc=
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="guid" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Se refiere al mecanismo que permite registrar e
+    					identificar a una transacción desde su origen
+    					hasta su destino. Esto aplica para todo tipo de
+    					transacciones financieras y no financieras.
+    					Utilizar componente de trazabilidad. Esto genera
+    					cada Aplicación de negocio o soporte. Tipo:
+    					String Longitud: 32 Ejemplo:
+    					550e8400e29b41d4a716446655440000
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="fechaHora" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Timestamp del servidor de aplicación que consume
+    					las orquestaciones o micro servicios del ESB, se
+    					debe utilizar componente de unicidad y
+    					trazabilidad con el siguiente formato
+    					YYYYMMDDhhmmssnnnn. Se lo utiliza para la
+    					trazabilidad en los logs técnicos. Tipo: String
+    					Longitud: 18 Ejemplo: 201608161239203000
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="filler" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					campo de relleno para uso futuro Tipo: String
+    					Longitud: 50 Ejemplo:
+    					00000000000000000000000000000000000000000000000000
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="idioma" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Identificará el idioma que el cliente ha
+    					seleccionado al accesar a la aplicación. WSO2
+    					enviará en el Claim. Para Omnicanalidad el
+    					default será español. Considerar estándar
+    					internacional Tipo: String Longitud: 2 Ejemplo:
+    					es
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+
+
+    		<xsd:element name="sesion" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Indica la sesión activa en la que el usuario se
+    					encuentra transaccionando. WSO2 enviará en el
+    					Claim Tipo: String Longitud: N/A Ejemplo:
+    					ASDASD77R01YH
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="ip" type="xsd:string" maxOccurs="1"
+    			minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Dirección IP que esta usando la aplicación de
+    					negocio o de soporte. WSO2 enviará en el Claim
+    					Tipo: String Longitud: 15 Ejemplo:
+    					192.168.123.111
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="idCliente" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Se refiere a la identificación del cliente que
+    					se encuentra transaccionando, aplica únicamente
+    					para medio digitales o aplicaciones de negocio.
+    					WSO2 enviará en el Claim Tipo: String Longitud:
+    					N/A Ejemplo: 1711089364
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="tipoIdCliente" type="xsd:string"
+    			maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Se refiere al tipo identificación del cliente
+    					que se encuentra transaccionando, aplica
+    					únicamente para medio digitales o aplicaciones
+    					de negocio. WSO2 enviará en el Claim. Tipo:
+    					String Longitud: 4 Ejemplo: 0001
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="bancs" type="bp:BancsTeller"
+    			maxOccurs="1" minOccurs="0">
+    			<xsd:annotation>
+    				<xsd:documentation>
+    					Folder que contiene datos de usuario de bancs
+    					asi como canal y aplicación necesarios para
+    					consumir las transacciones del core bancs.
+    				</xsd:documentation>
+    			</xsd:annotation>
+    		</xsd:element>
+    		<xsd:element name="documento"
+    			type="bp:transaccionFinancieraType" maxOccurs="1"
+    			minOccurs="1">
+                <xsd:annotation>
+                	<xsd:documentation>Folder que contiene campos de respuesta de una transacción financiera especificamente utilizados para notificaciones, registro de log transanccional y para
+el reverso manual en caso de ser requerido.</xsd:documentation>
+                </xsd:annotation>
+    		</xsd:element>
+
+    	</xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="GenericError">
+        <xsd:annotation>
+        	<xsd:documentation>Folder que contiene campos que describen el exito o el error de una invocación a un orquestador o a un microservicio.</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+        	<xsd:element name="codigo" type="xsd:string" maxOccurs="1"
+        		minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				Código del error presentado en el procesamiento
+        				del orquestador o el microservicio y sus
+        				invocaciones internas, en caso de exito se
+        				respondera con 0. Tipo: String Longitud: N/A
+        				Ejemplo: 999
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="mensaje" type="xsd:string" maxOccurs="1"
+        		minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				Mensaje de error presentado en el procesamiento
+        				del orquestador o el microservicio y sus
+        				invocaciones internas, en caso de exito se
+        				respondera con OK. Tipo: String Longitud: N/A
+        				Ejemplo: CUENTA NO EXISTE
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+            <xsd:element name="mensajeNegocio" type="xsd:string" maxOccurs="1" minOccurs="1"></xsd:element>
+            <xsd:element name="tipo" type="xsd:string" maxOccurs="1"
+        		minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				tipo de error presentado en el procesamiento del
+        				orquestador o el microservicio y sus
+        				invocaciones internas guiado a la severidad del
+        				mismo, puede ser de tipo ERROR, FATAL e INFO.
+        				Tipo: String Longitud: N/A Ejemplo: INFO
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="recurso" type="xsd:string" maxOccurs="1"
+        		minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				Nombre del módulo invocado del microservicio o
+        				el orquestador en el que se produce el error, se
+        				presenta con la sintaxis siguiente:
+        				nombre/método. Tipo: String Longitud: N/A
+        				Ejemplo:
+        				WSTransferencias1001/ProcesarTransferenciasDirecta11
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="componente" type="xsd:string"
+        		maxOccurs="1" minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				Nombre del componente en el que se produce el
+        				fallo, ese podria ser el metodo mismo del
+        				recurso invocado o puede ser un componente de
+        				tipo backend como una transacción de bancs.
+        				Tipo: String Longitud: N/A Ejemplo: TX067180
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+        	<xsd:element name="backend" type="xsd:string" maxOccurs="1"
+        		minOccurs="1">
+        		<xsd:annotation>
+        			<xsd:documentation>
+        				Código de backend invocado por el componente en
+        				el que se produce el error. Tipo: String
+        				Longitud: 5 Ejemplo: 00045 (Bancs)
+        			</xsd:documentation>
+        		</xsd:annotation>
+        	</xsd:element>
+
+        </xsd:sequence>
+    </xsd:complexType>
+
+
+    <xsd:complexType name="journals">
+        <xsd:annotation>
+        	<xsd:documentation>Folder de documentos de journal asociados al journal prinipal de una transaccion financiera</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+    		<xsd:element name="journal" type="bp:journal" maxOccurs="unbounded" minOccurs="0">
+    			<xsd:annotation>
+    				<xsd:documentation>Folder que contiene el valor de los journal asociados al journal principal</xsd:documentation></xsd:annotation></xsd:element>
+    	</xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="journal">
+        <xsd:annotation>
+        	<xsd:documentation>Folder que contiene el valor de los journal asociados al journal principal</xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+    		<xsd:element name="valor" type="xsd:string" maxOccurs="1" minOccurs="1">
+    			<xsd:annotation>
+    				<xsd:documentation>Valor del journal o numero de documento:
+tipo: String
+longitud: 9
+ejemplo: 000584129
+</xsd:documentation>
+    			</xsd:annotation></xsd:element>
+    	</xsd:sequence>
+    </xsd:complexType>
+</xsd:schema>

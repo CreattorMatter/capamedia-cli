@@ -6,6 +6,13 @@ Estrategia:
   3. Alternativamente, buscar el package cacheado por npx en
      ~/AppData/Local/npm-cache/_npx/<hash>/node_modules/@pichincha/fabrics-project/dist/index.js
      y lanzarlo con `node` directo (mas rapido y no requiere .npmrc fresco).
+
+NOTA DE NAMING (inconsistencia interna del banco):
+  - El npm package se llama `@pichincha/fabrics-project`.
+  - El MCP server reporta internamente serverInfo.name = `azure-project-manager`.
+  - El tool expuesto se llama `create_project_with_wsdl`.
+  - Los tres nombres se refieren al MISMO componente (el "Fabrics" del banco).
+  Si ves "azure-project-manager" en logs, es el MCP Fabrics.
 """
 
 from __future__ import annotations

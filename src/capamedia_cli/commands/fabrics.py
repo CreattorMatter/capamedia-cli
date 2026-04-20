@@ -7,8 +7,11 @@ Subcomandos:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -45,6 +48,50 @@ def _load_or_create_mcp_json(path: Path) -> dict:
     return {"mcpServers": {}}
 
 
+NPMRC_FEED = "//pkgs.dev.azure.com/BancoPichinchaEC/arq-framework/_packaging/Framework/npm/registry/"
+
+
+def _refresh_npmrc(token: str) -> Path:
+    """Actualiza ~/.npmrc con el token de Azure Artifacts (base64-encoded).
+
+    Formato requerido por Azure Artifacts:
+      //pkgs.dev.azure.com/.../registry/:username=BancoPichinchaEC
+      //pkgs.dev.azure.com/.../registry/:_password=<base64(PAT)>
+      //pkgs.dev.azure.com/.../registry/:email=npm@pichincha.com
+      @pichincha:registry=https://pkgs.dev.azure.com/.../registry/
+      always-auth=true
+    """
+    npmrc = Path.home() / ".npmrc"
+    pw_b64 = base64.b64encode(token.encode("utf-8")).decode("ascii")
+
+    new_lines = [
+        "; managed by capamedia-cli fabrics setup --refresh-npmrc",
+        f"{NPMRC_FEED}:username=BancoPichinchaEC",
+        f"{NPMRC_FEED}:_password={pw_b64}",
+        f"{NPMRC_FEED}:email=npm@pichincha.com",
+        f"@pichincha:registry=https:{NPMRC_FEED}",
+        "always-auth=true",
+        "",
+    ]
+
+    # Preserve user lines not related to the Azure Artifacts feed
+    existing: list[str] = []
+    if npmrc.exists():
+        try:
+            for line in npmrc.read_text(encoding="utf-8").splitlines():
+                if NPMRC_FEED in line or "@pichincha:registry" in line or line.startswith("; managed by capamedia"):
+                    continue
+                if "always-auth=true" in line:
+                    continue
+                existing.append(line)
+        except OSError:
+            pass
+
+    content = "\n".join(new_lines + existing).rstrip() + "\n"
+    npmrc.write_text(content, encoding="utf-8")
+    return npmrc
+
+
 @app.command("setup")
 def setup(
     scope: Annotated[
@@ -65,6 +112,13 @@ def setup(
     force: Annotated[
         bool,
         typer.Option("--force", help="Sobrescribir si ya existe"),
+    ] = False,
+    refresh_npmrc: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-npmrc",
+            help="Ademas de .mcp.json, actualiza ~/.npmrc con el token (para que `npx @pichincha/fabrics-project` funcione).",
+        ),
     ] = False,
 ) -> None:
     """Registra el MCP Fabrics del banco en la configuracion de Claude Code.
@@ -131,15 +185,242 @@ def setup(
     )
 
     console.print(f"[green]OK[/green] MCP Fabrics registrado en {target}")
+
+    # Refresh ~/.npmrc si se pidio (o auto si no tiene configuracion del feed)
+    if refresh_npmrc:
+        npmrc_path = _refresh_npmrc(token.strip())
+        console.print(f"[green]OK[/green] ~/.npmrc actualizado en {npmrc_path}")
+        console.print(
+            "       Ahora `npx @pichincha/fabrics-project@latest` podra bajar el paquete."
+        )
+
     console.print()
     if scope == "project":
         console.print(
             "[yellow]IMPORTANTE:[/yellow] el archivo .mcp.json contiene tu token. "
             "Ya esta en .gitignore si usaste 'capamedia init', pero verifica antes de commit."
         )
+    if not refresh_npmrc:
+        console.print(
+            "[dim]Tip: si `npx @pichincha/fabrics-project` te da E401, "
+            "corre este comando con --refresh-npmrc para renovar el token en ~/.npmrc[/dim]"
+        )
 
 
 NAMESPACE_OPTIONS = ["tnd", "tpr", "csg", "tmp", "tia", "tct"]
+
+# Params del MCP que nuestro CLI sabe proveer. Usado para validacion de schema en runtime.
+KNOWN_MCP_PARAMS = frozenset(
+    {
+        "projectName",
+        "projectPath",
+        "wsdlFilePath",
+        "groupId",
+        "namespace",
+        "tecnologia",
+        "projectType",
+        "webFramework",
+        "invocaBancs",
+    }
+)
+
+
+def _find_java21_home() -> Path | None:
+    """Localiza Java 21 en el sistema (necesario porque Gradle 8.x no soporta Java 25+).
+
+    Busca en ubicaciones tipicas de Windows (Eclipse Temurin, Oracle) y macOS/Linux.
+    Retorna el path al JAVA_HOME (directorio que contiene bin/java).
+    """
+    candidates: list[Path] = []
+    # Windows - Eclipse Temurin (lo que instala winget / capamedia install)
+    candidates.extend(Path("C:/Program Files/Eclipse Adoptium").glob("jdk-21*")) if Path("C:/Program Files/Eclipse Adoptium").exists() else None
+    # Windows - Oracle
+    candidates.extend(Path("C:/Program Files/Java").glob("jdk-21*")) if Path("C:/Program Files/Java").exists() else None
+    # macOS
+    candidates.append(Path("/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home"))
+    # Linux
+    candidates.append(Path("/usr/lib/jvm/java-21-openjdk-amd64"))
+    candidates.append(Path("/usr/lib/jvm/temurin-21-jdk-amd64"))
+
+    for c in candidates:
+        if c and c.exists() and (c / "bin" / ("java.exe" if os.name == "nt" else "java")).exists():
+            return c
+
+    # Fallback: check JAVA_HOME env if it points to Java 21
+    env_java = os.environ.get("JAVA_HOME")
+    if env_java:
+        p = Path(env_java)
+        release = p / "release"
+        if release.exists():
+            try:
+                text = release.read_text(encoding="utf-8", errors="replace")
+                if 'JAVA_VERSION="21' in text:
+                    return p
+            except OSError:
+                pass
+    return None
+
+
+def _artifact_env_from_mcp(ws: Path) -> dict[str, str]:
+    """Lee ARTIFACT_USERNAME/ARTIFACT_TOKEN del .mcp.json para pasarlos al gradlew subprocess."""
+    for candidate in (ws / ".mcp.json", ws.parent / ".mcp.json", Path.home() / ".mcp.json"):
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        fabrics = data.get("mcpServers", {}).get("fabrics", {})
+        env = fabrics.get("env", {})
+        if "ARTIFACT_TOKEN" in env:
+            return {
+                "ARTIFACT_USERNAME": env.get("ARTIFACT_USERNAME", "BancoPichinchaEC"),
+                "ARTIFACT_TOKEN": env["ARTIFACT_TOKEN"],
+            }
+    return {}
+
+
+def _fix_schema_locations(proj_dir: Path) -> list[str]:
+    """Arregla schemaLocation con paths relativos externos (`../...`) en WSDL/XSD.
+
+    Caso tipico: WSClientes*_InlineSchema1.xsd tiene:
+        <xsd:include schemaLocation="../TCSProcesarServicioSOAP/GenericSOAP.xsd"/>
+    Fix:
+        1. Copiar GenericSOAP.xsd (recurso embebbed del CLI) al dir del WSDL.
+        2. Quitar el prefijo `../TCSProcesarServicioSOAP/` del schemaLocation.
+
+    Retorna la lista de archivos modificados.
+    """
+    import re
+
+    legacy_dir = proj_dir / "src" / "main" / "resources" / "legacy"
+    if not legacy_dir.exists():
+        return []
+
+    # Copiar GenericSOAP.xsd desde los recursos del CLI si hace falta
+    resources_dir = Path(__file__).resolve().parent.parent / "data" / "resources"
+    src_generic = resources_dir / "GenericSOAP.xsd"
+    dest_generic = legacy_dir / "GenericSOAP.xsd"
+
+    modified: list[str] = []
+    pattern_need_fix = re.compile(r'schemaLocation="[^"]*\.\./[^"]*GenericSOAP\.xsd"')
+
+    for f in list(legacy_dir.glob("*.wsdl")) + list(legacy_dir.glob("*.xsd")):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if pattern_need_fix.search(text):
+            if src_generic.exists() and not dest_generic.exists():
+                dest_generic.write_bytes(src_generic.read_bytes())
+                modified.append(f"copied GenericSOAP.xsd -> {dest_generic.name}")
+            # Reemplazar schemaLocation relativo por local
+            new_text = re.sub(
+                r'schemaLocation="[^"]*\.\./[^"]*GenericSOAP\.xsd"',
+                'schemaLocation="GenericSOAP.xsd"',
+                text,
+            )
+            f.write_text(new_text, encoding="utf-8")
+            modified.append(f"fixed schemaLocation in {f.name}")
+    return modified
+
+
+def _set_gradle_java_home(proj_dir: Path, java_home: Path) -> None:
+    """Escribe org.gradle.java.home en gradle.properties para forzar el JDK.
+
+    Usa forward slashes (Gradle los acepta en Windows) para evitar issues de
+    escape de backslashes en .properties files. Reemplaza la linea si ya existe.
+    """
+    props = proj_dir / "gradle.properties"
+    lines: list[str] = []
+    if props.exists():
+        try:
+            for line in props.read_text(encoding="utf-8").splitlines():
+                if not line.strip().startswith("org.gradle.java.home"):
+                    lines.append(line)
+        except OSError:
+            pass
+    java_home_str = str(java_home).replace("\\", "/")
+    lines.append(f"org.gradle.java.home={java_home_str}")
+    props.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
+    """Workaround post-MCP: corre `gradlew generateFromWsdl` con path absoluto y env vars.
+
+    Hace 3 cosas para superar los bugs conocidos del MCP en Windows:
+      1. Pre-procesa WSDL/XSDs arreglando schemaLocation relativos (GenericSOAP.xsd).
+      2. Pasa ARTIFACT_USERNAME/ARTIFACT_TOKEN al subprocess (los plugins Gradle
+         viven en Azure Artifacts privado y los necesitan para auth).
+      3. Invoca el wrapper con path absoluto (bug Windows: `gradlew.bat` sin `.\\`
+         no es resuelto por exec).
+    """
+    is_windows = os.name == "nt"
+    wrapper = proj_dir / ("gradlew.bat" if is_windows else "gradlew")
+    if not wrapper.exists():
+        return (False, f"no existe {wrapper.name}")
+
+    # 1. Fix schemaLocation externos
+    fixes = _fix_schema_locations(proj_dir)
+    if fixes:
+        console.print(f"  [dim]Pre-procesado: {len(fixes)} fix(es) de schemaLocation[/dim]")
+
+    # 2. Env vars para Azure Artifacts + Java 21 (Gradle 8.x no soporta Java 25+)
+    subprocess_env = os.environ.copy()
+    subprocess_env.update(_artifact_env_from_mcp(ws))
+    java21 = _find_java21_home()
+    if java21:
+        # Setear via gradle.properties (mas confiable en Windows con paths con espacios)
+        _set_gradle_java_home(proj_dir, java21)
+        subprocess_env["JAVA_HOME"] = str(java21)
+        console.print(f"  [dim]Java 21 forzado via gradle.properties: {java21.name}[/dim]")
+    else:
+        console.print(
+            "  [yellow]WARN[/yellow] Java 21 no encontrado. Gradle puede fallar si PATH apunta a Java >=25."
+        )
+
+    # 3. Ejecutable: en Unix marcar como ejecutable
+    if not is_windows:
+        try:
+            wrapper.chmod(0o755)
+        except OSError:
+            pass
+
+    # 4. Limpiar caches previos del proyecto (evita class files de otras versiones de Java)
+    import shutil as _sh
+    for stale in (proj_dir / ".gradle", proj_dir / "build"):
+        if stale.exists():
+            try:
+                _sh.rmtree(stale, ignore_errors=True)
+            except OSError:
+                pass
+
+    try:
+        result = subprocess.run(
+            [str(wrapper), "generateFromWsdl", "--no-daemon"],
+            cwd=str(proj_dir),
+            capture_output=True,
+            text=True,
+            timeout=600,
+            shell=is_windows,
+            env=subprocess_env,
+        )
+        if result.returncode == 0:
+            return (True, "")
+        # Buscar la linea "What went wrong" para dar info util
+        full_output = (result.stdout or "") + "\n" + (result.stderr or "")
+        relevant: list[str] = []
+        for line in full_output.splitlines():
+            lower = line.lower()
+            if any(k in lower for k in ("error", "unable", "fail", "exception", "401", "wsdlexception")):
+                relevant.append(line.strip())
+                if len(relevant) >= 3:
+                    break
+        return (False, " | ".join(relevant)[:400] or "gradlew returned non-zero")
+    except subprocess.TimeoutExpired:
+        return (False, "timeout (>600s)")
+    except (OSError, FileNotFoundError) as e:
+        return (False, str(e))
 
 
 @app.command("generate")
@@ -277,19 +558,57 @@ def generate(
     result: dict = {}
     try:
         with MCPClient(spec.command, env=spec.env, cwd=str(ws)) as client:
-            info = client.initialize(client_name="capamedia-cli", client_version="0.2.3")
+            info = client.initialize(client_name="capamedia-cli", client_version="0.2.4")
             console.print(
                 f"  [green]OK[/green] MCP conectado: {info.get('serverInfo', {}).get('name')} "
                 f"v{info.get('serverInfo', {}).get('version')}"
             )
+
+            # Fix #4: validar schema en runtime
+            tools = client.list_tools()
+            target = next((t for t in tools if t.name == "create_project_with_wsdl"), None)
+            if target is None:
+                console.print("[red]FAIL[/red] el MCP no expone create_project_with_wsdl. Tools disponibles:")
+                for t in tools:
+                    console.print(f"  - {t.name}")
+                raise typer.Exit(1)
+
+            required = set(target.required_params)
+            all_props = set(target.all_params)
+
+            # Params obligatorios que el CLI no sabe proveer
+            missing_in_cli = required - KNOWN_MCP_PARAMS
+            if missing_in_cli:
+                console.print(
+                    f"[red]FAIL[/red] el MCP pide params required desconocidos: "
+                    f"{sorted(missing_in_cli)}. Este CLI no sabe como completarlos.\n"
+                    f"       Actualiza capamedia-cli a una version que soporte estos params."
+                )
+                raise typer.Exit(1)
+
+            # Params nuevos opcionales (warning, no bloqueante)
+            new_optional = all_props - KNOWN_MCP_PARAMS
+            if new_optional:
+                console.print(
+                    f"  [yellow]WARN[/yellow] el MCP acepta params nuevos no usados: "
+                    f"{sorted(new_optional)} (puede ser version nueva del MCP)"
+                )
+
+            # Validar que todos los mcp_args que vamos a enviar estan en el schema
+            our_extras = set(mcp_args.keys()) - all_props
+            if our_extras:
+                console.print(
+                    f"  [yellow]WARN[/yellow] removiendo params que el MCP no conoce: "
+                    f"{sorted(our_extras)}"
+                )
+                for k in our_extras:
+                    mcp_args.pop(k, None)
 
             # Step 6: Invoke the tool
             console.print("\n[bold]Invocando create_project_with_wsdl...[/bold]")
             try:
                 result = client.call_tool("create_project_with_wsdl", mcp_args)
             except MCPError as e:
-                # El MCP puede reportar error pero igual haber creado el scaffold.
-                # Lo tratamos como warning si destino/ existe.
                 mcp_error_msg = str(e)
     except MCPError as e:
         console.print(f"[red]FAIL[/red] error conectando al MCP: {e}")
@@ -311,9 +630,22 @@ def generate(
     proj_dir = destino / project_name
     generated_ok = destino.exists() and any(destino.iterdir())
 
+    # Workaround #5: si el MCP fallo pero el scaffold existe, el error tipico es
+    # que corrio `gradlew.bat generateFromWsdl` sin prefijo `.\\` (bug Windows).
+    # Completamos el paso por nuestra cuenta con path absoluto al wrapper.
+    recovered = False
+    if generated_ok and mcp_error_msg and "gradlew" in mcp_error_msg.lower():
+        console.print("\n[bold]Completando paso faltante del MCP (gradlew generateFromWsdl)...[/bold]")
+        ok, err = _run_gradlew_wsdl_import(proj_dir, ws)
+        if ok:
+            console.print("  [green]OK[/green] clases JAXB generadas en build/generated/")
+            recovered = True
+            mcp_error_msg = None
+        else:
+            console.print(f"  [yellow]WARN[/yellow] gradlew fallo: {err}")
+
     if generated_ok and mcp_error_msg:
-        # Exito parcial: scaffold existe pero el MCP reporto error (tipicamente
-        # el paso final de `gradlew generateFromWsdl` fallo)
+        # Exito parcial: scaffold existe pero el error no pude recuperar
         console.print()
         def _safe(s: str) -> str:
             return s.encode("ascii", errors="replace").decode("ascii")
@@ -321,23 +653,24 @@ def generate(
         console.print(
             Panel(
                 f"Scaffold generado en [cyan]{proj_dir}[/cyan]\n"
-                f"pero el MCP reporto un error en el paso final:\n\n"
+                f"pero el MCP reporto un error y el auto-recovery fallo:\n\n"
                 f"[dim]{short_err}[/dim]\n\n"
-                f"Esto suele pasar cuando el MCP intenta correr `gradlew generateFromWsdl`\n"
-                f"pero el wrapper todavia no es ejecutable.\n\n"
                 f"Completa el paso manualmente:\n"
                 f"  cd {proj_dir}\n"
-                f"  ./gradlew generateFromWsdl",
+                f"  gradlew.bat generateFromWsdl  # Windows\n"
+                f"  ./gradlew generateFromWsdl     # macOS/Linux",
                 border_style="yellow",
                 title="Exito parcial",
             )
         )
     elif generated_ok:
+        recovery_line = "  0. (Auto) Clases JAXB generadas ya por gradlew generateFromWsdl.\n" if recovered else ""
         console.print()
         console.print(
             Panel(
                 f"Arquetipo generado en [cyan]{proj_dir}[/cyan]\n\n"
                 f"Proximos pasos:\n"
+                f"{recovery_line}"
                 f"  1. Revisa `{proj_dir.name}/build.gradle` y aplica workarounds conocidos.\n"
                 f"  2. Corre `capamedia init --here` dentro de destino/{project_name}/ para sumar .claude/ y CLAUDE.md.\n"
                 f"  3. Abri en Claude Code y corre `/migrate` en el chat.",

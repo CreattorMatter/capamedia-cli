@@ -263,7 +263,29 @@ def install_toolchain(
     else:
         console.print("\n[bold green]Toolchain instalado correctamente.[/bold green]")
 
+    # Mostrar estado del cache del MCP Fabrics
+    console.print()
+    _check_mcp_fabrics_cache()
+
     _print_manual_steps()
+
+
+def _check_mcp_fabrics_cache() -> None:
+    """Informa si el MCP Fabrics ya esta cacheado en npx.
+
+    No intenta descargarlo (requiere .npmrc valido que quiza no lo este).
+    Solo verifica si existe el cache. El usuario puede forzar el cache despues
+    con `capamedia fabrics setup --refresh-npmrc` + `npx @pichincha/fabrics-project --version`.
+    """
+    from capamedia_cli.core.mcp_launcher import _find_cached_mcp
+
+    cached = _find_cached_mcp()
+    if cached:
+        console.print(f"[green]MCP Fabrics cacheado:[/green] {cached}")
+    else:
+        console.print(
+            "[yellow]MCP Fabrics no cacheado[/yellow] (el primer `capamedia fabrics generate` lo bajara)"
+        )
 
 
 def _print_manual_steps() -> None:

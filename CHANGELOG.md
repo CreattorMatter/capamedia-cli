@@ -4,6 +4,78 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.2.4] - 2026-04-20
+
+### Fixed - 4 mitigaciones de descubrimientos del día anterior
+
+Todas las mitigaciones se integraron al flujo de `fabrics generate`. Ahora el
+comando **termina el proyecto end-to-end** con clases JAXB generadas.
+
+**Fix #5 — Workaround para bug del MCP en Windows** (el MCP corre `gradlew.bat`
+sin prefijo `.\\` y falla). Mi CLI ahora detecta el error y corre el paso por
+su cuenta con:
+- Path absoluto al wrapper (no depende del exec resolution)
+- `shell=True` en Windows, `chmod 0o755` en Unix
+- `--no-daemon` para evitar cache sucio de daemon previo
+- Clean previo de `.gradle/` y `build/` del proyecto
+
+**Fix adicional descubierto mientras probaba el #5:**
+- **schemaLocation externos** (`../TCSProcesarServicioSOAP/GenericSOAP.xsd`)
+  pre-procesados automaticamente: mi CLI trae un `GenericSOAP.xsd` embebbed
+  (`data/resources/GenericSOAP.xsd`) y lo copia al destino + arregla el
+  schemaLocation para apuntar local.
+- **Auth Azure Artifacts al gradlew**: inyecto `ARTIFACT_USERNAME`/
+  `ARTIFACT_TOKEN` desde `.mcp.json` al env del subprocess (gradlew necesita
+  bajar plugins del feed privado del banco).
+- **Java 21 forzado** en `gradle.properties` (`org.gradle.java.home=...` con
+  forward slashes). Gradle 8.x no soporta Java 25+, pero si el PATH tiene Java
+  25 por default, hay que sobrescribir.
+
+**Fix #4 — Validacion de schema MCP en runtime.** Antes de invocar el tool:
+- Llamamos `tools/list` y buscamos `create_project_with_wsdl`
+- Comparamos `required` del schema contra `KNOWN_MCP_PARAMS` del CLI
+- Si hay params required desconocidos, abortamos con guia al user
+- Si hay params opcionales nuevos, warning (no bloqueante)
+- Removemos del payload params que el MCP no conoce (tolerancia)
+
+**Fix #3 — `capamedia fabrics setup --refresh-npmrc`**. Actualiza `~/.npmrc`
+con el token base64-encoded para que `npx @pichincha/fabrics-project` pueda
+bajar el paquete. Preserva lineas no-relacionadas con el feed. `capamedia
+install` ahora tambien reporta si el MCP esta cacheado.
+
+**Fix #1 — Doc de inconsistencia de naming**. Nota en `mcp_launcher.py`:
+npm package = `@pichincha/fabrics-project`; MCP server interno =
+`azure-project-manager`; tool = `create_project_with_wsdl`. Los tres son el
+mismo componente.
+
+### Added
+- `GenericSOAP.xsd` embebbed como recurso del CLI en `data/resources/`
+- Funcion `_find_java21_home()` para localizar Java 21 en Windows/macOS/Linux
+- Funcion `_set_gradle_java_home()` que escribe `org.gradle.java.home` con
+  forward slashes (evita issues de escape de backslashes en `.properties`)
+- Funcion `_artifact_env_from_mcp()` que lee `ARTIFACT_TOKEN` del `.mcp.json`
+  y lo inyecta al subprocess env
+- Funcion `_fix_schema_locations()` que pre-procesa WSDL/XSDs con paths
+  relativos externos
+- Constante `KNOWN_MCP_PARAMS` con los 9 params que el CLI sabe proveer
+
+### Testing end-to-end sobre `wsclientes0007`
+
+Probado con workspace limpio `007b-test/`:
+- `capamedia fabrics generate wsclientes0007 --namespace tnd`
+- **MCP conectado** desde cache npx (sin depender de `.npmrc` fresco)
+- **Scaffold creado** por el MCP (build.gradle, Dockerfile, Helm, etc.)
+- **2 fixes de schemaLocation** aplicados automaticamente
+- **Java 21 forzado** via gradle.properties (evita bug de Java 25 + Gradle 8)
+- **`gradlew generateFromWsdl`** corre y termina OK
+- **19 clases JAXB** generadas en `build/generated/sources/wsdl/`
+- **BUILD SUCCESSFUL in 8s**
+
+Flujo completo: del legacy clonado al scaffold con clases Java generadas, en
+un solo comando, sin intervencion manual.
+
+---
+
 ## [0.2.3] - 2026-04-20
 
 ### Added - `fabrics generate` ahora invoca el MCP y genera la carpeta destino
