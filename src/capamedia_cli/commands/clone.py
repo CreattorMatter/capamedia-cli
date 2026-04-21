@@ -115,8 +115,26 @@ def _write_complexity_report(
     service_name: str,
     workspace: Path,
     tx_results: list[TxCloneResult],
+    legacy_root: Path | None = None,
 ) -> Path:
     """Write COMPLEXITY_<service>.md with the deterministic analysis."""
+    from capamedia_cli.core.caveats import (
+        Caveat,
+        caveats_summary,
+        caveats_to_markdown_table,
+        detect_external_endpoints,
+        detect_non_bancs_caveats,
+        detect_orq_dependencies,
+        detect_ump_caveats,
+    )
+
+    # Detectar caveats
+    caveats: list[Caveat] = []
+    caveats.extend(detect_ump_caveats(analysis))
+    if legacy_root:
+        caveats.extend(detect_non_bancs_caveats(legacy_root))
+        caveats.extend(detect_external_endpoints(legacy_root))
+    orq_deps, is_orq = detect_orq_dependencies(legacy_root or workspace, service_name)
     dest = workspace / f"COMPLEXITY_{service_name}.md"
     lines: list[str] = []
     lines.append(f"# Complexity Report: {service_name}\n")
@@ -186,6 +204,28 @@ def _write_complexity_report(
         lines.append("")
         for w in analysis.warnings:
             lines.append(f"- {w}")
+        lines.append("")
+
+    # Seccion de caveats (v0.3.1)
+    lines.append("## Caveats detectados (requieren intervencion manual)")
+    lines.append("")
+    summary = caveats_summary(caveats)
+    if summary:
+        for kind, count in sorted(summary.items()):
+            lines.append(f"- **{kind}:** {count}")
+        lines.append("")
+        lines.append(caveats_to_markdown_table(caveats))
+    else:
+        lines.append("_(ninguno)_\n")
+
+    # Seccion de dependencias ORQ (v0.3.1)
+    if is_orq:
+        lines.append("## Dependencias ORQ")
+        lines.append("")
+        lines.append(f"Este servicio es un **orquestador**. Delega a {len(orq_deps)} servicio(s):")
+        lines.append("")
+        for d in orq_deps:
+            lines.append(f"- {d} (verificar si esta migrado antes de poner el ORQ en produccion)")
         lines.append("")
 
     lines.append("## Proximo paso")
@@ -302,7 +342,7 @@ def clone_service(
         console.print("\n[dim]5. No hay TX codes extraidos para clonar[/dim]")
 
     # --- Step 6: Report ---
-    report = _write_complexity_report(analysis, service_name, ws, tx_results)
+    report = _write_complexity_report(analysis, service_name, ws, tx_results, legacy_root=legacy_dest)
     console.print(f"\n[bold]6. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
 
     # --- Final summary table ---

@@ -211,20 +211,29 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("1.2", "Block 1", "Domain sin imports framework", "pass"))
 
-    # 1.3 - Ports son abstract classes (NO interfaces)
+    # 1.3 - Ports son interfaces (NUNCA abstract classes)
     for app_dir in src_java.rglob("application"):
         if not app_dir.is_dir():
             continue
-        # Buscar interfaces con nombre *Port (deberian ser abstract class)
-        iface_ports: list[str] = []
+        abstract_ports: list[str] = []
         for f in app_dir.rglob("port/**/*.java"):
             text = _read_or_empty(f)
-            if re.search(r"public interface \w+Port\b", text):
-                iface_ports.append(f.name)
-        if iface_ports:
-            results.append(CheckResult("1.3", "Block 1", "Ports son abstract classes", "fail", severity="high", detail=f"{len(iface_ports)} port(s) como interface: {', '.join(iface_ports[:3])}", suggested_fix="Convertir a `public abstract class`"))
+            if re.search(r"public abstract class \w+Port\b", text):
+                abstract_ports.append(f.name)
+        if abstract_ports:
+            results.append(
+                CheckResult(
+                    "1.3",
+                    "Block 1",
+                    "Ports son interfaces",
+                    "fail",
+                    severity="high",
+                    detail=f"{len(abstract_ports)} port(s) como abstract class: {', '.join(abstract_ports[:3])}",
+                    suggested_fix="Convertir a `public interface`",
+                )
+            )
         else:
-            results.append(CheckResult("1.3", "Block 1", "Ports son abstract classes", "pass"))
+            results.append(CheckResult("1.3", "Block 1", "Ports son interfaces", "pass"))
         break
 
     # 1.4 - UN solo output port Bancs

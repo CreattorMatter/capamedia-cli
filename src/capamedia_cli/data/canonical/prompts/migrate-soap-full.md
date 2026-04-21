@@ -186,12 +186,20 @@ The application layer only knows about ports (interfaces) and domain models. Nev
 - If the service has a database (Oracle/JPA) -> add HikariCP + JPA (Rule 4.1). Works natively on Spring MVC.
 - If the service has no database -> skip Rule 4.1, keep only the BANCS Core Adapter output.
 
-**Rule 4.1 -- DB access (Oracle + HikariCP + JPA) — when `DB_USAGE: YES`:**
+**Rule 4.1 -- DB access (HikariCP + JPA) — when `DB_USAGE: YES` AND legacy is WAS:**
 
-This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`. Skip otherwise.
+This block applies ONLY when:
+1. `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`, AND
+2. The legacy source is **WAS** (NOT IIB/BUS — IIB/BUS services do not have DB).
+
+Skip otherwise.
 
 - **Connection pool:** **HikariCP** (Spring Boot default, team standard — no custom configuration needed beyond properties)
-- **Persistence:** Spring Data JPA (`spring-boot-starter-data-jpa`) + Oracle JDBC driver (`com.oracle.database.jdbc:ojdbc11`)
+- **Persistence:** Spring Data JPA (`spring-boot-starter-data-jpa`)
+- **DB engines supported:** **Oracle** (most common) AND **SQL Server** (less common but valid).
+  - **Oracle:** driver `com.oracle.database.jdbc:ojdbc11`, dialect `OracleDialect`
+  - **SQL Server:** driver `com.microsoft.sqlserver:mssql-jdbc`, dialect `SQLServerDialect`
+  - **The legacy code reveals which one** — inspect `persistence.xml`, `ibm-web-bnd.xml`, JNDI URLs, or driver imports.
 - **Web stack:** `spring-boot-starter-web` (Tomcat/Undertow MVC) — NEVER `spring-boot-starter-webflux`
 - **Layering (hexagonal):**
   - `infrastructure/output/adapter/persistence/` — `@Repository` interfaces extending `JpaRepository`
@@ -199,11 +207,11 @@ This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`
   - `infrastructure/persistence/mapper/` — domain <-> entity mappers (MapStruct or manual)
   - The output port in `application/output/port/` stays framework-agnostic (no JPA imports)
 - **Transactions:** `@Transactional` at the application service boundary (`application/service/*ServiceImpl`), NEVER on adapters or repositories
-- **Configuration (`application.yml`):**
+- **Configuration (`application.yml`) — Oracle:**
   ```yaml
   spring:
     datasource:
-      url: ${CCC_DB_URL}
+      url: ${CCC_DB_URL}                     # ej: jdbc:oracle:thin:@host:1521/SID
       username: ${CCC_DB_USER}
       password: ${CCC_DB_PASSWORD}
       driver-class-name: oracle.jdbc.OracleDriver
@@ -213,6 +221,24 @@ This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`
         connection-timeout: ${CCC_DB_CONN_TIMEOUT:30000}
         idle-timeout: ${CCC_DB_IDLE_TIMEOUT:600000}
         max-lifetime: ${CCC_DB_MAX_LIFETIME:1800000}
+  ```
+
+- **Configuration (`application.yml`) — SQL Server:**
+  ```yaml
+  spring:
+    datasource:
+      url: ${CCC_DB_URL}                     # ej: jdbc:sqlserver://host:1433;databaseName=DB
+      username: ${CCC_DB_USER}
+      password: ${CCC_DB_PASSWORD}
+      driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+      hikari:
+        maximum-pool-size: ${CCC_DB_POOL_MAX:10}
+        minimum-idle: ${CCC_DB_POOL_MIN:2}
+        connection-timeout: ${CCC_DB_CONN_TIMEOUT:30000}
+        idle-timeout: ${CCC_DB_IDLE_TIMEOUT:600000}
+        max-lifetime: ${CCC_DB_MAX_LIFETIME:1800000}
+    jpa:
+      database-platform: org.hibernate.dialect.SQLServerDialect
         pool-name: ${spring.application.name}-pool
     jpa:
       database-platform: org.hibernate.dialect.OracleDialect
@@ -229,14 +255,14 @@ This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`
 - **Repository pattern:**
   ```java
   // application/output/port/CustomerOutputPort.java (framework-agnostic)
-  public abstract class CustomerOutputPort {
-      public abstract Optional<Customer> findById(String id);
+  public interface CustomerOutputPort {
+      Optional<Customer> findById(String id);
   }
 
   // infrastructure/output/adapter/persistence/CustomerJpaAdapter.java
   @Component
   @RequiredArgsConstructor
-  public class CustomerJpaAdapter extends CustomerOutputPort {
+  public class CustomerJpaAdapter implements CustomerOutputPort {
       private final CustomerJpaRepository repo;
       private final CustomerEntityMapper mapper;
       @Override public Optional<Customer> findById(String id) {

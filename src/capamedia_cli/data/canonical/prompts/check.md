@@ -82,7 +82,7 @@ Todo `schemaLocation` del WSDL debe existir en `src/main/resources/`. Si falta �
 
 Los bloques están documentados en el prompt canónico `prompts.checklist-rules` (espejo del `post-migracion/03-checklist.md`):
 
-- **BLOQUE 1** — Arquitectura hexagonal (capas, domain sin framework, puertos abstract class, único port Bancs)
+- **BLOQUE 1** — Arquitectura hexagonal (capas, domain sin framework, puertos como **interfaces** —NUNCA abstract classes—, único port Bancs)
 - **BLOQUE 2** — Logging y tracing (`@BpTraceable`, `@BpLogger`, sin `org.slf4j`, log levels correctos)
 - **BLOQUE 3** — Naming (camelCase methods, PascalCase `@PayloadRoot.localPart`)
 - **BLOQUE 4** — Validaciones (HeaderRequestValidator, patterns externalizados via `@ConfigurationProperties`)

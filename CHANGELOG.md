@@ -4,6 +4,57 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.3.1] - 2026-04-20
+
+### Changed - Regla canonica: ports son **interfaces** (no abstract classes)
+
+Confirmado por usuario: la regla oficial es ports como **interface**. Cambios:
+
+- **Check 1.3 del checklist invertido**: ahora FAIL si encuentra `public abstract class .*Port` (antes era al reves).
+- **`prompts/migrate-soap-full.md`**: ejemplo de `CustomerOutputPort` cambiado a `interface` + adapter `implements` en vez de `extends`.
+- **`agents/migrador.md` + `agents/validador-hex.md`**: actualizados para reflejar la regla.
+- **`prompts/check.md`**: descripcion del BLOQUE 1 actualizada.
+- **wsclientes0007 migrado** (007-test/destino): ports y service/adapter convertidos a interface/implements.
+
+### Added - SQL Server soportado en HikariCP/JPA
+
+`prompts/migrate-soap-full.md` Rule 4.1 ahora documenta los **dos engines de DB** soportados por el banco:
+- **Oracle**: driver `com.oracle.database.jdbc:ojdbc11`, dialect `OracleDialect`
+- **SQL Server**: driver `com.microsoft.sqlserver:mssql-jdbc`, dialect `SQLServerDialect`
+
+Aclaracion: HikariCP aplica solo cuando legacy es **WAS** con DB. IIB/BUS no usan DB.
+
+### Added - Caveats honestos en COMPLEXITY_*.md
+
+Nuevo modulo `core/caveats.py` que detecta situaciones que requieren intervencion manual:
+
+- **`ump_not_cloned`** — UMP referenciado en ESQL pero el repo no esta en `tpl-bus-omnicanal`
+- **`tx_not_extracted`** — UMP clonado pero el TX vive en config externa (no `'XXXXXX'` literal)
+- **`non_bancs_call`** — invocaciones SOAP non-BANCS detectadas (label `et_soap`)
+- **`external_endpoint`** — URLs HTTP externas al banco (Equifax, SRI, providers)
+- **`orq_dep_missing`** — para ORQ: servicios delegados que aun no estan migrados
+
+Cada caveat tiene `kind`, `target`, `detail`, `suggested_action`, `evidence`.
+
+`COMPLEXITY_<svc>.md` ahora incluye:
+- Seccion **"Caveats detectados"** con summary por tipo + tabla detallada
+- Seccion **"Dependencias ORQ"** (solo si el servicio es orquestador) listando los servicios delegados
+
+### Added - Soporte `.xlsx` y `.csv` en `batch --from`
+
+`capamedia batch <cmd> --from services.xlsx --sheet "Servicios"` ahora funciona ademas
+de `.txt` y `.csv`. Detecta header automatico ("servicio", "service", "name", "nombre").
+
+Dependencia nueva: `openpyxl>=3.1.0`.
+
+### Testing
+
+- **44/44 tests PASS** (+9 nuevos en `test_caveats.py`)
+- wsclientes0007 reverificado: ports convertidos a interface, build verde, `READY_WITH_FOLLOW_UP`
+- caveats funcional sobre wsclientes0007: detecta el `tx_not_extracted` de UMPClientes0028
+
+---
+
 ## [0.3.0] - 2026-04-20
 
 ### Added - Batch mode + BLOQUE 15 del checklist

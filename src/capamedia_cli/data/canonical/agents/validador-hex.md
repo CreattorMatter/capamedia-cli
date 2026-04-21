@@ -18,9 +18,9 @@ grep -r "import.*infrastructure" src/main/java/**/application/
 # domain/ no importa Spring
 grep -r "import org.springframework" src/main/java/**/domain/
 
-# Ports son abstract classes
-grep -c "public abstract class" src/main/java/**/port/**/*.java
-grep -c "public interface" src/main/java/**/port/**/*.java
+# Ports son interfaces (NUNCA abstract classes)
+grep -c "public abstract class" src/main/java/**/port/**/*.java  # esperado: 0
+grep -c "public interface" src/main/java/**/port/**/*.java  # esperado: >0
 ```
 
 ### Clean Code

@@ -1,6 +1,6 @@
 [project]
 name = "capamedia-cli"
-version = "0.3.0"
+version = "0.3.1"
 description = "CLI multi-harness para la migración de servicios legacy (IIB/WAS/ORQ) a Java 21 + Spring Boot hexagonal OLA1 en Banco Pichincha"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,7 @@ dependencies = [
     "tomli>=2.0.1",
     "tomli-w>=1.0.0",
     "pyperclip>=1.9.0",
+    "openpyxl>=3.1.0",
 ]
 
 [project.optional-dependencies]

@@ -47,19 +47,73 @@ class BatchRow:
     fields: dict[str, str]
 
 
-def _read_services_file(path: Path) -> list[str]:
-    """Lee un txt con un servicio por linea. Ignora comentarios (#) y vacias."""
+def _read_services_file(path: Path, sheet: str | None = None) -> list[str]:
+    """Lee servicios desde txt, csv o xlsx.
+
+    - .txt: una linea por servicio. Comentarios con #.
+    - .csv: primera columna es el servicio. Header opcional ("servicio" en row 1).
+    - .xlsx: hoja `sheet` (default primera). Primera columna = servicio.
+      Si la primera celda es literal "servicio", se asume header.
+    """
     if not path.exists():
         raise typer.BadParameter(f"no existe: {path}")
+
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        return _read_xlsx_services(path, sheet)
+    if suffix == ".csv":
+        return _read_csv_services(path)
+
+    # Default: .txt
     names: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        # Permitir "wsclientes0007" o "wsclientes0007 # comentario"
         name = line.split("#", 1)[0].strip()
         if name:
             names.append(name)
+    return names
+
+
+def _read_csv_services(path: Path) -> list[str]:
+    names: list[str] = []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        for i, row in enumerate(reader):
+            if not row or not row[0].strip():
+                continue
+            cell = row[0].strip()
+            if i == 0 and cell.lower() in ("servicio", "service", "name", "nombre"):
+                continue  # header
+            if cell.startswith("#"):
+                continue
+            names.append(cell)
+    return names
+
+
+def _read_xlsx_services(path: Path, sheet: str | None) -> list[str]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:
+        raise typer.BadParameter(
+            "openpyxl no disponible. Instalar con: pip install openpyxl"
+        ) from e
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
+    names: list[str] = []
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if not row or row[0] is None:
+            continue
+        cell = str(row[0]).strip()
+        if not cell:
+            continue
+        if i == 0 and cell.lower() in ("servicio", "service", "name", "nombre"):
+            continue  # header
+        if cell.startswith("#"):
+            continue
+        names.append(cell)
     return names
 
 
@@ -161,8 +215,12 @@ def _ensure_legacy_cloned(service: str, root: Path, shallow: bool) -> tuple[bool
 def batch_complexity(
     file: Annotated[
         Path,
-        typer.Option("--from", "-f", help="Archivo txt con un servicio por linea"),
+        typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con un servicio por linea"),
     ],
+    sheet: Annotated[
+        Optional[str],
+        typer.Option("--sheet", help="Hoja del .xlsx (default: primera)"),
+    ] = None,
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
     root: Annotated[
         Optional[Path],
@@ -174,7 +232,7 @@ def batch_complexity(
     """Analiza complejidad de N servicios en paralelo."""
     from capamedia_cli.core.legacy_analyzer import analyze_legacy
 
-    services = _read_services_file(file)
+    services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
 
     console.print(
@@ -236,7 +294,12 @@ def batch_complexity(
 
 @app.command("clone")
 def batch_clone(
-    file: Annotated[Path, typer.Option("--from", "-f", help="Archivo txt con servicios")],
+    file: Annotated[
+        Path, typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios")
+    ],
+    sheet: Annotated[
+        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+    ] = None,
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
     root: Annotated[Optional[Path], typer.Option("--root")] = None,
     shallow: Annotated[bool, typer.Option("--shallow")] = False,
@@ -244,7 +307,7 @@ def batch_clone(
     """Clone masivo (legacy + UMPs + TX) en paralelo."""
     from capamedia_cli.commands.clone import clone_service
 
-    services = _read_services_file(file)
+    services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
     console.print(
         Panel.fit(
@@ -380,7 +443,12 @@ def batch_check(
 
 @app.command("init")
 def batch_init(
-    file: Annotated[Path, typer.Option("--from", "-f", help="Archivo txt con servicios")],
+    file: Annotated[
+        Path, typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios")
+    ],
+    sheet: Annotated[
+        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+    ] = None,
     ai: Annotated[str, typer.Option("--ai", help="Harness(es) CSV o 'all'")] = "claude",
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
     root: Annotated[Optional[Path], typer.Option("--root")] = None,
@@ -388,7 +456,7 @@ def batch_init(
     """Inicializa N workspaces con .claude/ + CLAUDE.md + .mcp.json."""
     from capamedia_cli.commands.init import init_project
 
-    services = _read_services_file(file)
+    services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
     console.print(
         Panel.fit(
