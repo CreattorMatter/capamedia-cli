@@ -80,11 +80,18 @@ def _candidate_folders(capa_media_root: Path, num: str, suffix_hint: str) -> lis
     return candidates
 
 
-def find_local_legacy(service: str, capa_media_root: Path) -> Path | None:
+def find_local_legacy(
+    service: str, capa_media_root: Path, prefer_original: bool = True
+) -> Path | None:
     """Busca el legacy del servicio en la estructura local de CapaMedia/.
 
     Retorna el path al directorio que actua como `legacy_root` para el analisis,
     o None si no encuentra nada.
+
+    Si `prefer_original=True` (default), los `_variants/` (versiones migradas)
+    se ignoran — solo se retorna legacy original. Esto fuerza al caller a clonar
+    de Azure si el original no esta local. Util para que `batch complexity` no
+    tome un variant migrado como si fuera el legacy.
     """
     prefix, num = _split_service(service)
     if not num:
@@ -110,12 +117,27 @@ def find_local_legacy(service: str, capa_media_root: Path) -> Path | None:
             if single.exists() and single.is_dir():
                 return single
 
-        # Estrategia 3: legacy/_variants/*<svc>* (variant migrado, ultimo recurso)
-        variants_dir = folder / "legacy" / "_variants"
-        if variants_dir.exists():
-            for variant in variants_dir.iterdir():
-                if variant.is_dir() and svc_lower in variant.name.lower():
-                    return variant
+            # Estrategia 2b (NUEVA v0.3.3): legacy/_repo/ con archivos directos
+            # (ej. WSReglas0010.wsdl, com/, pom.xml). Detectar indicios de IIB/WAS legacy.
+            has_indicators = (
+                any(repo_dir.glob("*.wsdl"))
+                or any(repo_dir.glob("*.esql"))
+                or (repo_dir / "pom.xml").exists()
+                or (repo_dir / "com").exists()
+                or (repo_dir / "IBMdefined").exists()
+                or any(repo_dir.glob("*.msgflow"))
+                or any(repo_dir.rglob("**/web.xml"))
+            )
+            if has_indicators:
+                return repo_dir
+
+        # Estrategia 3: legacy/_variants/*<svc>* (variant migrado, solo si prefer_original=False)
+        if not prefer_original:
+            variants_dir = folder / "legacy" / "_variants"
+            if variants_dir.exists():
+                for variant in variants_dir.iterdir():
+                    if variant.is_dir() and svc_lower in variant.name.lower():
+                        return variant
 
         # Estrategia 4: legacy/sqb-msa-<svc>  (clone CLI standar)
         candidate = folder / "legacy" / f"sqb-msa-{svc_lower}"

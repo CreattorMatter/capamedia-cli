@@ -4,6 +4,65 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.3.3] - 2026-04-20
+
+### Added - Multi-project Azure fallback + estrategia `_repo/ directo`
+
+**Multi-project Azure DevOps con multi-pattern de naming:**
+
+Antes el CLI solo conocia `tpl-bus-omnicanal`. Investigando en Azure se descubrieron 4 proyectos con patrones distintos:
+
+| Project key | Proyecto Azure | Patrones de repo |
+|---|---|---|
+| `bus` | `tpl-bus-omnicanal` | `sqb-msa-<svc>` (IIB + UMPs + ORQs) |
+| `was` | `tpl-integration-services-was` | `ws-<svc>-was`, `ms-<svc>-was` (WAS legacy) |
+| `config` | `tpl-integrationbus-config` | `sqb-cfg-<TX>-TX`, `sqb-cfg-*-config` |
+| `middleware` | `tpl-middleware` | `tnd-msa-sp-*`, `tia-msa-sp-*`, `tpr-msa-sp-*`, `csg-msa-sp-*` (gold/migrados) |
+
+Nueva funcion `_resolve_azure_repo(service, dest, shallow)` en `clone.py` que itera sobre `AZURE_FALLBACK_PATTERNS`:
+
+```python
+AZURE_FALLBACK_PATTERNS = [
+    ("bus", "sqb-msa-{svc}"),
+    ("was", "ws-{svc}-was"),
+    ("was", "ms-{svc}-was"),
+    ("middleware", "tnd-msa-sp-{svc}"),
+    ("middleware", "tia-msa-sp-{svc}"),
+    ("middleware", "tpr-msa-sp-{svc}"),
+    ("middleware", "csg-msa-sp-{svc}"),
+]
+```
+
+Prueba cada combinacion hasta encontrar una que funcione. Reporta cual proyecto/patron se uso (ej. `azure: was/ws-wsclientes0091-was`).
+
+**Estrategia 2b (NUEVA) en `local_resolver.py`: `_repo/` directo:**
+
+Antes el resolver solo manejaba:
+1. `_repo/<svc>-aplicacion` + `-infraestructura` (WAS)
+2. `_repo/<svc>` (single subcarpeta)
+3. `_variants/`
+4. `sqb-msa-<svc>`
+
+Ahora tambien detecta:
+
+**2b. `_repo/` con archivos directos** (caso WSReglas0010): si `_repo/` tiene WSDL/ESQL/pom.xml/com/IBMdefined/msgflow directos sin subcarpeta, lo retorna.
+
+**Flag `prefer_original=True` (default):** los `_variants/` (versiones migradas) ya NO se retornan por defecto — el caller espera el legacy original. Esto fuerza a clonar de Azure si solo hay variant local. Util para que `batch complexity` no tome un variant migrado como fuente de analisis.
+
+### Testing - 26 servicios reales
+
+Re-corrida del batch sobre los 26 servicios:
+- **12 ORQ OK** (Azure tpl-bus-omnicanal)
+- **11 WAS OK** (local con `-aplicacion`/`-infraestructura`)
+- **2 IIB OK** (WSReglas0010 ahora detectado via _repo/ directo + WSTecnicos0006 desde Azure)
+- **1 caso edge** (WSClientes0091): clonado correctamente desde `tpl-integration-services-was/ws-wsclientes0091-was` pero el repo Azure esta vacio (sin codigo, solo `.git/`). Reportado correctamente como UNKNOWN.
+
+**Resultado:** 25/26 con tipo correcto + 1 caso edge legitimo. Cobertura efectiva ~100%.
+
+**Tests:** 63/63 PASS (+2 nuevos en `test_local_resolver.py` para estrategia 2b).
+
+---
+
 ## [0.3.2] - 2026-04-20
 
 ### Added - Local resolver + Domain mapping multi-adapter

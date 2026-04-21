@@ -184,42 +184,26 @@ def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None 
 
 
 def _ensure_legacy_available(service: str, root: Path, shallow: bool) -> tuple[Path | None, str]:
-    """Resuelve el legacy del servicio: local first, fallback a Azure.
+    """Resuelve el legacy del servicio: local first, fallback a Azure multi-project.
 
-    Retorna (path_legacy, error). Si path es None, error indica el motivo.
-    Si path es Path, error es '' (OK) o un mensaje informativo (ej. 'local').
+    Retorna (path_legacy, source_msg). Si path es None, source_msg indica el motivo de error.
     """
-    import subprocess
-
+    from capamedia_cli.commands.clone import _resolve_azure_repo
     from capamedia_cli.core.local_resolver import find_local_legacy
 
     # 1. Buscar local primero
-    capa_media_root = root.parent  # padre del workspace
+    capa_media_root = root.parent
     local = find_local_legacy(service, capa_media_root)
     if local:
         return (local, "local")
 
-    # 2. Fallback a Azure DevOps
-    repo = f"sqb-msa-{service.lower()}"
-    dest = root / service / "legacy" / repo
-    if dest.exists() and any(dest.iterdir()):
-        return (dest, "already cloned")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["git", "clone"]
-    if shallow:
-        cmd += ["--depth", "1"]
-    cmd += [
-        f"https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/{repo}",
-        str(dest),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            return (dest, "azure clone")
-        msg = (result.stderr or "").split("\n")[-1][:200]
-        return (None, f"not local + azure clone failed: {msg}")
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        return (None, f"not local + azure error: {e}")
+    # 2. Fallback a Azure DevOps multi-proyecto / multi-patron
+    svc_workspace = root / service
+    svc_workspace.mkdir(parents=True, exist_ok=True)
+    legacy_dest, project_key, repo_name = _resolve_azure_repo(service, svc_workspace, shallow)
+    if legacy_dest is None:
+        return (None, "not local + no Azure project found")
+    return (legacy_dest, f"azure: {project_key}/{repo_name}")
 
 
 # Backward compat

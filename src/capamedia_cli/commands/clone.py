@@ -37,8 +37,10 @@ AZURE_ORG = "BancoPichinchaEC"
 
 # Mapeo de tipo de repo -> proyecto Azure DevOps
 AZURE_PROJECTS = {
-    "bus": "tpl-bus-omnicanal",            # legacy + UMPs (IIB)
-    "config": "tpl-integrationbus-config",  # TX repos
+    "bus": "tpl-bus-omnicanal",                # legacy IIB + UMPs + ORQs
+    "was": "tpl-integration-services-was",      # legacy WAS (ws-<svc>-was, ms-<svc>-was)
+    "config": "tpl-integrationbus-config",      # TX repos + catalogos
+    "middleware": "tpl-middleware",             # gold/migrados (tnd/tia/tpr/csg-msa-sp-*)
 }
 
 
@@ -46,6 +48,35 @@ def _azure_url(project_key: str, repo_name: str) -> str:
     """Build the Azure DevOps clone URL for a given project key."""
     project = AZURE_PROJECTS[project_key]
     return f"https://dev.azure.com/{AZURE_ORG}/{project}/_git/{repo_name}"
+
+
+# Combinaciones (proyecto, patron) probadas en orden cuando un servicio no esta local.
+# Patron usa {svc} como placeholder para el nombre lowercase del servicio.
+AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
+    ("bus", "sqb-msa-{svc}"),                # IIB tipico
+    ("was", "ws-{svc}-was"),                 # WAS tipico
+    ("was", "ms-{svc}-was"),                 # WAS variante "ms"
+    ("middleware", "tnd-msa-sp-{svc}"),     # gold REST/SOAP migrado
+    ("middleware", "tia-msa-sp-{svc}"),     # gold variante tia
+    ("middleware", "tpr-msa-sp-{svc}"),     # gold variante tpr
+    ("middleware", "csg-msa-sp-{svc}"),     # gold variante csg
+]
+
+
+def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tuple[Path | None, str, str]:
+    """Intenta clonar el servicio probando todos los patrones Azure conocidos.
+
+    Returns:
+      (path_clonado, project_key, repo_name) o (None, "", "") si nada funciona.
+    """
+    svc = service_name.lower()
+    for project_key, pattern in AZURE_FALLBACK_PATTERNS:
+        repo_name = pattern.format(svc=svc)
+        dest = dest_root / "legacy" / repo_name
+        ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+        if ok:
+            return (dest, project_key, repo_name)
+    return (None, "", "")
 
 
 @dataclass
@@ -283,18 +314,16 @@ def clone_service(
             f"\n[bold]1. Legacy detectado LOCALMENTE[/bold] (no requiere clone): {legacy_dest}"
         )
     else:
-        legacy_repo = _resolve_legacy_repo_name(service_name)
-        legacy_dest = ws / "legacy" / legacy_repo
-        console.print(f"\n[bold]1. Legacy no esta local. Clonando de Azure[/bold] {legacy_repo}...")
-        ok, err = _git_clone(legacy_repo, legacy_dest, project_key="bus", shallow=shallow)
-        if not ok:
-            console.print(f"[red]FAIL[/red] clone legacy: {err}")
+        console.print(f"\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
+        legacy_dest, project_key, repo_name = _resolve_azure_repo(service_name, ws, shallow)
+        if legacy_dest is None:
+            console.print(f"[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
             console.print(
-                "[yellow]Tip:[/yellow] corre 'git clone' manual una vez para cachear el PAT via GCM, "
-                "luego reintenta. O verifica que el servicio exista en CapaMedia/<NNNN>*/legacy/_repo/."
+                "[yellow]Tip:[/yellow] verifica que el servicio exista o agrega un nuevo "
+                "patron a AZURE_FALLBACK_PATTERNS en clone.py."
             )
             raise typer.Exit(1)
-        console.print(f"[green]OK[/green] legacy clonado en {legacy_dest}")
+        console.print(f"[green]OK[/green] {project_key}/{repo_name} clonado en {legacy_dest}")
 
     # --- Step 2: Detect UMPs ---
     console.print("\n[bold]2. Detectando UMPs referenciados en ESQL/msgflow...[/bold]")
