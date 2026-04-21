@@ -35,6 +35,10 @@ class CheckContext:
     project_type: str = ""  # "rest" | "soap" (detectado en BLOQUE 0)
     operation_count: int = 0
     has_database: bool = False
+    # v0.3.2: lista de dominios distintos invocados via UMPs.
+    # Si esta poblado, el Check 1.4 usa la regla "1 port por dominio".
+    # Si es None, cae al check viejo (solo Bancs unico).
+    ump_domains: list = None  # type: ignore[assignment]
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -236,16 +240,124 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
             results.append(CheckResult("1.3", "Block 1", "Ports son interfaces", "pass"))
         break
 
-    # 1.4 - UN solo output port Bancs
-    bancs_ports = 0
-    for f in src_java.rglob("application/**/port/output/*[Bb]ancs*.java"):
-        bancs_ports += 1
-    if bancs_ports == 0:
-        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "pass", detail="0 ports Bancs (servicio sin BANCS, OK)"))
-    elif bancs_ports == 1:
-        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "pass"))
+    # 1.4 - UN output port POR DOMINIO de UMP invocado
+    # Regla actualizada (v0.3.2): el numero de output ports debe coincidir con la
+    # cantidad de dominios distintos de UMPs invocados por el servicio. Cada UMP
+    # de un mismo dominio se consolida en 1 solo port/adapter del dominio.
+    from capamedia_cli.core.domain_mapping import domains_for_umps
+
+    # Listar todos los *OutputPort en application/**/port/output/
+    actual_ports: list[str] = []
+    for f in src_java.rglob("application/**/port/output/*OutputPort.java"):
+        actual_ports.append(f.stem)
+
+    # Si tenemos contexto de UMPs (provistos por el orquestador del check), comparamos
+    expected_domains = getattr(ctx, "ump_domains", None)
+    if expected_domains is not None:
+        # Detectar a que dominio pertenece cada port encontrado
+        from capamedia_cli.core.domain_mapping import SERVICE_PREFIX_TO_DOMAIN, UMP_PREFIX_TO_DOMAIN
+
+        all_domain_names = {d.pascal for d in SERVICE_PREFIX_TO_DOMAIN.values()} | {
+            d.pascal for d in UMP_PREFIX_TO_DOMAIN.values()
+        }
+        ports_by_domain: dict[str, list[str]] = {}
+        for port in actual_ports:
+            for dom in all_domain_names:
+                if port.startswith(dom):
+                    ports_by_domain.setdefault(dom, []).append(port)
+                    break
+
+        expected_set = {d.pascal for d in expected_domains}
+        actual_set = set(ports_by_domain.keys())
+
+        missing = expected_set - actual_set
+        extra = actual_set - expected_set
+        duplicated = {d: ps for d, ps in ports_by_domain.items() if len(ps) > 1}
+
+        if missing:
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "1 output port por dominio de UMP invocado",
+                    "fail",
+                    severity="high",
+                    detail=f"Faltan ports para dominios: {sorted(missing)}",
+                    suggested_fix=(
+                        "Agregar 1 output port por cada dominio. Ej: para UMPSeguridad* "
+                        "crear SecurityOutputPort + SecurityBancsAdapter."
+                    ),
+                )
+            )
+        elif duplicated:
+            dup_str = ", ".join(f"{d}: {len(ps)} ports" for d, ps in duplicated.items())
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "1 output port por dominio de UMP invocado",
+                    "fail",
+                    severity="high",
+                    detail=f"Dominios con mas de 1 port: {dup_str}",
+                    suggested_fix="Consolidar los ports del mismo dominio en uno solo (Rule FB-JG)",
+                )
+            )
+        elif extra:
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "1 output port por dominio de UMP invocado",
+                    "pass",
+                    detail=f"OK ({len(actual_set)} dominios). Extras no requeridos: {sorted(extra)}",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "1 output port por dominio de UMP invocado",
+                    "pass",
+                    detail=f"{len(actual_set)} dominios = {len(expected_set)} esperados",
+                )
+            )
     else:
-        results.append(CheckResult("1.4", "Block 1", "Output port Bancs unico", "fail", severity="high", detail=f"{bancs_ports} ports Bancs detectados", suggested_fix="Consolidar en un unico BancsOutputPort"))
+        # Fallback al comportamiento viejo (sin contexto de UMPs): solo contar Bancs
+        bancs_ports = sum(
+            1 for p in actual_ports if "bancs" in p.lower()
+        )
+        if bancs_ports == 0:
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "Output port unico (sin contexto de UMPs)",
+                    "pass",
+                    detail="0 ports Bancs detectados",
+                )
+            )
+        elif bancs_ports == 1:
+            results.append(
+                CheckResult(
+                    "1.4", "Block 1", "Output port unico (sin contexto de UMPs)", "pass"
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "1.4",
+                    "Block 1",
+                    "Output port unico (sin contexto de UMPs)",
+                    "fail",
+                    severity="high",
+                    detail=f"{bancs_ports} ports Bancs detectados",
+                    suggested_fix=(
+                        "Consolidar por dominio. Pasar ump_domains a CheckContext "
+                        "para validacion mas precisa."
+                    ),
+                )
+            )
 
     # 1.5 - Application no importa infrastructure
     bad_imports: list[str] = []

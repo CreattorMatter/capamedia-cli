@@ -272,19 +272,29 @@ def clone_service(
         )
     )
 
-    # --- Step 1: Clone legacy ---
-    legacy_repo = _resolve_legacy_repo_name(service_name)
-    legacy_dest = ws / "legacy" / legacy_repo
-    console.print(f"\n[bold]1. Clonando legacy[/bold] {legacy_repo}...")
-    ok, err = _git_clone(legacy_repo, legacy_dest, project_key="bus", shallow=shallow)
-    if not ok:
-        console.print(f"[red]FAIL[/red] clone legacy: {err}")
+    # --- Step 1: Resolver legacy (local primero, despues clonar de Azure) ---
+    from capamedia_cli.core.local_resolver import find_local_legacy
+
+    capa_media_root = ws.parent  # padre del workspace = donde viven los <NNNN>-* locales
+    legacy_dest: Path | None = find_local_legacy(service_name, capa_media_root)
+
+    if legacy_dest:
         console.print(
-            "[yellow]Tip:[/yellow] corre 'git clone' manual una vez para cachear el PAT via GCM, "
-            "luego reintenta."
+            f"\n[bold]1. Legacy detectado LOCALMENTE[/bold] (no requiere clone): {legacy_dest}"
         )
-        raise typer.Exit(1)
-    console.print(f"[green]OK[/green] legacy clonado en {legacy_dest}")
+    else:
+        legacy_repo = _resolve_legacy_repo_name(service_name)
+        legacy_dest = ws / "legacy" / legacy_repo
+        console.print(f"\n[bold]1. Legacy no esta local. Clonando de Azure[/bold] {legacy_repo}...")
+        ok, err = _git_clone(legacy_repo, legacy_dest, project_key="bus", shallow=shallow)
+        if not ok:
+            console.print(f"[red]FAIL[/red] clone legacy: {err}")
+            console.print(
+                "[yellow]Tip:[/yellow] corre 'git clone' manual una vez para cachear el PAT via GCM, "
+                "luego reintenta. O verifica que el servicio exista en CapaMedia/<NNNN>*/legacy/_repo/."
+            )
+            raise typer.Exit(1)
+        console.print(f"[green]OK[/green] legacy clonado en {legacy_dest}")
 
     # --- Step 2: Detect UMPs ---
     console.print("\n[bold]2. Detectando UMPs referenciados en ESQL/msgflow...[/bold]")

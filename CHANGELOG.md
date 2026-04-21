@@ -4,6 +4,84 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.3.2] - 2026-04-20
+
+### Added - Local resolver + Domain mapping multi-adapter
+
+**`core/local_resolver.py` — Local first, Azure fallback:**
+
+`capamedia clone` y `capamedia batch complexity` ahora buscan el legacy del servicio
+**localmente en `<CapaMedia>/<NNNN>-<SUF>/legacy/_repo/...` antes de clonar de Azure**.
+
+Estrategias de busqueda local (en orden):
+1. `<NNNN>-<SUF>/legacy/_repo/<svc>-aplicacion` + `-infraestructura` (WAS clasico) -> retorna el `_repo/` padre
+2. `<NNNN>-<SUF>/legacy/_repo/<svc>` (single repo)
+3. `<NNNN>-<SUF>/legacy/_variants/*<svc>*` (variant migrado)
+4. `<NNNN>-<SUF>/legacy/sqb-msa-<svc>` (clone CLI standar)
+5. `<NNNN>-<SUF>/legacy/` (legacy directo, sin subdir)
+
+Mapeo de prefijo de servicio -> sufijo de carpeta:
+- WSClientes -> WSC, WSCuentas -> WSCU, WSReglas -> WSR, WSTecnicos -> WST,
+  WSTarjetas -> WSTa, WSProductos -> WSP, ORQ* -> ORQ.
+
+**`core/domain_mapping.py` — Adapters por dominio de UMP:**
+
+**Cambio conceptual importante:** los adapters NO se nombran segun el WS del legacy,
+sino segun el **dominio de los UMPs invocados**. Un mismo servicio puede invocar UMPs
+de varios dominios y necesita 1 adapter por cada uno.
+
+Mapeos:
+- `UMPClientes*` -> `Customer` (CustomerOutputPort, CustomerBancsAdapter)
+- `UMPCuentas*` -> `Account`
+- `UMPSeguridad*` -> `Security`
+- `UMPReglas*` -> `Rules`
+- `UMPTecnicos*` -> `Technical`
+- `UMPTarjetas*` -> `Card`
+- `UMPProductos*` -> `Product`
+- `UMPTransferencias*` -> `Transfer`
+- `UMPPagos*` -> `Payment`
+- `UMPAutorizaciones*` -> `Authorization`
+- `UMPNotificaciones*` -> `Notification`
+- (otros) -> `Generic`
+
+API publica:
+- `get_domain(service)` -> Domain del WS/ORQ
+- `get_ump_domain(ump_name)` -> Domain del UMP
+- `domains_for_umps(umps_list)` -> lista de Domains distintos requeridos
+- `umps_grouped_by_domain(umps_list)` -> dict {Domain: [UMPs del dominio]}
+
+**Check 1.4 del checklist actualizado:**
+
+Antes: "1 solo output port Bancs". Ahora: **"1 output port por dominio de UMP invocado"**.
+Si `CheckContext.ump_domains` esta poblado, valida que la cantidad y nombre de los
+output ports coincida con los dominios esperados.
+
+**Reporte de batch complexity enriquecido:**
+
+Nueva columna `dominios` en la tabla: muestra los dominios distintos del servicio
+en formato `Customer+Security+Account` (concatenados con `+`).
+
+**Prompts de migracion actualizados:**
+
+`migrate-rest-full.md` y `migrate-soap-full.md` ahora documentan al inicio la tabla
+de mapeo prefijo UMP -> dominio, con ejemplos concretos.
+
+### Testing
+
+- **61/61 tests PASS** (+17 nuevos en `test_domain_mapping.py` y `test_local_resolver.py`)
+- Probado batch complexity sobre los 26 servicios reales del usuario:
+  - 12 ORQs OK desde Azure (`tpl-bus-omnicanal`)
+  - 11 WS detectados localmente (estructura WAS con `-aplicacion`/`-infraestructura`)
+  - 2 WS clonados desde Azure (los que SI estan ahi)
+  - 1 WS no encontrado en ningun lado (heuristica de busqueda incorrecta)
+
+### Pending - WS legacy en Azure
+
+Los WS-WAS legacy (WSClientes0010, etc.) NO estan en `tpl-bus-omnicanal`. Necesitamos
+que el usuario confirme cual proyecto Azure los aloja para agregar fallback ahi.
+
+---
+
 ## [0.3.1] - 2026-04-20
 
 ### Changed - Regla canonica: ports son **interfaces** (no abstract classes)

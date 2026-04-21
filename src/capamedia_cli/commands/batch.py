@@ -183,14 +183,27 @@ def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None 
 # -- Helpers compartidos ----------------------------------------------------
 
 
-def _ensure_legacy_cloned(service: str, root: Path, shallow: bool) -> tuple[bool, str]:
-    """Clona solo el legacy (sin UMPs/TX) si no esta ya presente. Helper rapido para batch-complexity."""
+def _ensure_legacy_available(service: str, root: Path, shallow: bool) -> tuple[Path | None, str]:
+    """Resuelve el legacy del servicio: local first, fallback a Azure.
+
+    Retorna (path_legacy, error). Si path es None, error indica el motivo.
+    Si path es Path, error es '' (OK) o un mensaje informativo (ej. 'local').
+    """
     import subprocess
 
+    from capamedia_cli.core.local_resolver import find_local_legacy
+
+    # 1. Buscar local primero
+    capa_media_root = root.parent  # padre del workspace
+    local = find_local_legacy(service, capa_media_root)
+    if local:
+        return (local, "local")
+
+    # 2. Fallback a Azure DevOps
     repo = f"sqb-msa-{service.lower()}"
     dest = root / service / "legacy" / repo
     if dest.exists() and any(dest.iterdir()):
-        return (True, "already cloned")
+        return (dest, "already cloned")
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone"]
     if shallow:
@@ -202,10 +215,18 @@ def _ensure_legacy_cloned(service: str, root: Path, shallow: bool) -> tuple[bool
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
-            return (True, "")
-        return (False, (result.stderr or "").split("\n")[-1][:200])
+            return (dest, "azure clone")
+        msg = (result.stderr or "").split("\n")[-1][:200]
+        return (None, f"not local + azure clone failed: {msg}")
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        return (False, str(e))
+        return (None, f"not local + azure error: {e}")
+
+
+# Backward compat
+def _ensure_legacy_cloned(service: str, root: Path, shallow: bool) -> tuple[bool, str]:
+    """Wrapper legacy para tests viejos."""
+    path, msg = _ensure_legacy_available(service, root, shallow)
+    return (path is not None, msg)
 
 
 # -- Subcommands ------------------------------------------------------------
@@ -246,23 +267,31 @@ def batch_complexity(
     rows: list[BatchRow] = []
 
     def process(service: str) -> BatchRow:
-        ok, err = _ensure_legacy_cloned(service, ws, shallow)
-        if not ok:
-            return BatchRow(service, "fail", f"clone failed: {err}", {})
-        legacy_root = ws / service / "legacy" / f"sqb-msa-{service.lower()}"
+        legacy_root, msg = _ensure_legacy_available(service, ws, shallow)
+        if legacy_root is None:
+            return BatchRow(service, "fail", msg, {})
         try:
             analysis = analyze_legacy(legacy_root, service_name=service, umps_root=None)
         except Exception as e:  # noqa: BLE001
             return BatchRow(service, "fail", f"analyze error: {e}", {})
+
+        # Detectar dominios distintos via UMPs
+        from capamedia_cli.core.domain_mapping import domains_for_umps
+
+        ump_names = [u.name for u in analysis.umps]
+        domains = domains_for_umps(ump_names)
+        domain_str = "+".join(d.pascal for d in domains) if domains else "-"
+
         return BatchRow(
             service,
             "ok",
-            "",
+            f"source={msg}",
             {
                 "tipo": analysis.source_kind.upper(),
                 "ops": str(analysis.wsdl.operation_count) if analysis.wsdl else "?",
                 "framework": analysis.framework_recommendation.upper() or "?",
                 "umps": str(len(analysis.umps)),
+                "dominios": domain_str,
                 "bd": "SI" if analysis.has_database else "NO",
                 "complejidad": analysis.complexity.upper(),
             },
@@ -282,7 +311,7 @@ def batch_complexity(
                 progress.advance(task)
 
     rows.sort(key=lambda r: r.service)
-    field_order = ["tipo", "ops", "framework", "umps", "bd", "complejidad"]
+    field_order = ["tipo", "ops", "framework", "umps", "dominios", "bd", "complejidad"]
 
     _render_table("complexity", rows, field_order)
     md = _write_markdown_report("complexity", rows, ws, field_order)
