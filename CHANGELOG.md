@@ -4,6 +4,62 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.3.8] - 2026-04-21
+
+### Added - Bootstrap unattended + cierre cross-platform para batch
+
+**`capamedia auth bootstrap`** nuevo comando para preparar una maquina de corrida:
+
+- Registra Fabrics en `~/.mcp.json` o `./.mcp.json` sin prompts (`--scope global|project`)
+- Puede refrescar `~/.npmrc` automaticamente para Azure Artifacts
+- Autentica Codex CLI por API key usando `codex login --with-api-key`
+- Opcionalmente escribe un `auth.env` con `CAPAMEDIA_ARTIFACT_TOKEN`, `CAPAMEDIA_AZDO_PAT`, `OPENAI_API_KEY`
+
+Esto deja una Mac o runner lista para `batch pipeline` sin depender de pasos interactivos
+salvo el binding de Sonar.
+
+**Azure DevOps unattended auth** en `clone.py`:
+
+- `capamedia clone` y todos los batch que lo reutilizan ahora aceptan PAT por env:
+  - `CAPAMEDIA_AZDO_PAT`
+  - `AZURE_DEVOPS_EXT_PAT`
+- El clone inyecta `http.extraHeader=Authorization: Basic ...` via `GIT_CONFIG_*`
+  para no exponer el PAT en la linea de comando y evitar prompts (`GIT_TERMINAL_PROMPT=0`)
+
+**Fabrics cross-platform:**
+
+- `fabrics setup` y el template `.mcp.json` pasan a registrar Fabrics con:
+  - `command: "npx"`
+  - `args: ["-y", "@pichincha/fabrics-project@latest"]`
+- `core/mcp_launcher.py` ya no asume solo `~/AppData/Local/npm-cache`; ahora busca
+  tambien en `~/.npm/_npx` y respeta `npm_config_cache` / `NPM_CONFIG_CACHE`
+
+**Toolchain / check-install:**
+
+- `capamedia install` ahora instala **Codex CLI** via `npm install -g @openai/codex`
+- `capamedia check-install` valida:
+  - `codex --version`
+  - `codex login status`
+  - Azure DevOps auth por env o Git Credential Manager
+  - Fabrics con el mismo preflight real que usa `batch pipeline`
+
+**Release automation:**
+
+- Nuevo workflow `ci.yml` corriendo tests en Windows, macOS y Linux
+- Nuevo workflow `release.yml` que construye `sdist/wheel`, crea GitHub Release en tags `v*`
+  y publica en PyPI si `PYPI_API_TOKEN` esta configurado
+
+### Testing
+
+- Nuevos tests:
+  - `test_auth.py` - bootstrap + env file + auth helpers
+  - `test_clone.py` - clone unattended con PAT por env
+  - `test_pipeline_support.py` - `.mcp.json` cross-platform + cache npm Unix
+- Suite local: `81 -> 90` tests pasando
+- Validado tambien:
+  - `py -m capamedia_cli.cli auth bootstrap --help`
+  - `py -m capamedia_cli.cli check-install --help`
+
 ## [0.3.3] - 2026-04-20
 
 ### Added - Multi-project Azure fallback + estrategia `_repo/ directo`

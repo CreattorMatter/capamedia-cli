@@ -56,7 +56,9 @@ class CanonicalAsset:
 
     @property
     def allowed_tools(self) -> list[str]:
-        raw = self.frontmatter.get("allowed_tools") or []
+        raw = self.frontmatter.get("allowed_tools")
+        if raw is None:
+            raw = self.frontmatter.get("tools") or []
         return list(raw) if isinstance(raw, list) else []
 
     @property
@@ -79,7 +81,7 @@ def _load_skill(skill_dir: Path) -> CanonicalAsset | None:
     if not skill_file.exists():
         return None
     asset = _load_file(skill_file, "skill")
-    extras = [p for p in skill_dir.iterdir() if p.is_file() and p.name != "SKILL.md"]
+    extras = [p for p in skill_dir.rglob("*") if p.is_file() and p.name != "SKILL.md"]
     asset.extra_files = extras
     return asset
 

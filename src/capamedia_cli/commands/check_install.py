@@ -1,16 +1,15 @@
 """capamedia check-install - verifica el toolchain completo.
 
 Agrupa los chequeos por categoria:
-  - Toolchain base (Git, Java, Gradle, Node, Python, uv)
+  - Toolchain base (Git, Java, Gradle, Node, Codex, Python, uv)
   - IDE + extensions
-  - MCP servers en Claude Code
-  - Azure DevOps PAT (detectado via GCM)
+  - Integraciones del banco (Azure DevOps, Fabrics, SonarCloud)
+  - Auth de Codex
 """
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -19,6 +18,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.table import Table
+
+from capamedia_cli.commands.fabrics import inspect_fabrics_workspace
+from capamedia_cli.core.auth import AZURE_PAT_ENV_VARS, OPENAI_API_KEY_ENV_VARS, resolve_azure_devops_pat
 
 console = Console()
 
@@ -31,28 +33,27 @@ class CheckResult:
     fix: str = ""
 
 
-def _check_command(exe: str, args: list[str] | None = None) -> tuple[bool, str]:
-    """Check if a command is available and return its version string."""
-    if shutil.which(exe) is None:
+def _run_command(cmd: list[str]) -> tuple[bool, str]:
+    """Run a command and return (success, first line of output)."""
+    if shutil.which(cmd[0]) is None:
         return False, ""
-    cmd = [exe, *(args or ["--version"])]
     try:
         result = subprocess.run(cmd, capture_output=True, check=False, timeout=10, text=True)
-        output = (result.stdout or result.stderr or "").strip().split("\n")[0]
-        return True, output
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False, ""
+    output = (result.stdout or result.stderr or "").strip().splitlines()
+    return result.returncode == 0, (output[0] if output else "")
 
 
 def _check_git() -> CheckResult:
-    ok, ver = _check_command("git")
+    ok, ver = _run_command(["git", "--version"])
     if ok:
         return CheckResult("Git", "ok", ver)
     return CheckResult("Git", "fail", "no instalado", "capamedia install")
 
 
 def _check_java() -> CheckResult:
-    ok, ver = _check_command("java", ["-version"])
+    ok, ver = _run_command(["java", "-version"])
     if not ok:
         return CheckResult("Java", "fail", "no instalado", "capamedia install")
     if "21" not in ver:
@@ -61,35 +62,47 @@ def _check_java() -> CheckResult:
 
 
 def _check_gradle() -> CheckResult:
-    ok, ver = _check_command("gradle")
+    ok, ver = _run_command(["gradle", "--version"])
     if ok:
         return CheckResult("Gradle", "ok", ver)
     return CheckResult("Gradle", "fail", "no instalado", "capamedia install")
 
 
 def _check_node() -> CheckResult:
-    ok, ver = _check_command("node")
+    ok, ver = _run_command(["node", "--version"])
     if not ok:
         return CheckResult("Node.js", "fail", "no instalado (requerido por MCP Fabrics)", "capamedia install")
     return CheckResult("Node.js", "ok", ver)
 
 
+def _check_codex() -> CheckResult:
+    ok, ver = _run_command(["codex", "--version"])
+    if ok:
+        return CheckResult("Codex CLI", "ok", ver)
+    return CheckResult(
+        "Codex CLI",
+        "fail",
+        "no instalado (requerido por batch migrate/pipeline)",
+        "capamedia install",
+    )
+
+
 def _check_python() -> CheckResult:
-    ok, ver = _check_command("python")
+    ok, ver = _run_command(["python", "--version"])
     if not ok:
         return CheckResult("Python", "fail", "no instalado", "capamedia install")
     return CheckResult("Python", "ok", ver)
 
 
 def _check_uv() -> CheckResult:
-    ok, ver = _check_command("uv")
+    ok, ver = _run_command(["uv", "--version"])
     if ok:
         return CheckResult("uv", "ok", ver)
     return CheckResult("uv", "warn", "no instalado (opcional pero recomendado)", "capamedia install")
 
 
 def _check_vscode() -> CheckResult:
-    ok, ver = _check_command("code")
+    ok, ver = _run_command(["code", "--version"])
     if ok:
         return CheckResult("VS Code", "ok", ver)
     return CheckResult("VS Code", "warn", "no detectado (podes usar Cursor/Windsurf/IntelliJ)", "")
@@ -120,59 +133,61 @@ def _check_sonarlint_extension() -> CheckResult:
 
 
 def _check_mcp_fabrics_config() -> CheckResult:
-    """Check if MCP Fabrics is configured in user or project settings."""
-    candidates = [
-        Path.home() / ".claude" / "settings.json",
-        Path.cwd() / ".mcp.json",
-        Path.home() / ".mcp.json",
-    ]
-    for candidate in candidates:
-        if not candidate.exists():
-            continue
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        servers = data.get("mcpServers", {})
-        if "fabrics" in servers:
-            return CheckResult("MCP Fabrics", "ok", f"configurado en {candidate}")
+    """Check Fabrics using the same preflight logic que usa batch pipeline."""
+    status = inspect_fabrics_workspace(Path.cwd())
+    if status["status"] == "ok":
+        return CheckResult("MCP Fabrics", "ok", status["detail"])
     return CheckResult(
         "MCP Fabrics",
         "fail",
-        "no configurado en ninguna ubicacion conocida",
-        "capamedia fabrics setup",
+        status["detail"],
+        "capamedia auth bootstrap --scope global o capamedia fabrics setup",
     )
 
 
-def _check_azure_devops_pat() -> CheckResult:
-    """Check if GCM has a cached PAT for Azure DevOps."""
-    if shutil.which("git-credential-manager") is None and shutil.which("git-credential-manager-core") is None:
+def _check_azure_devops_auth() -> CheckResult:
+    """Check env-based PAT first, then Git Credential Manager."""
+    pat = resolve_azure_devops_pat()
+    if pat:
         return CheckResult(
-            "Azure DevOps PAT (GCM)",
-            "warn",
-            "Git Credential Manager no encontrado",
-            "viene con Git for Windows; reinstala Git si falta",
+            "Azure DevOps auth",
+            "ok",
+            f"PAT presente por env ({'/'.join(AZURE_PAT_ENV_VARS)})",
         )
+
     try:
         input_text = "protocol=https\nhost=dev.azure.com\npath=BancoPichinchaEC\n\n"
         result = subprocess.run(
-            ["git-credential-manager", "get"],
+            ["git", "credential-manager", "get"],
             input=input_text,
             capture_output=True,
             check=False,
             timeout=10,
             text=True,
         )
-        if "password=" in (result.stdout or ""):
-            return CheckResult("Azure DevOps PAT (GCM)", "ok", "token valido en cache")
-        return CheckResult(
-            "Azure DevOps PAT (GCM)",
-            "fail",
-            "sin token en cache",
-            "git clone https://dev.azure.com/BancoPichinchaEC/_git/<cualquiera>",
-        )
+        if result.returncode == 0 and "password=" in (result.stdout or ""):
+            return CheckResult("Azure DevOps auth", "ok", "token valido en Git Credential Manager")
     except (subprocess.TimeoutExpired, FileNotFoundError):
-        return CheckResult("Azure DevOps PAT (GCM)", "warn", "no pudo verificarse", "")
+        pass
+
+    return CheckResult(
+        "Azure DevOps auth",
+        "fail",
+        "sin PAT por env y sin token usable en Git Credential Manager",
+        "export CAPAMEDIA_AZDO_PAT=... o corre `git clone https://dev.azure.com/...` una vez",
+    )
+
+
+def _check_codex_auth() -> CheckResult:
+    ok, detail = _run_command(["codex", "login", "status"])
+    if ok:
+        return CheckResult("Codex auth", "ok", detail)
+    return CheckResult(
+        "Codex auth",
+        "fail",
+        f"sin login activo (tambien podes bootstrapear por API key en {'/'.join(OPENAI_API_KEY_ENV_VARS)})",
+        "capamedia auth bootstrap --openai-api-key ...",
+    )
 
 
 def _check_sonarcloud_binding() -> CheckResult:
@@ -214,6 +229,7 @@ CHECKS = {
         _check_java,
         _check_gradle,
         _check_node,
+        _check_codex,
         _check_python,
         _check_uv,
     ],
@@ -221,9 +237,10 @@ CHECKS = {
         _check_vscode,
         _check_sonarlint_extension,
     ],
-    "Integraciones del banco": [
-        _check_azure_devops_pat,
+    "Integraciones y auth": [
+        _check_azure_devops_auth,
         _check_mcp_fabrics_config,
+        _check_codex_auth,
         _check_sonarcloud_binding,
     ],
 }
@@ -258,7 +275,7 @@ def check_install() -> None:
         console.print(table)
         console.print()
 
-    summary_color = "green" if total_fail == 0 else "red" if total_fail > 0 else "yellow"
+    summary_color = "green" if total_fail == 0 else "red"
     console.print(
         f"[bold {summary_color}]Resumen: {total_ok} OK · {total_warn} WARN · {total_fail} FAIL[/bold {summary_color}]"
     )

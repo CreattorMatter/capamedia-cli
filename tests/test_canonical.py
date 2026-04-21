@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from capamedia_cli.core.canonical import load_canonical_assets
+from pathlib import Path
+
+from capamedia_cli.core.canonical import CANONICAL_ROOT, load_canonical_assets
 from capamedia_cli.core.frontmatter import parse_frontmatter, serialize_frontmatter
 
 
@@ -78,3 +80,23 @@ def test_frontmatter_missing_returns_empty_dict() -> None:
     fm, body = parse_frontmatter(content)
     assert fm == {}
     assert body == content
+
+
+def test_canonical_migration_assets_align_ports_with_interfaces() -> None:
+    targets = [
+        CANONICAL_ROOT / "prompts" / "migrate.md",
+        CANONICAL_ROOT / "context" / "hexagonal.md",
+        CANONICAL_ROOT / "agents" / "migrador.md",
+        CANONICAL_ROOT / "skills" / "migrar" / "SKILL.md",
+    ]
+
+    forbidden = [
+        "Puertos son abstract classes, nunca interfaces.",
+        "Ports son ABSTRACT CLASSES, nunca interfaces",
+        "Crear abstract class ports + service impl",
+    ]
+
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        for phrase in forbidden:
+            assert phrase not in content, f"{Path(path).name} still contains outdated rule: {phrase}"

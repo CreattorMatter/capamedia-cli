@@ -64,3 +64,16 @@ def test_claude_adapter_renders_to_tmp(tmp_path: Path) -> None:
     commands_dir = tmp_path / ".claude" / "commands"
     if commands_dir.exists():
         assert any(commands_dir.glob("*.md"))
+
+
+def test_codex_adapter_renders_agents_and_skills(tmp_path: Path) -> None:
+    assets = load_canonical_assets()
+    adapter = get_adapter("codex")
+    written, warnings = adapter.render_all(assets, tmp_path)
+
+    assert len(written) > 0
+    assert all("not supported" not in warning for warning in warnings)
+    assert (tmp_path / ".codex" / "prompts").exists()
+    assert (tmp_path / ".codex" / "agents" / "migrador.toml").exists()
+    assert (tmp_path / ".agents" / "skills" / "migrar" / "SKILL.md").exists()
+    assert (tmp_path / ".codex" / "config.toml").exists()

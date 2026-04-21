@@ -5,6 +5,9 @@ Subcomandos:
   - clone      <file>   Clone masivo (legacy + UMPs + TX) con ThreadPool
   - check      <root>   Audita todos los proyectos migrados bajo un path
   - init       <file>   Inicializa N workspaces con .claude/ + CLAUDE.md
+  - pipeline   <file>   Ejecuta clone -> init -> fabric -> migrate -> check
+  - migrate    <file>   Ejecuta `codex exec` sobre N workspaces listos
+  - watch      <root>   Mirador operativo de estados persistentes del batch
 
 Inputs:
   - services.txt: un servicio por linea (ej wsclientes0007). Comentarios con #.
@@ -19,17 +22,30 @@ from __future__ import annotations
 
 import csv
 import datetime
+import json
 import shutil
+import subprocess
+import textwrap
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
+
+from capamedia_cli.core.batch_state import (
+    load_state,
+    mark_stage,
+    save_state,
+    set_result,
+    state_file,
+    stage_ok,
+)
 
 console = Console()
 
@@ -42,9 +58,71 @@ app = typer.Typer(
 @dataclass
 class BatchRow:
     service: str
-    status: str  # "ok" | "fail" | "skip"
+    status: str  # "ok" | "fail" | "skip" | "wait"
     detail: str
     fields: dict[str, str]
+
+
+MIGRATE_FIELD_ORDER = ["codex", "result", "framework", "build", "check", "seconds", "project"]
+PIPELINE_FIELD_ORDER = [
+    "clone",
+    "init",
+    "fabric",
+    "codex",
+    "result",
+    "build",
+    "check",
+    "seconds",
+    "project",
+]
+WATCH_FIELD_ORDER = [
+    "kind",
+    "phase",
+    "clone",
+    "init",
+    "fabric",
+    "codex",
+    "result",
+    "build",
+    "check",
+    "attempts",
+    "updated",
+    "project",
+]
+
+MIGRATE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "summary"],
+    "properties": {
+        "status": {
+            "type": "string",
+            "enum": ["ok", "partial", "blocked", "failed"],
+        },
+        "summary": {"type": "string"},
+        "framework": {"type": "string"},
+        "build_status": {"type": "string"},
+        "migrated_project": {"type": "string"},
+        "artifacts": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+FALLBACK_MIGRATE_PROMPT = textwrap.dedent(
+    """
+    Completa la migracion del servicio legacy a Java 21 + Spring Boot hexagonal siguiendo
+    las instrucciones del workspace. Lee primero AGENTS.md y cualquier prompt local del
+    proyecto, despues implementa los cambios minimos necesarios dentro de `destino/`.
+
+    Requisitos:
+    - trabaja solo dentro del workspace actual;
+    - preserva la matriz oficial del proyecto (1 op -> REST/WebFlux, 2+ ops -> SOAP/MVC);
+    - valida con build real del proyecto migrado si existe;
+    - si falta un prerequisito, no inventes nada: reportalo como `blocked`.
+
+    Tu respuesta final debe ser SOLO un JSON valido segun el schema provisto.
+    """
+).strip()
 
 
 def _read_services_file(path: Path, sheet: str | None = None) -> list[str]:
@@ -130,7 +208,8 @@ def _write_markdown_report(
     ok = sum(1 for r in rows if r.status == "ok")
     fail = sum(1 for r in rows if r.status == "fail")
     skip = sum(1 for r in rows if r.status == "skip")
-    lines.append(f"**OK:** {ok} · **FAIL:** {fail} · **SKIP:** {skip}\n")
+    wait = sum(1 for r in rows if r.status == "wait")
+    lines.append(f"**OK:** {ok} · **FAIL:** {fail} · **WAIT:** {wait} · **SKIP:** {skip}\n")
 
     if rows:
         cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
@@ -171,6 +250,8 @@ def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None 
     for r in rows:
         if r.status == "ok":
             status = "[green]OK[/green]"
+        elif r.status == "wait":
+            status = "[cyan]WAIT[/cyan]"
         elif r.status == "skip":
             status = "[yellow]SKIP[/yellow]"
         else:
@@ -181,6 +262,792 @@ def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None 
 
 
 # -- Helpers compartidos ----------------------------------------------------
+
+
+def _ensure_batch_runtime_dir(root: Path) -> Path:
+    runtime_dir = root / ".capamedia" / "batch"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return runtime_dir
+
+
+def _ensure_migrate_schema(root: Path) -> Path:
+    runtime_dir = _ensure_batch_runtime_dir(root)
+    schema_path = runtime_dir / "codex-batch-migrate.schema.json"
+    schema_json = json.dumps(MIGRATE_OUTPUT_SCHEMA, ensure_ascii=True, indent=2) + "\n"
+    if not schema_path.exists() or schema_path.read_text(encoding="utf-8") != schema_json:
+        schema_path.write_text(schema_json, encoding="utf-8")
+    return schema_path
+
+
+def _has_gradle_build(path: Path) -> bool:
+    return (path / "build.gradle").exists() or (path / "build.gradle.kts").exists()
+
+
+def _find_migrated_project(workspace: Path, service: str) -> Path | None:
+    destino = workspace / "destino"
+    if not destino.exists():
+        return None
+
+    expected_names = (
+        f"tnd-msa-sp-{service.lower()}",
+        service.lower(),
+        service,
+    )
+    for name in expected_names:
+        candidate = destino / name
+        if candidate.is_dir() and _has_gradle_build(candidate):
+            return candidate
+
+    candidates = sorted(p for p in destino.iterdir() if p.is_dir() and _has_gradle_build(p))
+    if not candidates:
+        return None
+
+    preferred = [p for p in candidates if service.lower() in p.name.lower()]
+    if preferred:
+        return preferred[0]
+    return candidates[0]
+
+
+def _find_legacy_root(workspace: Path, service: str | None = None) -> Path | None:
+    for candidate in (workspace / "legacy", workspace.parent / "legacy"):
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    if service:
+        from capamedia_cli.core.local_resolver import find_local_legacy
+
+        return find_local_legacy(service, workspace.parent)
+    return None
+
+
+def _has_complexity_report(workspace: Path, service: str) -> bool:
+    return (workspace / f"COMPLEXITY_{service}.md").exists()
+
+
+def _has_init_material(workspace: Path) -> bool:
+    return (workspace / ".capamedia" / "config.yaml").exists()
+
+
+def _load_fabrics_metadata(workspace: Path) -> dict[str, Any] | None:
+    from capamedia_cli.commands.fabrics import load_fabrics_metadata
+
+    data = load_fabrics_metadata(workspace)
+    return data if isinstance(data, dict) else None
+
+
+def _has_fabrics_material(workspace: Path) -> bool:
+    data = _load_fabrics_metadata(workspace)
+    if not data:
+        return False
+    project_path = _as_text(data.get("project_path"))
+    project_name = _as_text(data.get("project_name"))
+    return bool(project_path or project_name)
+
+
+def _find_project_from_fabrics_metadata(workspace: Path) -> Path | None:
+    data = _load_fabrics_metadata(workspace)
+    if not data:
+        return None
+    project_path = _as_text(data.get("project_path")).strip()
+    if project_path:
+        candidate = Path(project_path)
+        if candidate.is_dir() and _has_gradle_build(candidate):
+            return candidate
+    project_name = _as_text(data.get("project_name")).strip()
+    if project_name:
+        candidate = workspace / "destino" / project_name
+        if candidate.is_dir() and _has_gradle_build(candidate):
+            return candidate
+    return None
+
+
+def _format_ts(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+    return value.replace("T", " ")[:19]
+
+
+def _read_state_snapshot(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _watch_stage_value(state: dict[str, Any], stage: str, field_key: str, default: str = "") -> str:
+    stage_data = state.get("stages", {}).get(stage, {})
+    if not isinstance(stage_data, dict):
+        return default
+    fields = stage_data.get("fields", {})
+    if isinstance(fields, dict) and fields.get(field_key) is not None:
+        return _as_text(fields.get(field_key))
+    return _as_text(stage_data.get("status"), default)
+
+
+def _watch_phase(run_kind: str, state: dict[str, Any]) -> str:
+    order = ["clone", "init", "fabric", "migrate", "check"] if run_kind == "pipeline" else ["migrate", "check"]
+    stages = state.get("stages", {})
+    for stage in order:
+        stage_data = stages.get(stage, {})
+        if not isinstance(stage_data, dict):
+            return stage
+        status = _as_text(stage_data.get("status")).strip().lower()
+        if status == "fail":
+            return f"{stage}:fail"
+        if not status:
+            return stage
+        if status != "ok":
+            return f"{stage}:{status}"
+    result_status = _as_text(state.get("result", {}).get("status")).strip().lower()
+    if result_status == "ok":
+        return "done"
+    return result_status or "pending"
+
+
+def _watch_row_for_service(workspace: Path, service: str, run_kind: str) -> BatchRow:
+    state = _read_state_snapshot(state_file(workspace, run_kind))
+    fabrics = _load_fabrics_metadata(workspace) or {}
+    project_hint = _as_text(fabrics.get("project_name")) or _as_text(
+        state.get("result", {}).get("fields", {}).get("project") if state else ""
+    )
+
+    if state is None:
+        return BatchRow(
+            service,
+            "wait",
+            _as_text(fabrics.get("detail"), "sin estado batch"),
+            {
+                "kind": run_kind,
+                "phase": "no_state",
+                "clone": "",
+                "init": "",
+                "fabric": _as_text(fabrics.get("status"), "-"),
+                "codex": "",
+                "result": "",
+                "build": "",
+                "check": "",
+                "attempts": "0",
+                "updated": "",
+                "project": project_hint,
+            },
+        )
+
+    result = state.get("result", {}) if isinstance(state.get("result"), dict) else {}
+    attempts = 0
+    for stage_data in state.get("stages", {}).values():
+        if isinstance(stage_data, dict):
+            attempts += int(stage_data.get("attempts", 0) or 0)
+
+    fields = {
+        "kind": run_kind,
+        "phase": _watch_phase(run_kind, state),
+        "clone": _watch_stage_value(state, "clone", "clone"),
+        "init": _watch_stage_value(state, "init", "init"),
+        "fabric": _watch_stage_value(state, "fabric", "fabric", _as_text(fabrics.get("status"), "")),
+        "codex": _watch_stage_value(state, "migrate", "codex"),
+        "result": _as_text(result.get("fields", {}).get("result")) if isinstance(result.get("fields"), dict) else _as_text(result.get("status")),
+        "build": _watch_stage_value(state, "migrate", "build"),
+        "check": _watch_stage_value(state, "check", "check"),
+        "attempts": str(attempts),
+        "updated": _format_ts(_as_text(state.get("updated_at"))),
+        "project": _as_text(
+            (result.get("fields", {}) if isinstance(result.get("fields"), dict) else {}).get("project"),
+            project_hint,
+        ),
+    }
+
+    failed_stage_detail = ""
+    for stage_name in ("clone", "init", "fabric", "migrate", "check"):
+        stage_data = state.get("stages", {}).get(stage_name, {})
+        if isinstance(stage_data, dict) and _as_text(stage_data.get("status")).lower() == "fail":
+            failed_stage_detail = _as_text(stage_data.get("detail"))
+            break
+
+    result_status = _as_text(result.get("status")).lower()
+    if result_status == "ok":
+        status = "ok"
+    elif failed_stage_detail:
+        status = "fail"
+    else:
+        status = "wait"
+
+    detail = _as_text(result.get("detail")) or failed_stage_detail or _as_text(fabrics.get("detail"), "en progreso")
+    return BatchRow(service, status, detail, fields)
+
+
+def _collect_watch_rows(root: Path, services: list[str], kind: str) -> list[BatchRow]:
+    rows: list[BatchRow] = []
+    for service in services:
+        workspace = root / service
+        if kind == "pipeline":
+            rows.append(_watch_row_for_service(workspace, service, "pipeline"))
+            continue
+        if kind == "migrate":
+            rows.append(_watch_row_for_service(workspace, service, "migrate"))
+            continue
+        pipeline_state = state_file(workspace, "pipeline")
+        migrate_state = state_file(workspace, "migrate")
+        if pipeline_state.exists():
+            rows.append(_watch_row_for_service(workspace, service, "pipeline"))
+        elif migrate_state.exists():
+            rows.append(_watch_row_for_service(workspace, service, "migrate"))
+        else:
+            rows.append(_watch_row_for_service(workspace, service, "pipeline"))
+    rows.sort(key=lambda r: r.service)
+    return rows
+
+
+def _hydrate_fields(base: dict[str, str], saved: dict[str, Any] | None) -> dict[str, str]:
+    fields = dict(base)
+    if not isinstance(saved, dict):
+        return fields
+    for key, value in saved.items():
+        fields[str(key)] = _as_text(value)
+    return fields
+
+
+def _load_migrate_prompt(workspace: Path, prompt_file: Path | None = None) -> str:
+    candidate = prompt_file or (workspace / ".codex" / "prompts" / "migrate.md")
+    if candidate.exists():
+        return candidate.read_text(encoding="utf-8").strip()
+    return FALLBACK_MIGRATE_PROMPT
+
+
+def _build_batch_migrate_prompt(
+    service: str,
+    workspace: Path,
+    migrated_project: Path,
+    prompt_body: str,
+) -> str:
+    legacy_root = _find_legacy_root(workspace, service)
+    legacy_hint = str(legacy_root) if legacy_root else "(no encontrado)"
+    return textwrap.dedent(
+        f"""
+        Servicio objetivo: {service}
+        Workspace root: {workspace}
+        Legacy root: {legacy_hint}
+        Proyecto migrado esperado: {migrated_project}
+
+        Ejecuta la migracion de forma no interactiva en este workspace ya preparado.
+        Antes de editar:
+        1. Lee `AGENTS.md` si existe.
+        2. Usa el prompt base incluido abajo como fuente principal del workflow.
+        3. Si falta un prerequisito importante, devolve `status=blocked` con detalle concreto.
+
+        Requisitos operativos:
+        - Trabaja solo dentro de este workspace.
+        - Corre al menos un build real del proyecto migrado si el proyecto existe.
+        - No incluyas Markdown ni explicaciones fuera del JSON final.
+        - La respuesta final debe ser SOLO el objeto JSON pedido por el schema.
+
+        Prompt base del proyecto:
+        ---
+        {prompt_body}
+        ---
+        """
+    ).strip()
+
+
+def _strip_code_fence(raw: str) -> str:
+    raw = raw.strip()
+    if not raw.startswith("```"):
+        return raw
+    lines = raw.splitlines()
+    if len(lines) >= 2 and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return raw
+
+
+def _read_structured_message(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    raw = _strip_code_fence(path.read_text(encoding="utf-8").strip())
+    if not raw:
+        return {}
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return {}
+        try:
+            data = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+
+    return data if isinstance(data, dict) else {}
+
+
+def _as_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _normalize_build_status(value: str) -> str:
+    lowered = value.strip().lower()
+    if lowered in {"green", "ok", "passed", "pass", "success", "successful"}:
+        return "green"
+    if lowered in {"red", "fail", "failed", "error"}:
+        return "red"
+    if lowered in {"", "unknown", "not_run", "not run"}:
+        return "unknown"
+    return value.strip() or "unknown"
+
+
+def _run_batch_check(service: str, migrated_project: Path, legacy_root: Path | None) -> dict[str, str]:
+    from capamedia_cli.commands.check import _write_report
+    from capamedia_cli.core.checklist_rules import CheckContext, run_all_blocks
+
+    ctx = CheckContext(migrated_path=migrated_project, legacy_path=legacy_root)
+    results = run_all_blocks(ctx)
+    report_path = _write_report(service, results, migrated_project, legacy_root)
+
+    high = sum(1 for r in results if r.status == "fail" and r.severity == "high")
+    medium = sum(1 for r in results if r.status == "fail" and r.severity == "medium")
+    low = sum(1 for r in results if r.status == "fail" and r.severity == "low")
+
+    if high > 0:
+        verdict = "BLOCKED_BY_HIGH"
+    elif medium > 0:
+        verdict = "READY_WITH_FOLLOW_UP"
+    else:
+        verdict = "READY_TO_MERGE"
+
+    return {
+        "verdict": verdict,
+        "HIGH": str(high),
+        "MEDIUM": str(medium),
+        "LOW": str(low),
+        "report": str(report_path),
+    }
+
+
+def _process_migrate_service(
+    service: str,
+    root: Path,
+    schema_path: Path,
+    *,
+    codex_bin: str,
+    model: str | None,
+    prompt_file: Path | None,
+    timeout_minutes: int,
+    run_check: bool,
+    unsafe: bool,
+    resume: bool = False,
+) -> BatchRow:
+    workspace = root / service
+    if not workspace.exists():
+        return BatchRow(service, "fail", f"workspace no existe: {workspace}", {})
+
+    state = load_state(workspace, "migrate", service, reset=not resume)
+    state_result = state.get("result", {}) if isinstance(state.get("result"), dict) else {}
+    base_fields = {
+        "codex": "pending",
+        "result": "pending",
+        "framework": "?",
+        "build": "unknown",
+        "check": "not_run" if run_check else "skip",
+        "seconds": "0.0",
+        "project": "?",
+    }
+
+    fabrics_meta = _load_fabrics_metadata(workspace)
+    if not fabrics_meta:
+        fields = _hydrate_fields(base_fields, state_result.get("fields"))
+        detail = (
+            "no hay evidencia de Fabrics en .capamedia/fabrics.json "
+            "(corre `capamedia fabrics generate` o `batch pipeline` antes de migrate)"
+        )
+        set_result(state, status="fail", detail=detail, fields=fields)
+        mark_stage(state, "migrate", status="fail", detail=detail, fields=fields)
+        save_state(workspace, "migrate", state)
+        return BatchRow(service, "fail", detail, fields)
+
+    migrated_project = _find_project_from_fabrics_metadata(workspace) or _find_migrated_project(workspace, service)
+    if migrated_project is None:
+        fields = _hydrate_fields(base_fields, state_result.get("fields"))
+        detail = "no se encontro proyecto migrado en destino/ pese a tener metadata de Fabrics"
+        set_result(state, status="fail", detail=detail, fields=fields)
+        mark_stage(state, "migrate", status="fail", detail=detail, fields=fields)
+        save_state(workspace, "migrate", state)
+        return BatchRow(
+            service,
+            "fail",
+            detail,
+            fields,
+        )
+
+    if resume and state_result.get("status") == "ok" and stage_ok(state, "migrate"):
+        check_is_done = (not run_check) or stage_ok(state, "check")
+        if check_is_done:
+            fields = _hydrate_fields(base_fields, state_result.get("fields"))
+            fields["project"] = migrated_project.name
+            return BatchRow(
+                service,
+                "ok",
+                _as_text(state_result.get("detail"), "already completed (resume)") or "already completed (resume)",
+                fields,
+            )
+
+    prompt_body = _load_migrate_prompt(workspace, prompt_file)
+    prompt = _build_batch_migrate_prompt(service, workspace, migrated_project, prompt_body)
+
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = workspace / ".capamedia" / "batch-migrate"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = run_dir / f"codex-prompt-{ts}.md"
+    output_path = run_dir / f"codex-last-message-{ts}.json"
+    stdout_path = run_dir / f"codex-stdout-{ts}.log"
+    stderr_path = run_dir / f"codex-stderr-{ts}.log"
+    prompt_path.write_text(prompt + "\n", encoding="utf-8")
+
+    cmd = [
+        codex_bin,
+        "exec",
+        "--skip-git-repo-check",
+        "--cd",
+        str(workspace),
+        "--output-schema",
+        str(schema_path),
+        "--output-last-message",
+        str(output_path),
+        "--color",
+        "never",
+    ]
+    if model:
+        cmd.extend(["--model", model])
+    if unsafe:
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        cmd.append("--full-auto")
+    cmd.append("-")
+
+    started = time.perf_counter()
+    skip_migrate = resume and stage_ok(state, "migrate")
+    project_name = migrated_project.name
+    result_status = "ok"
+    build_status = "unknown"
+    summary = ""
+    elapsed = 0.0
+    if skip_migrate:
+        saved_fields = {}
+        stage_data = state.get("stages", {}).get("migrate", {})
+        if isinstance(stage_data, dict):
+            saved_fields = stage_data.get("fields", {})
+            summary = _as_text(stage_data.get("detail"), "migrate already completed")
+        project_name = _as_text(saved_fields.get("project"), migrated_project.name) or migrated_project.name
+        result_status = _as_text(saved_fields.get("result"), "ok").lower()
+        build_status = _normalize_build_status(_as_text(saved_fields.get("build"), "green"))
+    else:
+        try:
+            result = subprocess.run(
+                cmd,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=timeout_minutes * 60,
+            )
+            stdout_text = result.stdout or ""
+            stderr_text = result.stderr or ""
+        except FileNotFoundError:
+            fields = _hydrate_fields(base_fields, state_result.get("fields"))
+            fields["project"] = migrated_project.name
+            set_result(state, status="fail", detail=f"no se encontro el binario `{codex_bin}`", fields=fields)
+            mark_stage(state, "migrate", status="fail", detail=f"no se encontro el binario `{codex_bin}`", fields=fields)
+            save_state(workspace, "migrate", state)
+            return BatchRow(service, "fail", f"no se encontro el binario `{codex_bin}`", fields)
+        except subprocess.TimeoutExpired as exc:
+            stdout_text = _as_text(exc.stdout)
+            stderr_text = _as_text(exc.stderr)
+            stdout_path.write_text(stdout_text, encoding="utf-8")
+            stderr_path.write_text(stderr_text, encoding="utf-8")
+            fields = _hydrate_fields(base_fields, state_result.get("fields"))
+            fields.update(
+                {
+                    "codex": "timeout",
+                    "result": "failed",
+                    "framework": "?",
+                    "build": "unknown",
+                    "check": "not_run" if run_check else "skip",
+                    "seconds": f"{time.perf_counter() - started:.1f}",
+                    "project": migrated_project.name,
+                }
+            )
+            set_result(state, status="fail", detail=f"timeout despues de {timeout_minutes}m", fields=fields)
+            mark_stage(state, "migrate", status="fail", detail=f"timeout despues de {timeout_minutes}m", fields=fields)
+            save_state(workspace, "migrate", state)
+            return BatchRow(service, "fail", f"timeout despues de {timeout_minutes}m", fields)
+
+        elapsed = time.perf_counter() - started
+        stdout_path.write_text(stdout_text, encoding="utf-8")
+        stderr_path.write_text(stderr_text, encoding="utf-8")
+
+        payload = _read_structured_message(output_path)
+        result_status = _as_text(payload.get("status"), "ok" if result.returncode == 0 else "failed").lower()
+        summary = _as_text(payload.get("summary")).strip()
+        if not summary:
+            summary = stderr_text.strip() or stdout_text.strip() or "codex exec termino sin resumen estructurado"
+        framework = _as_text(payload.get("framework"), "?").strip() or "?"
+        build_status = _normalize_build_status(_as_text(payload.get("build_status"), "unknown"))
+        reported_project = _as_text(payload.get("migrated_project"), str(migrated_project)).strip()
+        project_name = Path(reported_project).name if reported_project else migrated_project.name
+        migrate_fields = {
+            "codex": "ok" if result.returncode == 0 else f"exit_{result.returncode}",
+            "result": result_status,
+            "framework": framework,
+            "build": build_status,
+            "check": "not_run" if run_check else "skip",
+            "seconds": f"{elapsed:.1f}",
+            "project": project_name,
+        }
+        migrate_stage_status = "ok" if result.returncode == 0 and result_status == "ok" and build_status == "green" else "fail"
+        mark_stage(state, "migrate", status=migrate_stage_status, detail=summary.splitlines()[0][:160], fields=migrate_fields)
+        save_state(workspace, "migrate", state)
+
+    saved_migrate_fields = {}
+    migrate_stage_data = state.get("stages", {}).get("migrate", {})
+    if isinstance(migrate_stage_data, dict):
+        saved_migrate_fields = migrate_stage_data.get("fields", {})
+
+    fields = _hydrate_fields(base_fields, saved_migrate_fields or state_result.get("fields"))
+    fields["project"] = project_name
+    if not skip_migrate and elapsed > 0:
+        fields["seconds"] = f"{elapsed:.1f}"
+
+    check_status = fields.get("check", "not_run" if run_check else "skip")
+    if run_check:
+        if resume and stage_ok(state, "check"):
+            stage_data = state.get("stages", {}).get("check", {})
+            if isinstance(stage_data, dict):
+                saved_check_fields = stage_data.get("fields", {})
+                fields["check"] = _as_text(saved_check_fields.get("check"), _as_text(stage_data.get("detail"), "READY_TO_MERGE"))
+            check_status = fields["check"]
+        else:
+            try:
+                check_result = _run_batch_check(service, migrated_project, _find_legacy_root(workspace, service))
+                check_status = check_result["verdict"]
+                fields["check"] = check_status
+                mark_stage(
+                    state,
+                    "check",
+                    status="ok" if not check_status.startswith("BLOCKED_BY_HIGH") else "fail",
+                    detail=check_status,
+                    fields={"check": check_status, "report": check_result["report"]},
+                )
+            except Exception as exc:  # noqa: BLE001
+                check_status = f"CHECK_ERROR: {type(exc).__name__}"
+                fields["check"] = check_status
+                mark_stage(state, "check", status="fail", detail=check_status, fields={"check": check_status})
+            save_state(workspace, "migrate", state)
+
+    row_status = "ok"
+    if fields.get("codex") not in {"ok"}:
+        row_status = "fail"
+    elif result_status != "ok":
+        row_status = "fail"
+    elif build_status != "green":
+        row_status = "fail"
+    elif check_status.startswith("BLOCKED_BY_HIGH") or check_status.startswith("CHECK_ERROR"):
+        row_status = "fail"
+
+    detail = (summary or _as_text(state_result.get("detail")) or "migrate completed").splitlines()[0][:160]
+    set_result(state, status=row_status, detail=detail, fields=fields)
+    save_state(workspace, "migrate", state)
+    return BatchRow(service, row_status, detail, fields)
+
+
+def _process_pipeline_service(
+    service: str,
+    root: Path,
+    schema_path: Path,
+    *,
+    harnesses: list[str],
+    artifact_token: str | None,
+    namespace: str,
+    group_id: str,
+    codex_bin: str,
+    model: str | None,
+    prompt_file: Path | None,
+    timeout_minutes: int,
+    skip_tx: bool,
+    shallow: bool,
+    skip_check: bool,
+    unsafe: bool,
+    resume: bool = False,
+) -> BatchRow:
+    from capamedia_cli.commands.clone import clone_service
+    from capamedia_cli.commands.fabrics import generate, inspect_fabrics_workspace
+    from capamedia_cli.commands.init import scaffold_project
+
+    workspace = root / service
+    workspace.mkdir(parents=True, exist_ok=True)
+    state = load_state(workspace, "pipeline", service, reset=not resume)
+
+    fields = {
+        "clone": "pending",
+        "init": "pending",
+        "fabric": "pending",
+        "codex": "pending",
+        "result": "pending",
+        "build": "pending",
+        "check": "pending",
+        "seconds": "0.0",
+        "project": "?",
+    }
+
+    started = time.perf_counter()
+
+    if not (resume and stage_ok(state, "clone") and _find_legacy_root(workspace, service) and _has_complexity_report(workspace, service)):
+        try:
+            clone_service(service, workspace=workspace, shallow=shallow, skip_tx=skip_tx)
+            fields["clone"] = "ok"
+            mark_stage(state, "clone", status="ok", detail="clone completed", fields={"clone": "ok"})
+            save_state(workspace, "pipeline", state)
+        except typer.Exit:
+            fields["clone"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            mark_stage(state, "clone", status="fail", detail="clone failed", fields={"clone": "fail"})
+            set_result(state, status="fail", detail="clone failed", fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", "clone failed", fields)
+        except Exception as exc:  # noqa: BLE001
+            fields["clone"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            detail = f"clone error: {type(exc).__name__}: {exc}"
+            mark_stage(state, "clone", status="fail", detail=detail, fields={"clone": "fail"})
+            set_result(state, status="fail", detail=detail, fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", detail, fields)
+    else:
+        fields["clone"] = "ok"
+
+    if not (resume and stage_ok(state, "init") and _has_init_material(workspace)):
+        try:
+            scaffold_project(
+                target_dir=workspace,
+                service_name=service,
+                harnesses=harnesses,
+                artifact_token=artifact_token,
+            )
+            fields["init"] = "ok"
+            mark_stage(state, "init", status="ok", detail="init completed", fields={"init": "ok"})
+            save_state(workspace, "pipeline", state)
+        except Exception as exc:  # noqa: BLE001
+            fields["init"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            detail = f"init error: {type(exc).__name__}: {exc}"
+            mark_stage(state, "init", status="fail", detail=detail, fields={"init": "fail"})
+            set_result(state, status="fail", detail=detail, fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", detail, fields)
+    else:
+        fields["init"] = "ok"
+
+    if not (resume and stage_ok(state, "fabric") and _has_fabrics_material(workspace)):
+        fabrics_ready = inspect_fabrics_workspace(workspace)
+        if fabrics_ready["status"] != "ok":
+            fields["fabric"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            detail = f"fabrics preflight failed: {fabrics_ready['detail']}"
+            mark_stage(state, "fabric", status="fail", detail=detail, fields={"fabric": "fail"})
+            set_result(state, status="fail", detail=detail, fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", detail, fields)
+        try:
+            generate(
+                service_name=service,
+                workspace=workspace,
+                namespace=namespace,
+                group_id=group_id,
+                dry_run=False,
+            )
+            fabrics_meta = _load_fabrics_metadata(workspace)
+            if not fabrics_meta:
+                raise RuntimeError("Fabrics no dejo metadata en .capamedia/fabrics.json")
+            fabric_status = _as_text(fabrics_meta.get("status"), "ok") or "ok"
+            fabric_detail = _as_text(fabrics_meta.get("detail"), "fabric completed") or "fabric completed"
+            fields["fabric"] = fabric_status
+            fields["project"] = _as_text(fabrics_meta.get("project_name"), fields["project"])
+            mark_stage(
+                state,
+                "fabric",
+                status="ok",
+                detail=fabric_detail,
+                fields={"fabric": fabric_status, "project": fields["project"]},
+            )
+            save_state(workspace, "pipeline", state)
+        except typer.Exit:
+            fields["fabric"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            mark_stage(state, "fabric", status="fail", detail="fabric failed", fields={"fabric": "fail"})
+            set_result(state, status="fail", detail="fabric failed", fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", "fabric failed", fields)
+        except Exception as exc:  # noqa: BLE001
+            fields["fabric"] = "fail"
+            fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+            detail = f"fabric error: {type(exc).__name__}: {exc}"
+            mark_stage(state, "fabric", status="fail", detail=detail, fields={"fabric": "fail"})
+            set_result(state, status="fail", detail=detail, fields=fields)
+            save_state(workspace, "pipeline", state)
+            return BatchRow(service, "fail", detail, fields)
+    else:
+        fabrics_meta = _load_fabrics_metadata(workspace)
+        fields["fabric"] = _as_text((fabrics_meta or {}).get("status"), "ok")
+        fields["project"] = _as_text((fabrics_meta or {}).get("project_name"), fields["project"])
+
+    migrate_row = _process_migrate_service(
+        service,
+        root,
+        schema_path,
+        codex_bin=codex_bin,
+        model=model,
+        prompt_file=prompt_file,
+        timeout_minutes=timeout_minutes,
+        run_check=not skip_check,
+        unsafe=unsafe,
+        resume=resume,
+    )
+    fields.update(migrate_row.fields)
+    fields["seconds"] = f"{time.perf_counter() - started:.1f}"
+    mark_stage(state, "migrate", status="ok" if migrate_row.status == "ok" else "fail", detail=migrate_row.detail, fields=migrate_row.fields)
+    if not skip_check:
+        mark_stage(
+            state,
+            "check",
+            status="ok" if migrate_row.fields.get("check", "").startswith("READY") else "fail",
+            detail=migrate_row.fields.get("check", ""),
+            fields={"check": migrate_row.fields.get("check", "")},
+        )
+    set_result(state, status=migrate_row.status, detail=migrate_row.detail, fields=fields)
+    save_state(workspace, "pipeline", state)
+    return BatchRow(service, migrate_row.status, migrate_row.detail, fields)
+
+
+def _run_service_with_retries(
+    service: str,
+    runner,
+    *,
+    retries: int,
+) -> BatchRow:
+    last_row: BatchRow | None = None
+    for attempt in range(retries + 1):
+        row = runner(service, attempt)
+        if row.status == "ok":
+            return row
+        last_row = row
+    assert last_row is not None
+    return last_row
 
 
 def _ensure_legacy_available(service: str, root: Path, shallow: bool) -> tuple[Path | None, str]:
@@ -467,10 +1334,12 @@ def batch_init(
     root: Annotated[Optional[Path], typer.Option("--root")] = None,
 ) -> None:
     """Inicializa N workspaces con .claude/ + CLAUDE.md + .mcp.json."""
-    from capamedia_cli.commands.init import init_project
+    from capamedia_cli.adapters import resolve_harnesses
+    from capamedia_cli.commands.init import scaffold_project
 
     services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
+    harnesses = resolve_harnesses(ai)
     console.print(
         Panel.fit(
             f"[bold]batch init[/bold]\n"
@@ -485,30 +1354,358 @@ def batch_init(
         svc_ws = ws / service
         svc_ws.mkdir(parents=True, exist_ok=True)
         try:
-            # init no es threadsafe con chdir; pero usamos --here con target via service_name
-            # Para batch llamamos directo pasando el path absoluto
-            init_project(
+            scaffold_project(
+                target_dir=svc_ws,
                 service_name=service,
-                ai=ai,
-                here=False,
-                force=True,
+                harnesses=harnesses,
                 artifact_token=None,
             )
-            # init_project crea bajo CWD/<service>; como usamos root como CWD-equivalente,
-            # debemos cambiar antes — pero no es ideal con ThreadPool. En su lugar:
-            # el init siempre crea bajo Path.cwd()/service. Movemos si root difiere.
             return BatchRow(service, "ok", f"inicializado", {"harness": ai})
-        except typer.Exit:
-            return BatchRow(service, "fail", "init failed (typer.Exit)", {})
         except Exception as e:  # noqa: BLE001
             return BatchRow(service, "fail", f"{type(e).__name__}: {e}", {})
 
-    # init es no-threadsafe por el CWD y stdin prompts — forzamos workers=1
-    console.print("[dim]init corre secuencial (no-threadsafe). Ignorando --workers.[/dim]")
-    for s in services:
-        rows.append(process(s))
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Inicializando", total=len(services))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for future in as_completed(pool.submit(process, s) for s in services):
+                rows.append(future.result())
+                progress.advance(task)
 
     rows.sort(key=lambda r: r.service)
     _render_table("init", rows, ["harness"])
     md = _write_markdown_report("init", rows, ws, ["harness"])
+    console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+
+
+@app.command("watch")
+def batch_watch(
+    root: Annotated[Path, typer.Argument(help="Directorio raiz donde viven los workspaces")],
+    file: Annotated[
+        Optional[Path],
+        typer.Option("--from", "-f", help="Archivo opcional .txt / .csv / .xlsx con servicios"),
+    ] = None,
+    sheet: Annotated[
+        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+    ] = None,
+    kind: Annotated[
+        str,
+        typer.Option("--kind", help="Que estado mirar: auto | pipeline | migrate"),
+    ] = "auto",
+    failures_only: Annotated[
+        bool, typer.Option("--failures-only", help="Mostrar solo servicios fallidos")
+    ] = False,
+    follow: Annotated[
+        bool, typer.Option("--follow", help="Refresca periodicamente hasta Ctrl+C")
+    ] = False,
+    interval_seconds: Annotated[
+        int, typer.Option("--interval-seconds", help="Intervalo de refresh en modo --follow")
+    ] = 15,
+) -> None:
+    """Mirador operativo de lotes batch usando el estado persistente por servicio."""
+    root = root.resolve()
+    if kind not in {"auto", "pipeline", "migrate"}:
+        raise typer.BadParameter("kind debe ser uno de: auto, pipeline, migrate")
+
+    if file is not None:
+        services = _read_services_file(file, sheet=sheet)
+    else:
+        services = sorted(
+            p.name
+            for p in root.iterdir()
+            if p.is_dir()
+            and not p.name.startswith(".")
+            and any((p / marker).exists() for marker in (".capamedia", "legacy", "destino"))
+        )
+
+    if not services:
+        console.print(f"[yellow]No se encontraron servicios bajo {root}[/yellow]")
+        raise typer.Exit(0)
+
+    def render_snapshot() -> list[BatchRow]:
+        rows = _collect_watch_rows(root, services, kind)
+        if failures_only:
+            rows = [row for row in rows if row.status == "fail"]
+        _render_table("watch", rows, WATCH_FIELD_ORDER)
+        return rows
+
+    if follow:
+        try:
+            while True:
+                console.clear()
+                console.print(
+                    Panel.fit(
+                        f"[bold]batch watch[/bold]\n"
+                        f"Servicios: {len(services)} · Root: {root}\n"
+                        f"Kind: {kind} · Failures only: {'SI' if failures_only else 'NO'} · Every: {interval_seconds}s",
+                        border_style="cyan",
+                    )
+                )
+                render_snapshot()
+                time.sleep(interval_seconds)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]watch cancelado por el usuario[/yellow]")
+        return
+
+    console.print(
+        Panel.fit(
+            f"[bold]batch watch[/bold]\n"
+            f"Servicios: {len(services)} · Root: {root}\n"
+            f"Kind: {kind} · Failures only: {'SI' if failures_only else 'NO'}",
+            border_style="cyan",
+        )
+    )
+    rows = render_snapshot()
+    md = _write_markdown_report(f"watch-{kind}", rows, root, WATCH_FIELD_ORDER)
+    console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+
+
+@app.command("pipeline")
+def batch_pipeline(
+    file: Annotated[
+        Path,
+        typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios"),
+    ],
+    namespace: Annotated[
+        str,
+        typer.Option(
+            "--namespace",
+            "-n",
+            help="Namespace del catalogo para Fabrics (obligatorio en modo batch)",
+        ),
+    ],
+    sheet: Annotated[
+        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+    ] = None,
+    ai: Annotated[
+        str,
+        typer.Option(
+            "--ai",
+            help="Harness(es) CSV para el scaffold. `codex` se agrega automaticamente si falta.",
+        ),
+    ] = "codex",
+    workers: Annotated[int, typer.Option("--workers", "-w")] = 2,
+    root: Annotated[Optional[Path], typer.Option("--root")] = None,
+    group_id: Annotated[str, typer.Option("--group-id")] = "com.pichincha.sp",
+    artifact_token: Annotated[
+        Optional[str],
+        typer.Option("--artifact-token", help="Override del token para renderizar .mcp.json"),
+    ] = None,
+    codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
+    model: Annotated[
+        Optional[str], typer.Option("--model", help="Override del modelo para `codex exec`")
+    ] = None,
+    prompt_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--prompt-file",
+            help="Prompt base alternativo para todos los servicios. Default: <workspace>/.codex/prompts/migrate.md",
+        ),
+    ] = None,
+    timeout_minutes: Annotated[
+        int, typer.Option("--timeout-minutes", help="Timeout maximo por servicio para migrate")
+    ] = 90,
+    shallow: Annotated[
+        bool, typer.Option("--shallow", help="Clone superficial para legacy/UMPs/TX")
+    ] = False,
+    skip_tx: Annotated[
+        bool, typer.Option("--skip-tx", help="No clonar repos individuales de TX")
+    ] = False,
+    skip_check: Annotated[
+        bool, typer.Option("--skip-check", help="No ejecutar checklist post-migracion")
+    ] = False,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Reanuda servicios saltando etapas ya exitosas")
+    ] = False,
+    retries: Annotated[
+        int, typer.Option("--retries", help="Reintentos adicionales por servicio")
+    ] = 0,
+    unsafe: Annotated[
+        bool,
+        typer.Option(
+            "--unsafe",
+            help="Usa `--dangerously-bypass-approvals-and-sandbox` en `codex exec`",
+        ),
+    ] = False,
+) -> None:
+    """Ejecuta el pipeline completo por servicio en paralelo."""
+    from capamedia_cli.adapters import resolve_harnesses
+
+    services = _read_services_file(file, sheet=sheet)
+    ws = (root or Path.cwd()).resolve()
+
+    if prompt_file is not None:
+        prompt_file = prompt_file.resolve()
+        if not prompt_file.exists():
+            raise typer.BadParameter(f"prompt no existe: {prompt_file}")
+
+    harnesses = resolve_harnesses(ai)
+    if "codex" not in harnesses:
+        harnesses.append("codex")
+
+    schema_path = _ensure_migrate_schema(ws)
+
+    console.print(
+        Panel.fit(
+            f"[bold]batch pipeline[/bold]\n"
+            f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
+            f"Harnesses: {', '.join(harnesses)} · Namespace: {namespace} · Codex: {codex_bin}\n"
+            f"Resume: {'SI' if resume else 'NO'} · Retries: {retries}",
+            border_style="cyan",
+        )
+    )
+
+    rows: list[BatchRow] = []
+
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Pipeline", total=len(services))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(
+                    _run_service_with_retries,
+                    service,
+                    lambda svc, attempt: _process_pipeline_service(
+                        svc,
+                        ws,
+                        schema_path,
+                        harnesses=harnesses,
+                        artifact_token=artifact_token,
+                        namespace=namespace,
+                        group_id=group_id,
+                        codex_bin=codex_bin,
+                        model=model,
+                        prompt_file=prompt_file,
+                        timeout_minutes=timeout_minutes,
+                        skip_tx=skip_tx,
+                        shallow=shallow,
+                        skip_check=skip_check,
+                        unsafe=unsafe,
+                        resume=resume or attempt > 0,
+                    ),
+                    retries=retries,
+                )
+                for service in services
+            ]
+            for future in as_completed(futures):
+                rows.append(future.result())
+                progress.advance(task)
+
+    rows.sort(key=lambda r: r.service)
+    _render_table("pipeline", rows, PIPELINE_FIELD_ORDER)
+    md = _write_markdown_report("pipeline", rows, ws, PIPELINE_FIELD_ORDER)
+    console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+
+
+@app.command("migrate")
+def batch_migrate(
+    file: Annotated[
+        Path,
+        typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios"),
+    ],
+    sheet: Annotated[
+        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+    ] = None,
+    workers: Annotated[int, typer.Option("--workers", "-w")] = 2,
+    root: Annotated[Optional[Path], typer.Option("--root")] = None,
+    codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
+    model: Annotated[
+        Optional[str], typer.Option("--model", help="Override del modelo para `codex exec`")
+    ] = None,
+    prompt_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--prompt-file",
+            help="Prompt base alternativo para todos los servicios. Default: <workspace>/.codex/prompts/migrate.md",
+        ),
+    ] = None,
+    timeout_minutes: Annotated[
+        int, typer.Option("--timeout-minutes", help="Timeout maximo por servicio")
+    ] = 90,
+    skip_check: Annotated[
+        bool, typer.Option("--skip-check", help="No ejecutar checklist post-migracion")
+    ] = False,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Reanuda servicios ya migrados exitosamente")
+    ] = False,
+    retries: Annotated[
+        int, typer.Option("--retries", help="Reintentos adicionales por servicio")
+    ] = 0,
+    unsafe: Annotated[
+        bool,
+        typer.Option(
+            "--unsafe",
+            help="Usa `--dangerously-bypass-approvals-and-sandbox` en `codex exec`",
+        ),
+    ] = False,
+) -> None:
+    """Ejecuta `codex exec` en paralelo sobre workspaces ya preparados."""
+    services = _read_services_file(file, sheet=sheet)
+    ws = (root or Path.cwd()).resolve()
+
+    if prompt_file is not None:
+        prompt_file = prompt_file.resolve()
+        if not prompt_file.exists():
+            raise typer.BadParameter(f"prompt no existe: {prompt_file}")
+
+    schema_path = _ensure_migrate_schema(ws)
+
+    console.print(
+        Panel.fit(
+            f"[bold]batch migrate[/bold]\n"
+            f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
+            f"Codex: {codex_bin} · Model: {model or '(default)'} · Checklist: {'NO' if skip_check else 'SI'}\n"
+            f"Resume: {'SI' if resume else 'NO'} · Retries: {retries}",
+            border_style="cyan",
+        )
+    )
+
+    rows: list[BatchRow] = []
+
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Migrando", total=len(services))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(
+                    _run_service_with_retries,
+                    service,
+                    lambda svc, attempt: _process_migrate_service(
+                        svc,
+                        ws,
+                        schema_path,
+                        codex_bin=codex_bin,
+                        model=model,
+                        prompt_file=prompt_file,
+                        timeout_minutes=timeout_minutes,
+                        run_check=not skip_check,
+                        unsafe=unsafe,
+                        resume=resume or attempt > 0,
+                    ),
+                    retries=retries,
+                )
+                for service in services
+            ]
+            for future in as_completed(futures):
+                rows.append(future.result())
+                progress.advance(task)
+
+    rows.sort(key=lambda r: r.service)
+    _render_table("migrate", rows, MIGRATE_FIELD_ORDER)
+    md = _write_markdown_report("migrate", rows, ws, MIGRATE_FIELD_ORDER)
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")

@@ -3,6 +3,7 @@
 Comandos disponibles:
   capamedia install        - instala toolchain (Java, Node, Git, etc.) via winget
   capamedia check-install  - verifica que todo el toolchain este OK
+  capamedia auth           - bootstrap de credenciales para Fabrics/Azure/Codex
   capamedia init           - inicializa un proyecto con scaffolding para el harness elegido
   capamedia fabrics        - gestiona el MCP Fabrics (setup y preflight)
   capamedia doctor         - diagnostico del CLI y el entorno
@@ -30,6 +31,7 @@ from rich.console import Console
 
 from capamedia_cli import __version__
 from capamedia_cli.commands import (
+    auth,
     batch,
     check,
     check_install,
@@ -76,6 +78,7 @@ def main(
 
 app.command("install")(install.install_toolchain)
 app.command("check-install")(check_install.check_install)
+app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("check")(check.check_project)

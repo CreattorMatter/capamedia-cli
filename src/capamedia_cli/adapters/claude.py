@@ -68,7 +68,8 @@ class ClaudeCodeAdapter(HarnessAdapter):
         dest.write_text(serialize_frontmatter(fm, asset.body), encoding="utf-8")
         written = [dest]
         for extra in asset.extra_files:
-            target = skill_dir / extra.name
+            target = skill_dir / extra.relative_to(asset.source.parent)
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(extra.read_bytes())
             written.append(target)
         return written

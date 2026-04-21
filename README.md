@@ -1,43 +1,31 @@
-# capamedia-cli · v0.3.3
+# capamedia-cli · v0.3.8
 
-CLI multi-harness para la migración de servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
+CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
 Un solo canonical, 6 harnesses soportados: **Claude Code · Cursor · Windsurf · GitHub Copilot · OpenAI Codex · opencode**.
 
 ---
 
-## Qué hace
+## Que hace
 
 Separa claramente dos responsabilidades:
 
-1. **Setup local** (comandos shell): `capamedia install`, `check-install`, `init`, `fabrics setup`
-2. **Trabajo diario** (slash commands del IDE): `/clone`, `/fabric`, `/migrate`, `/check`
+1. **Setup local**: `capamedia install`, `capamedia check-install`, `capamedia auth bootstrap`, `capamedia init`, `capamedia fabrics setup`
+2. **Trabajo diario en IDE**: `/clone`, `/fabric`, `/migrate`, `/check`
+3. **Fabrica batch**: `capamedia batch complexity|clone|init|pipeline|migrate|check|watch`
 
-El CLI genera los slash commands nativos del harness elegido en la carpeta de trabajo. Los comandos se ejecutan desde el chat del IDE — la AI entiende el contexto del proyecto, lee el legacy, invoca el MCP Fabrics, y responde conversacionalmente.
+El CLI genera slash commands y assets nativos del harness elegido. Para Fabrics usa siempre el MCP del banco como gate del arquetipo; si el arquetipo no sale de Fabrics, la migracion no avanza.
 
-```
-┌───────────────────── capamedia-cli (shell) ─────────────────────┐
-│                                                                  │
-│   install ─→ check-install ─→ init ─→ fabrics setup              │
-│                                                                  │
-└──────────────────────────── genera ──────────────────────────────┘
-                                ↓
-         ┌──────────────────────┴──────────────────────┐
-         │    .claude/commands/{clone,fabric,migrate,check}.md   │
-         │    .cursor/rules/*.mdc · .windsurf/rules/*.md         │
-         │    .github/prompts/*.md · .codex/prompts/*.md         │
-         │    .opencode/prompts/*.md                             │
-         │    CLAUDE.md · .mcp.json · .sonarlint/                │
-         └──────────────────────┬──────────────────────┘
-                                ↓
-               [Chat del IDE con la AI del harness]
-                                ↓
-   /clone <svc> ─→ /fabric ─→ /migrate ─→ /check
+```text
+install -> check-install -> auth bootstrap -> init -> fabrics setup
+                                      |
+                                      v
+                         batch pipeline / batch migrate / batch watch
 ```
 
 ---
 
-## Instalación
+## Instalacion
 
 ```bash
 uv tool install capamedia-cli --from .
@@ -45,147 +33,246 @@ uv tool install capamedia-cli --from .
 pip install -e .
 ```
 
-## Flujo completo
+## Setup de una maquina
 
-### 1) Setup (una vez por desarrollador)
+### 1. Toolchain
 
 ```bash
-# Instala toolchain (Git, Java 21, Gradle, Node.js LTS, Python 3.12, uv, VS Code)
 capamedia install
-
-# Verifica que todo esté OK
 capamedia check-install
-
-# Registra el MCP Fabrics del banco (pide ARTIFACT_TOKEN)
-capamedia fabrics setup
 ```
 
-**Manual** (no automatizable):
-- Azure DevOps PAT — primer `git clone` interactivo para cachear via GCM
-- SonarCloud binding — desde el sidebar de VS Code → *Share Configuration*
+`capamedia install` instala el toolchain automatizable:
 
-### 2) Por cada servicio a migrar
+- Git
+- Java 21
+- Gradle
+- Node.js LTS
+- Codex CLI
+- Python 3.12
+- uv
+- VS Code
+
+### 2. Credenciales y MCP
+
+Bootstrap recomendado para una Mac o runner que va a ejecutar batch unattended:
 
 ```bash
-# Crear carpeta del servicio
+capamedia auth bootstrap \
+  --scope global \
+  --artifact-token <AZURE_ARTIFACTS_PAT> \
+  --azure-pat <AZURE_DEVOPS_PAT> \
+  --openai-api-key <OPENAI_API_KEY> \
+  --env-file ~/.capamedia/auth.env
+```
+
+Esto hace tres cosas:
+
+- registra Fabrics en `~/.mcp.json`
+- refresca `~/.npmrc` para `@pichincha/fabrics-project`
+- autentica Codex CLI via `codex login --with-api-key`
+
+Y opcionalmente escribe un `auth.env` con:
+
+- `CAPAMEDIA_ARTIFACT_TOKEN`
+- `CAPAMEDIA_AZDO_PAT`
+- `OPENAI_API_KEY`
+
+Si no queres usar `auth bootstrap`, tambien podes hacer cada paso por separado:
+
+```bash
+capamedia fabrics setup --scope global --refresh-npmrc
+codex login
+```
+
+### 3. Paso manual que sigue existiendo
+
+Lo unico que queda manual por ahora es SonarCloud connected mode / SonarQube for IDE.
+
+---
+
+## Flujo por servicio
+
+```bash
 mkdir -p "C:/Dev/Banco Pichincha/CapaMedia/wsclientes0008"
 cd "C:/Dev/Banco Pichincha/CapaMedia/wsclientes0008"
 
-# Inicializar con el harness preferido (interactivo por default)
-capamedia init wsclientes0008
-# → te pregunta uno por uno: claude? cursor? windsurf? copilot? codex? opencode?
-# → genera .claude/, .cursor/, .mcp.json, CLAUDE.md, .sonarlint/, .gitignore
+capamedia init wsclientes0008 --ai codex
+```
 
-# Abrir en el IDE
-code .        # o "claude", o "cursor .", o "windsurf ."
+Eso genera, segun el harness:
 
-# En el CHAT del IDE:
-/clone wsclientes0008
-#   → trae legacy, UMPs, TX catalogs, gold reference
-#   → responde: "Cloné. Es 1 op, 3 UMPs (TX 060480, 061404, 067010). Va REST+WebFlux. MEDIUM complexity."
+- `.claude/commands/*`
+- `.cursor/rules/*`
+- `.github/prompts/*`
+- `.codex/prompts/*`
+- `.codex/agents/*.toml`
+- `.agents/skills/*/SKILL.md`
+- `CLAUDE.md` o `AGENTS.md`
+- `.mcp.json`
+- `.sonarlint/connectedMode.json`
 
-/fabric
-#   → preflight del MCP, invoca mcp__fabrics__create_project_with_wsdl
-#   → aplica workarounds conocidos (webflux starter, jaxws-rt, versiones)
-#   → responde: "Arquetipo generado en ./destino/tnd-msa-sp-wsclientes0008/. Listo para /migrate."
+En modo IDE el flujo sigue siendo:
 
-/migrate
-#   → lanza agente migrador (sub-agente)
-#   → implementa 7 blocks con GATEs + self-correction loop
-#   → corre ./gradlew build hasta que pase
-#   → responde: "Migración OK. 47 archivos. Build verde. Tests 92%."
-
-/check
-#   → corre BLOQUES 0-14 del checklist BPTPSRE
-#   → cruza WSDL legacy ↔ migrado (operaciones, namespaces, XSDs)
-#   → diálogo conversacional: "¿1 op? SÍ. ¿REST? SÍ. ¿OK? SÍ."
-#   → responde: "14 bloques · 58 PASS · 3 MEDIUM · 1 HIGH. ¿Fix los MEDIUM?"
+```text
+/clone <servicio> -> /fabric -> /migrate -> /check
 ```
 
 ---
 
-## Arquitectura
+## Fabrica paralela
 
+### Batch migrate
+
+Cuando los workspaces ya existen y `destino/` ya fue generado por Fabrics:
+
+```bash
+capamedia batch migrate \
+  --from services.txt \
+  --root "C:/Dev/Banco Pichincha/CapaMedia" \
+  --workers 3 \
+  --resume \
+  --retries 2
 ```
-capamedia-cli/
-├── pyproject.toml
-├── src/capamedia_cli/
-│   ├── cli.py                        # typer entry
-│   ├── commands/
-│   │   ├── install.py               # winget/brew/apt toolchain
-│   │   ├── check_install.py         # verifica toolchain + MCP + Azure PAT + SonarCloud
-│   │   ├── init.py                  # scaffolding interactivo con rich.Confirm
-│   │   ├── fabrics.py               # setup + preflight del MCP
-│   │   ├── doctor.py                # diagnóstico
-│   │   └── upgrade.py               # --add/--remove harness
-│   ├── core/
-│   │   ├── canonical.py             # loader con schema validation
-│   │   └── frontmatter.py           # YAML frontmatter parse/serialize
-│   ├── adapters/                    # 1 por harness (copiados de specapi-cli)
-│   │   ├── base.py  claude.py  cursor.py  windsurf.py
-│   │   ├── copilot.py  codex.py  opencode.py
-│   └── data/
-│       ├── canonical/
-│       │   ├── schema.json          # JSON Schema del frontmatter
-│       │   ├── prompts/
-│       │   │   ├── clone.md · fabric.md · migrate.md · check.md   # slash commands
-│       │   │   ├── analisis-servicio.md · analisis-orq.md          # pre-migración
-│       │   │   ├── migrate-rest-full.md · migrate-soap-full.md     # migración detallada
-│       │   │   └── checklist-rules.md                              # checklist 15 bloques
-│       │   ├── skills/{pre-migracion,migrar,post-migracion}/SKILL.md
-│       │   ├── agents/{analista-legacy,migrador,qa-generator,validador-hex}.md
-│       │   └── context/{hexagonal,bancs,security,code-style,sonarlint}.md
-│       └── templates/
-│           ├── CLAUDE.md.j2
-│           ├── mcp.json.j2
-│           └── sonarlint-connectedMode.json.j2
-└── tests/
-    ├── test_canonical.py            # loader sanity
-    └── test_adapters.py             # adapters roundtrip
+
+Este comando:
+
+- ejecuta `codex exec` una vez por servicio
+- exige evidencia previa de Fabrics en `.capamedia/fabrics.json`
+- exige salida final estructurada por JSON Schema
+- guarda prompt, stdout, stderr y last message en `.capamedia/batch-migrate/`
+- corre checklist post-migracion por defecto
+
+### Batch pipeline
+
+Para correr la cadena completa desde cero por servicio:
+
+```bash
+capamedia batch pipeline \
+  --from services.txt \
+  --root "C:/Dev/Banco Pichincha/CapaMedia" \
+  --namespace tnd \
+  --workers 2 \
+  --resume \
+  --retries 2
 ```
+
+Ese comando encadena:
+
+```text
+clone -> init -> fabrics generate -> codex exec -> check
+```
+
+Garantias del pipeline:
+
+- `Fabrics` es prerequisito duro
+- `batch-state/*.json` permite resume por etapa
+- `--retries` reintenta solo lo fallido o pendiente
+- Azure DevOps puede correr unattended via `CAPAMEDIA_AZDO_PAT`
+
+### Mirador operativo
+
+```bash
+capamedia batch watch "C:/Dev/Banco Pichincha/CapaMedia" --kind auto --follow
+```
+
+Muestra por servicio:
+
+- fase actual
+- intentos
+- ultimo update
+- estado de Fabrics
+- proyecto objetivo
 
 ---
 
-## Matriz oficial (sin excepciones)
+## Cross-platform
 
-| WSDL ops | Framework target | Stack | Aplicable a |
-|---|---|---|---|
-| **1 op** | REST + `@RestController` | Spring WebFlux + Netty | IIB / WAS / ORQ |
-| **2+ ops** | SOAP + `@Endpoint` | Spring WS + Spring MVC + Undertow | IIB / WAS / ORQ |
+Esta version deja cerrados los P0 para correr desde macOS, Linux o Windows:
 
-**BD** es ortogonal:
-- WAS + DB → HikariCP + JPA dentro de SOAP/MVC
-- Caso raro REST + DB → R2DBC o `Schedulers.boundedElastic()` (flag `ATTENTION_NEEDED_REST_WITH_DB`)
+- `fabrics setup` genera `.mcp.json` con `npx -y @pichincha/fabrics-project@latest`
+- el launcher de MCP soporta cache `npm` tanto en Windows (`AppData`) como en Unix (`~/.npm/_npx`)
+- `clone` soporta PAT por env sin prompts
+- `install` y `check-install` ya contemplan Codex CLI
+- hay workflow de CI y workflow de release
+
+---
+
+## Comandos principales
+
+| Comando | Uso |
+|---|---|
+| `capamedia install` | instala el toolchain automatizable |
+| `capamedia check-install` | valida toolchain, Fabrics, Azure auth, Codex auth, Sonar binding |
+| `capamedia auth bootstrap` | registra Fabrics y autentica Codex; opcionalmente escribe `auth.env` |
+| `capamedia init` | scaffold del workspace y harnesses |
+| `capamedia clone` | clona legacy, UMPs y TX |
+| `capamedia fabrics setup` | registra el MCP Fabrics |
+| `capamedia fabrics generate` | invoca el MCP y genera `destino/` |
+| `capamedia check` | corre el checklist deterministico |
+| `capamedia batch pipeline` | fabrica completa por servicio |
+| `capamedia batch migrate` | migracion headless sobre workspaces ya preparados |
+| `capamedia batch watch` | mirador operativo del lote |
 
 ---
 
 ## Harnesses soportados
 
-| Harness | Flag | Qué genera |
-|---------|------|-----------|
-| **Claude Code** | `claude` | `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, `.claude/settings.json`, `CLAUDE.md` |
-| **GitHub Copilot** | `copilot` | `.github/prompts/`, `.github/copilot-instructions.md` |
-| **Cursor** | `cursor` | `.cursor/rules/*.mdc` |
-| **Windsurf** | `windsurf` | `.windsurf/rules/`, `.windsurfrules` |
-| **OpenAI Codex CLI** | `codex` | `.codex/prompts/`, `.codex/config.toml`, `AGENTS.md` |
-| **opencode** | `opencode` | `.opencode/`, `opencode.json`, `AGENTS.md` |
+| Harness | Flag | Que genera |
+|---|---|---|
+| Claude Code | `claude` | `.claude/commands/`, `.claude/agents/`, `.claude/skills/`, `CLAUDE.md` |
+| GitHub Copilot | `copilot` | `.github/prompts/`, `.github/copilot-instructions.md` |
+| Cursor | `cursor` | `.cursor/rules/*.mdc` |
+| Windsurf | `windsurf` | `.windsurf/rules/`, `.windsurfrules` |
+| OpenAI Codex CLI | `codex` | `.codex/prompts/`, `.codex/agents/*.toml`, `.agents/skills/`, `.codex/config.toml`, `AGENTS.md` |
+| opencode | `opencode` | `.opencode/`, `opencode.json`, `AGENTS.md` |
 
 ---
 
-## Referencias internas
+## Repo layout
 
-- [PromptCapaMedia](https://github.com/CreattorMatter/PromptCapaMedia) — repo predecesor (prompts como markdown sueltos, ahora migrados al canonical de este CLI)
-- [spec-api-ai-v2](../spec-api-ai-v2) — CLI hermano para migraciones Apigee → Azure APIM (misma arquitectura de adapters)
+```text
+capamedia-cli/
+├── pyproject.toml
+├── CHANGELOG.md
+├── .github/workflows/
+│   ├── ci.yml
+│   └── release.yml
+├── src/capamedia_cli/
+│   ├── cli.py
+│   ├── commands/
+│   │   ├── auth.py
+│   │   ├── batch.py
+│   │   ├── check_install.py
+│   │   ├── clone.py
+│   │   ├── fabrics.py
+│   │   ├── init.py
+│   │   └── install.py
+│   ├── core/
+│   │   ├── auth.py
+│   │   ├── batch_state.py
+│   │   ├── canonical.py
+│   │   ├── local_resolver.py
+│   │   └── mcp_launcher.py
+│   ├── adapters/
+│   └── data/
+└── tests/
+```
 
 ---
 
 ## Roadmap
 
-- [x] v0.1.0 — MVP: `install`, `check-install`, `init` interactivo, `fabrics setup`, 4 slash commands canónicos, 6 adapters
-- [x] v0.2.0 — Shell parity: `clone`, `check`, `fabrics generate` como comandos shell deterministas (sin AI). `migrate` queda solo como slash command (requiere AI)
-- [x] v0.2.4 — `fabrics generate` invoca el MCP Fabrics real y deja `destino/` con clases JAXB generadas
-- [x] v0.3.0 — Batch mode: `batch complexity` / `clone` / `check` / `init` en paralelo con ThreadPool + BLOQUE 15 del checklist (Estructura de error oficial). Tests: 35/35 ✅
-- [ ] v0.4.0 — Integración con Jira / Azure Boards / Confluence / Slack
+- [x] v0.1.0 - MVP: `install`, `check-install`, `init`, `fabrics setup`, 4 slash commands, 6 adapters
+- [x] v0.2.0 - shell parity: `clone`, `check`, `fabrics generate`
+- [x] v0.2.4 - Fabrics real via MCP + scaffold con clases JAXB
+- [x] v0.3.0 - batch mode inicial
+- [x] v0.3.4 - `batch migrate` con `codex exec`
+- [x] v0.3.5 - `batch pipeline`
+- [x] v0.3.6 - `resume` + `retries` + agents/skills reales de Codex
+- [x] v0.3.7 - Fabrics como gate duro + `batch watch`
+- [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
+- [ ] v0.4.0 - integracion con Jira / Azure Boards / Confluence / Slack
 
 ## Licencia
 

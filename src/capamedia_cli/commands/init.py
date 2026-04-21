@@ -182,6 +182,34 @@ def _save_config(target_dir: Path, service_name: str, harnesses: list[str]) -> N
     )
 
 
+def scaffold_project(
+    target_dir: Path,
+    service_name: str,
+    harnesses: list[str],
+    artifact_token: str | None = None,
+) -> tuple[int, list[str]]:
+    """Render the non-interactive project scaffold into an explicit target dir."""
+    target_dir = target_dir.resolve()
+    token_val = artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}"
+
+    _create_layout(target_dir, service_name)
+    _copy_templates(target_dir, service_name, token_val)
+    _update_gitignore(target_dir)
+
+    assets = load_canonical_assets()
+    total_files = 0
+    all_warnings: list[str] = []
+    for harness_name in harnesses:
+        adapter = get_adapter(harness_name)
+        written, warnings = adapter.render_all(assets, target_dir)
+        total_files += len(written)
+        all_warnings.extend(warnings)
+
+    _post_process_agent_docs(target_dir, service_name, __version__)
+    _save_config(target_dir, service_name, harnesses)
+    return total_files, all_warnings
+
+
 def init_project(
     service_name: Annotated[
         Optional[str],
@@ -251,29 +279,18 @@ def init_project(
         console.print("  Harnesses: [dim]ninguno (solo scaffold base)[/dim]")
     console.print()
 
-    # Token placeholder
-    token_val = artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}"
+    total_files, all_warnings = scaffold_project(
+        target_dir=target_dir,
+        service_name=service_name,
+        harnesses=harnesses,
+        artifact_token=artifact_token,
+    )
 
-    _create_layout(target_dir, service_name)
-    _copy_templates(target_dir, service_name, token_val)
-    _update_gitignore(target_dir)
-
-    # Render harness assets
-    assets = load_canonical_assets()
-    total_files = 0
-    all_warnings: list[str] = []
     for harness_name in harnesses:
         adapter = get_adapter(harness_name)
-        written, warnings = adapter.render_all(assets, target_dir)
         console.print(
-            f"  [green]OK[/green] {adapter.display_name}: {len(written)} archivo(s) generado(s)"
+            f"  [green]OK[/green] {adapter.display_name}: scaffold listo"
         )
-        total_files += len(written)
-        all_warnings.extend(warnings)
-
-    _post_process_agent_docs(target_dir, service_name, __version__)
-
-    _save_config(target_dir, service_name, harnesses)
 
     if all_warnings:
         console.print()
@@ -293,7 +310,7 @@ def init_project(
     console.print(f"     [cyan]/migrate[/cyan]              - migra la logica al destino")
     console.print(f"     [cyan]/check[/cyan]                - ejecuta checklist post-migracion")
     console.print()
-    if token_val == "${CAPAMEDIA_ARTIFACT_TOKEN}":
+    if (artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}") == "${CAPAMEDIA_ARTIFACT_TOKEN}":
         console.print(
             "[yellow]Recordatorio:[/yellow] el .mcp.json usa ${CAPAMEDIA_ARTIFACT_TOKEN}. "
             "Expone esa env var o edita .mcp.json con tu token de Azure Artifacts antes de usar el MCP."

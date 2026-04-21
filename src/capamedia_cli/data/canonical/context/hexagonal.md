@@ -15,9 +15,9 @@ paths:
 
 ## application/
 - CERO imports de com.pichincha.sp.infrastructure.*
-- Ports son ABSTRACT CLASSES, nunca interfaces
+- Ports son INTERFACES, nunca abstract classes
 - Services usan @RequiredArgsConstructor, nunca @Autowired
-- Services extienden el input port correspondiente
+- Services implementan el input port correspondiente
 
 ## Direccion de dependencias
 - infrastructure -> application (permitido)

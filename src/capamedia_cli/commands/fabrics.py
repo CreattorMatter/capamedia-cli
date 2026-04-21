@@ -1,13 +1,14 @@
 """capamedia fabrics - gestion del MCP Fabrics del banco.
 
 Subcomandos:
-  - setup        Registra el MCP Fabrics en ~/.claude/settings.json o .mcp.json local
+  - setup        Registra el MCP Fabrics en ~/.mcp.json o .mcp.json local
   - preflight    Verifica que el MCP este conectado y que la version sea reciente
 """
 
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import os
 import subprocess
@@ -21,6 +22,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from capamedia_cli.core.auth import resolve_artifact_token
+
 console = Console()
 
 app = typer.Typer(
@@ -29,14 +32,150 @@ app = typer.Typer(
 )
 
 
-MCP_FABRICS_CONFIG = {
-    "command": "cmd",
-    "args": ["/c", "npx", "@pichincha/fabrics-project@latest"],
-    "env": {
-        "ARTIFACT_USERNAME": "BancoPichinchaEC",
-        "ARTIFACT_TOKEN": "",
-    },
-}
+def _default_mcp_fabrics_config() -> dict[str, object]:
+    return {
+        "command": "npx",
+        "args": ["-y", "@pichincha/fabrics-project@latest"],
+        "env": {
+            "ARTIFACT_USERNAME": "BancoPichinchaEC",
+            "ARTIFACT_TOKEN": "",
+        },
+    }
+
+
+def _resolve_env_placeholder(value: str) -> str:
+    raw = (value or "").strip()
+    if raw.startswith("${") and raw.endswith("}"):
+        return os.environ.get(raw[2:-1], "").strip()
+    return raw
+
+
+def _is_placeholder_token(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return True
+    if raw.startswith("${") and raw.endswith("}"):
+        return _resolve_env_placeholder(raw) == ""
+    return "<" in raw
+
+
+def _resolve_fabrics_env(raw_env: dict[str, str]) -> dict[str, str]:
+    env = {str(k): str(v) for k, v in raw_env.items()}
+    token = _resolve_env_placeholder(env.get("ARTIFACT_TOKEN", ""))
+    if token:
+        env["ARTIFACT_TOKEN"] = token
+    return env
+
+
+def _candidate_fabrics_configs(workspace: Path) -> list[tuple[Path, str]]:
+    return [
+        (workspace / ".mcp.json", "workspace"),
+        (workspace.parent / ".mcp.json", "workspace-parent"),
+        (Path.home() / ".mcp.json", "home"),
+    ]
+
+
+def _discover_fabrics_config(workspace: Path) -> tuple[Path | None, dict[str, str], str, str]:
+    """Find the first usable Fabrics config for a workspace.
+
+    Returns (path, env, source, hint). When no usable config exists, path/env/source
+    are empty and hint explains the first invalid config if one was found.
+    """
+    first_invalid_hint = ""
+    for candidate, source in _candidate_fabrics_configs(workspace):
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        fabrics = data.get("mcpServers", {}).get("fabrics", {})
+        if not fabrics:
+            continue
+        env = _resolve_fabrics_env(fabrics.get("env", {}))
+        token = env.get("ARTIFACT_TOKEN", "").strip()
+        if token and not _is_placeholder_token(token):
+            return (candidate, env, source, "")
+        if not first_invalid_hint:
+            first_invalid_hint = (
+                f"config encontrada en {candidate} pero ARTIFACT_TOKEN es placeholder o esta vacio"
+            )
+    return (None, {}, "", first_invalid_hint)
+
+
+def inspect_fabrics_workspace(workspace: Path) -> dict[str, str]:
+    """Return a structured preflight verdict for Fabrics in a workspace."""
+    from shutil import which
+
+    ws = workspace.resolve()
+    if which("npx") is None:
+        return {
+            "status": "fail",
+            "detail": "npx no esta disponible (instala Node.js LTS antes de correr Fabrics)",
+        }
+
+    config_path, env, source, hint = _discover_fabrics_config(ws)
+    if config_path is None:
+        detail = hint or "MCP fabrics no esta registrado o no tiene un ARTIFACT_TOKEN usable"
+        return {"status": "fail", "detail": detail}
+
+    token = env.get("ARTIFACT_TOKEN", "").strip()
+    if not token or _is_placeholder_token(token):
+        return {
+            "status": "fail",
+            "detail": (
+                f"config encontrada en {config_path} pero el ARTIFACT_TOKEN no es usable; "
+                "corre `capamedia fabrics setup` o expone CAPAMEDIA_ARTIFACT_TOKEN"
+            ),
+        }
+
+    return {
+        "status": "ok",
+        "detail": f"config={config_path} ({source})",
+        "config_path": str(config_path),
+        "config_source": source,
+        "token_length": str(len(token)),
+    }
+
+
+def fabrics_metadata_path(workspace: Path) -> Path:
+    return workspace / ".capamedia" / "fabrics.json"
+
+
+def load_fabrics_metadata(workspace: Path) -> dict | None:
+    path = fabrics_metadata_path(workspace)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_fabrics_metadata(workspace: Path, payload: dict) -> Path:
+    path = fabrics_metadata_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(payload)
+    payload["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _resolve_legacy_root(service_name: str, workspace: Path) -> Path | None:
+    """Find the legacy root for fabrics generate, preferring workspace-local material."""
+    preferred = workspace / "legacy" / f"sqb-msa-{service_name.lower()}"
+    if preferred.exists():
+        return preferred
+
+    if (workspace / "legacy").exists():
+        candidates = list((workspace / "legacy").glob("*"))
+        if candidates:
+            return candidates[0]
+
+    from capamedia_cli.core.local_resolver import find_local_legacy
+
+    return find_local_legacy(service_name, workspace.parent)
 
 
 def _load_or_create_mcp_json(path: Path) -> dict:
@@ -145,7 +284,7 @@ def setup(
 
     # Token: prioridad 1) --token, 2) env var, 3) prompt
     if token is None:
-        token = os.environ.get("CAPAMEDIA_ARTIFACT_TOKEN")
+        token = resolve_artifact_token()
     if token is None or token.strip() == "":
         console.print(
             Panel(
@@ -168,9 +307,10 @@ def setup(
         console.print("[red]Token vacio. Cancelando.[/red]")
         raise typer.Exit(1)
 
+    default_config = _default_mcp_fabrics_config()
     fabric_config = {
-        "command": MCP_FABRICS_CONFIG["command"],
-        "args": list(MCP_FABRICS_CONFIG["args"]),
+        "command": str(default_config["command"]),
+        "args": list(default_config["args"]),
         "env": {
             "ARTIFACT_USERNAME": "BancoPichinchaEC",
             "ARTIFACT_TOKEN": token.strip(),
@@ -263,20 +403,12 @@ def _find_java21_home() -> Path | None:
 
 def _artifact_env_from_mcp(ws: Path) -> dict[str, str]:
     """Lee ARTIFACT_USERNAME/ARTIFACT_TOKEN del .mcp.json para pasarlos al gradlew subprocess."""
-    for candidate in (ws / ".mcp.json", ws.parent / ".mcp.json", Path.home() / ".mcp.json"):
-        if not candidate.exists():
-            continue
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        fabrics = data.get("mcpServers", {}).get("fabrics", {})
-        env = fabrics.get("env", {})
-        if "ARTIFACT_TOKEN" in env:
-            return {
-                "ARTIFACT_USERNAME": env.get("ARTIFACT_USERNAME", "BancoPichinchaEC"),
-                "ARTIFACT_TOKEN": env["ARTIFACT_TOKEN"],
-            }
+    _, env, _, _ = _discover_fabrics_config(ws)
+    if env.get("ARTIFACT_TOKEN"):
+        return {
+            "ARTIFACT_USERNAME": env.get("ARTIFACT_USERNAME", "BancoPichinchaEC"),
+            "ARTIFACT_TOKEN": env["ARTIFACT_TOKEN"],
+        }
     return {}
 
 
@@ -469,16 +601,18 @@ def generate(
         )
     )
 
+    preflight_status = inspect_fabrics_workspace(ws)
+    if preflight_status["status"] != "ok":
+        console.print(f"[red]FAIL[/red] {preflight_status['detail']}")
+        raise typer.Exit(1)
+    console.print(f"  [green]OK[/green] Fabrics listo: {preflight_status['detail']}")
+
     # Step 1: Find legacy folder
-    legacy_root = ws / "legacy" / f"sqb-msa-{service_name.lower()}"
-    if not legacy_root.exists():
-        candidates = list((ws / "legacy").glob("*")) if (ws / "legacy").exists() else []
-        if candidates:
-            legacy_root = candidates[0]
-        else:
-            console.print(f"[red]FAIL[/red] no se encontro legacy en {ws / 'legacy'}")
-            console.print("[yellow]Tip:[/yellow] corre 'capamedia clone <servicio>' antes")
-            raise typer.Exit(1)
+    legacy_root = _resolve_legacy_root(service_name, ws)
+    if legacy_root is None:
+        console.print(f"[red]FAIL[/red] no se encontro legacy en {ws / 'legacy'} ni localmente")
+        console.print("[yellow]Tip:[/yellow] corre 'capamedia clone <servicio>' antes")
+        raise typer.Exit(1)
 
     console.print(f"  [green]OK[/green] legacy encontrado en: {legacy_root}")
 
@@ -556,9 +690,13 @@ def generate(
 
     mcp_error_msg: str | None = None
     result: dict = {}
+    server_info: dict = {}
+    mcp_source = ""
     try:
         with MCPClient(spec.command, env=spec.env, cwd=str(ws)) as client:
             info = client.initialize(client_name="capamedia-cli", client_version="0.2.4")
+            server_info = info.get("serverInfo", {}) if isinstance(info, dict) else {}
+            mcp_source = spec.source
             console.print(
                 f"  [green]OK[/green] MCP conectado: {info.get('serverInfo', {}).get('name')} "
                 f"v{info.get('serverInfo', {}).get('version')}"
@@ -634,6 +772,8 @@ def generate(
     # que corrio `gradlew.bat generateFromWsdl` sin prefijo `.\\` (bug Windows).
     # Completamos el paso por nuestra cuenta con path absoluto al wrapper.
     recovered = False
+    fabrics_status = "fail"
+    fabrics_detail = ""
     if generated_ok and mcp_error_msg and "gradlew" in mcp_error_msg.lower():
         console.print("\n[bold]Completando paso faltante del MCP (gradlew generateFromWsdl)...[/bold]")
         ok, err = _run_gradlew_wsdl_import(proj_dir, ws)
@@ -645,6 +785,8 @@ def generate(
             console.print(f"  [yellow]WARN[/yellow] gradlew fallo: {err}")
 
     if generated_ok and mcp_error_msg:
+        fabrics_status = "partial"
+        fabrics_detail = mcp_error_msg[:500]
         # Exito parcial: scaffold existe pero el error no pude recuperar
         console.print()
         def _safe(s: str) -> str:
@@ -664,6 +806,8 @@ def generate(
             )
         )
     elif generated_ok:
+        fabrics_status = "ok"
+        fabrics_detail = "arquetipo generado por Fabrics"
         recovery_line = "  0. (Auto) Clases JAXB generadas ya por gradlew generateFromWsdl.\n" if recovered else ""
         console.print()
         console.print(
@@ -688,6 +832,32 @@ def generate(
             console.print(f"Error MCP: {_safe(mcp_error_msg[:500])}")
         raise typer.Exit(1)
 
+    if generated_ok:
+        _write_fabrics_metadata(
+            ws,
+            {
+                "service": service_name,
+                "status": fabrics_status,
+                "detail": fabrics_detail,
+                "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+                "project_name": project_name,
+                "project_path": str(proj_dir),
+                "namespace": namespace,
+                "group_id": group_id,
+                "wsdl_file_path": wsdl_abs,
+                "tecnologia": tecnologia,
+                "project_type": project_type,
+                "web_framework": web_framework,
+                "invoca_bancs": str(invoca_bancs).lower(),
+                "operation_count": str(analysis.wsdl.operation_count),
+                "source_kind": analysis.source_kind,
+                "recovered_gradlew": str(recovered).lower(),
+                "mcp_source": mcp_source,
+                "mcp_server_name": _resolve_env_placeholder(str(server_info.get("name", ""))),
+                "mcp_server_version": str(server_info.get("version", "")),
+            },
+        )
+
 
 @app.command("preflight")
 def preflight() -> None:
@@ -699,56 +869,18 @@ def preflight() -> None:
       - npx esta disponible (necesario para invocar el MCP)
       - Puede hacer un dry-run del MCP para verificar conectividad
     """
-    from shutil import which
-
     console.print("[bold]Preflight MCP Fabrics[/bold]\n")
-
-    # 1) npx available?
-    if which("npx") is None:
-        console.print("[red]FAIL[/red] npx no esta disponible (instala Node.js LTS)")
-        raise typer.Exit(1)
-    console.print("[green]OK[/green] npx disponible")
-
-    # 2) config exists?
-    candidates = [
-        Path.cwd() / ".mcp.json",
-        Path.home() / ".mcp.json",
-        Path.home() / ".claude" / "settings.json",
-    ]
-    config_path = None
-    for c in candidates:
-        if not c.exists():
-            continue
-        try:
-            data = json.loads(c.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if "fabrics" in data.get("mcpServers", {}):
-            config_path = c
-            break
-
-    if config_path is None:
-        console.print("[red]FAIL[/red] MCP fabrics no esta registrado en ninguna ubicacion conocida")
+    status = inspect_fabrics_workspace(Path.cwd())
+    if status["status"] != "ok":
+        console.print(f"[red]FAIL[/red] {status['detail']}")
         console.print("       Corre: [bold]capamedia fabrics setup[/bold]")
         raise typer.Exit(1)
 
-    console.print(f"[green]OK[/green] config encontrada en {config_path}")
-
-    # 3) token not empty?
-    data = json.loads(config_path.read_text(encoding="utf-8"))
-    token = (
-        data.get("mcpServers", {})
-        .get("fabrics", {})
-        .get("env", {})
-        .get("ARTIFACT_TOKEN", "")
+    console.print("[green]OK[/green] npx disponible")
+    console.print(f"[green]OK[/green] config encontrada en {status['config_path']}")
+    console.print(
+        f"[green]OK[/green] ARTIFACT_TOKEN presente ({status['token_length']} chars)"
     )
-    if not token or "${" in token or "<" in token:
-        console.print(
-            f"[yellow]WARN[/yellow] el ARTIFACT_TOKEN parece ser un placeholder: [dim]{token[:20]}...[/dim]"
-        )
-        console.print("       Edita el archivo o corre [bold]capamedia fabrics setup[/bold]")
-    else:
-        console.print(f"[green]OK[/green] ARTIFACT_TOKEN presente ({len(token)} chars)")
 
     # 4) Reminder to verify version
     console.print()

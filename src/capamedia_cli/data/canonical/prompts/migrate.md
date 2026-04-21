@@ -53,7 +53,7 @@ El agente ejecuta los 7 bloques del prompt de migración:
 
 1. **Block 1: Scaffolding** — verificar el scaffold del MCP, ajustar si falta algo
 2. **Block 2: Domain layer** — records, exceptions, sin imports de framework
-3. **Block 3: Application layer** — abstract class ports + services
+3. **Block 3: Application layer** — interface ports + services
 4. **Block 4: Infrastructure layer** — controllers, DTOs, mappers, adapters BANCS, error resolvers, application.yml
 5. **Block 5: Helm + Docker** — values-{dev,test,prod}.yaml con probes
 6. **Block 6: Tests** — unit + integration con JUnit 5, Mockito, StepVerifier
@@ -109,7 +109,7 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 ## Reglas importantes
 
 1. **No sobrescribir `build.gradle` del MCP.** Sólo agregar dependencias faltantes; nunca reemplazar el archivo.
-2. **Puertos son abstract classes, nunca interfaces.**
+2. **Puertos son interfaces, nunca abstract classes.**
 3. **Domain sin imports de Spring/JPA/WebFlux.**
 4. **HTTP 200 para errores de negocio** (compatibilidad con IIB caller).
 5. **Secrets vía `${CCC_*}` env vars.**

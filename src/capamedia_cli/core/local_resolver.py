@@ -88,10 +88,10 @@ def find_local_legacy(
     Retorna el path al directorio que actua como `legacy_root` para el analisis,
     o None si no encuentra nada.
 
-    Si `prefer_original=True` (default), los `_variants/` (versiones migradas)
-    se ignoran — solo se retorna legacy original. Esto fuerza al caller a clonar
-    de Azure si el original no esta local. Util para que `batch complexity` no
-    tome un variant migrado como si fuera el legacy.
+    Si `prefer_original=True` (default), primero intenta resolver legacy original.
+    Si no hay original pero si existe un `_variants/` local compatible, lo usa
+    como fallback antes de rendirse. Esto evita devolver `None` cuando el unico
+    material local disponible es el variant migrado.
     """
     prefix, num = _split_service(service)
     if not num:
@@ -101,6 +101,8 @@ def find_local_legacy(
     svc_lower = service.lower()
 
     folders = _candidate_folders(capa_media_root, num, suffix_hint)
+
+    fallback_variant: Path | None = None
 
     for folder in folders:
         # Estrategia 1 (WAS clasico): hay <svc>-aplicacion + <svc>-infraestructura hermanos
@@ -131,13 +133,17 @@ def find_local_legacy(
             if has_indicators:
                 return repo_dir
 
-        # Estrategia 3: legacy/_variants/*<svc>* (variant migrado, solo si prefer_original=False)
-        if not prefer_original:
-            variants_dir = folder / "legacy" / "_variants"
-            if variants_dir.exists():
-                for variant in variants_dir.iterdir():
-                    if variant.is_dir() and svc_lower in variant.name.lower():
+        # Estrategia 3: legacy/_variants/*<svc>*.
+        # Si prefer_original=False, retorna inmediatamente.
+        # Si prefer_original=True, guardamos un fallback por si no aparece original.
+        variants_dir = folder / "legacy" / "_variants"
+        if variants_dir.exists():
+            for variant in variants_dir.iterdir():
+                if variant.is_dir() and svc_lower in variant.name.lower():
+                    if not prefer_original:
                         return variant
+                    if fallback_variant is None:
+                        fallback_variant = variant
 
         # Estrategia 4: legacy/sqb-msa-<svc>  (clone CLI standar)
         candidate = folder / "legacy" / f"sqb-msa-{svc_lower}"
@@ -156,4 +162,4 @@ def find_local_legacy(
             if has_indicators:
                 return legacy_dir
 
-    return None
+    return fallback_variant

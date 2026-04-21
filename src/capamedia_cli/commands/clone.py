@@ -19,6 +19,7 @@ puede clonarlo manual una vez.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from capamedia_cli.core.legacy_analyzer import analyze_legacy
+from capamedia_cli.core.auth import build_azure_git_env
 
 console = Console()
 
@@ -103,6 +105,7 @@ def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bo
     if shallow:
         cmd += ["--depth", "1"]
     cmd += [url, str(dest)]
+    git_env = build_azure_git_env()
     try:
         result = subprocess.run(
             cmd,
@@ -110,6 +113,7 @@ def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bo
             text=True,
             check=False,
             timeout=300,
+            env={**os.environ, **git_env} if git_env else None,
         )
         if result.returncode == 0:
             return (True, "")

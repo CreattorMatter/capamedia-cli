@@ -10,15 +10,19 @@ Componentes automatizables:
   - Java 21 (Eclipse Temurin)
   - Gradle 8.x
   - Node.js LTS (requerido por el MCP Fabrics via npx)
+  - Codex CLI (requerido por batch migrate / batch pipeline)
   - Python 3.12 (para este CLI mismo)
   - uv (gestor de paquetes Python)
   - VS Code (IDE principal soportado)
   - Extension SonarQube for IDE (si VS Code esta instalado)
 
+Componentes parcialmente automatizables:
+  - Azure DevOps PAT (via env CAPAMEDIA_AZDO_PAT o login interactivo/GCM)
+  - Codex auth (via `capamedia auth bootstrap` o `codex login`)
+  - MCP Fabrics token (via `capamedia auth bootstrap` o `capamedia fabrics setup`)
+
 Componentes NO automatizables (solo guia al usuario):
-  - Azure DevOps PAT (login interactivo en navegador con GCM)
   - SonarCloud connected mode binding (login web)
-  - MCP Fabrics token (requiere pegar token manualmente la primera vez)
 """
 
 from __future__ import annotations
@@ -47,6 +51,9 @@ class Package:
     winget_id: str | None = None
     brew_id: str | None = None
     apt_id: str | None = None
+    windows_install_command: list[str] | None = None
+    macos_install_command: list[str] | None = None
+    linux_install_command: list[str] | None = None
     optional: bool = False
     note: str = ""
 
@@ -96,6 +103,14 @@ PACKAGES: list[Package] = [
         apt_id="nodejs",
     ),
     Package(
+        name="Codex CLI",
+        check_command=["codex", "--version"],
+        windows_install_command=["npm", "install", "-g", "@openai/codex"],
+        macos_install_command=["npm", "install", "-g", "@openai/codex"],
+        linux_install_command=["npm", "install", "-g", "@openai/codex"],
+        note="Despues autentica con `capamedia auth bootstrap` o `codex login`",
+    ),
+    Package(
         name="Python 3.12",
         check_command=["python", "--version"],
         winget_id="Python.Python.3.12",
@@ -141,6 +156,12 @@ def _detect_os() -> str:
 
 
 def _get_installer_command(package: Package, os_name: str) -> list[str] | None:
+    if os_name == "windows" and package.windows_install_command:
+        return package.windows_install_command
+    if os_name == "macos" and package.macos_install_command:
+        return package.macos_install_command
+    if os_name == "linux" and package.linux_install_command:
+        return package.linux_install_command
     if os_name == "windows" and package.winget_id:
         return ["winget", "install", "--id", package.winget_id, "--accept-source-agreements", "--accept-package-agreements", "-e"]
     if os_name == "macos" and package.brew_id:
@@ -295,17 +316,15 @@ def _print_manual_steps() -> None:
         Panel(
             (
                 "[bold]Pasos manuales (no automatizables):[/bold]\n\n"
-                "1. [cyan]Azure DevOps PAT[/cyan] (para clone de repos del banco)\n"
-                "   -> corre: git clone https://dev.azure.com/BancoPichinchaEC/_git/<cualquiera>\n"
-                "      el navegador abre, login con creds del banco, GCM guarda el PAT\n\n"
+                "1. [cyan]Auth bootstrap[/cyan] (recomendado para correr batch unattended)\n"
+                "   -> corre: [bold]capamedia auth bootstrap --scope global[/bold]\n"
+                "      y pasa `--artifact-token`, `--openai-api-key` o usa env vars segun necesites\n"
+                "      Azure DevOps puede quedar por env (`CAPAMEDIA_AZDO_PAT`) o por GCM interactivo\n\n"
                 "2. [cyan]SonarCloud binding[/cyan]\n"
                 "   -> abri VS Code, ve al sidebar de SonarQube\n"
                 "   -> 'Add SonarQube Cloud Connection' - login con Azure DevOps\n"
                 "   -> nombre de conexion: [bold]bancopichinchaec[/bold] (literal)\n\n"
-                "3. [cyan]MCP Fabrics token[/cyan]\n"
-                "   -> corre: [bold]capamedia fabrics setup[/bold]\n"
-                "      (te guia para registrar el MCP en ~/.claude/settings.json)\n\n"
-                "Despues de los 3 pasos, verifica todo con:\n"
+                "Despues del bootstrap y del binding, verifica todo con:\n"
                 "   [bold]capamedia check-install[/bold]"
             ),
             border_style="yellow",

@@ -29,7 +29,7 @@ Despues de cada bloque, ejecutar verificaciones (grep imports, @Autowired, abstr
 Si falla: identificar → analizar → corregir → re-verificar. Maximo 3 intentos antes de escalar al usuario.
 
 ## Reglas no negociables
-- Ports son ABSTRACT CLASSES, nunca interfaces
+- Ports son INTERFACES, nunca abstract classes
 - domain/ no importa Spring/SOAP/JPA
 - application/ no importa infrastructure/
 - CERO @Autowired — solo @RequiredArgsConstructor

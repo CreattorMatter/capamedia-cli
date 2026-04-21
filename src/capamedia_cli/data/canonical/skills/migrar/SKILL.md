@@ -33,12 +33,12 @@ Ejecuta la migracion completa usando el ANALISIS_*.md previamente generado.
    - GATE: grep domain/ por imports de Spring (debe ser vacio)
 
 4. **Bloque 3: Application**
-   - Crear abstract class ports + service impl
-   - GATE: grep ports por "public interface" (debe ser 0), grep application/ por imports de infrastructure/ (debe ser vacio)
+   - Crear interface ports + service impl
+   - GATE: grep ports por "public interface" (debe ser >0), grep application/ por imports de infrastructure/ (debe ser vacio)
 
 5. **Bloque 4: Infrastructure**
    - SOAP controller, DTOs, mappers, BANCS adapters (stubs si TX desconocida), config, error resolvers, application.yml
-   - GATE: grep @Autowired (debe ser 0), verificar adapters extienden ports
+   - GATE: grep @Autowired (debe ser 0), verificar adapters implementan ports
 
 6. **Bloque 5: Helm + Docker**
    - helm/dev.yml, test.yml, prod.yml con probes
