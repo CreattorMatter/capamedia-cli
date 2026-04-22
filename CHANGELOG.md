@@ -4,6 +4,86 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.14.0] - 2026-04-22
+
+### Added - Comandos `version` y `uninstall`
+
+**`capamedia version`** (nuevo subcomando):
+
+Muestra version del CLI + metadata util en un panel rich. Complementa el
+flag global `--version` / `-V` que ya existia; el subcomando es mas
+explorable (aparece en `capamedia --help`) y agrega:
+
+- Version instalada (v0.14.0)
+- Python interprete + implementation
+- Plataforma (OS + release)
+- Location del package (util para debug)
+- Executable path
+
+**`capamedia uninstall`** (nuevo subcomando):
+
+Desinstala el CLI detectando la fuente automatico (uv tool / pip).
+
+```bash
+capamedia uninstall                  # interactivo, pide confirmacion
+capamedia uninstall --yes            # unattended
+capamedia uninstall --dry-run        # muestra que ejecutaria, sin tocar
+capamedia uninstall --purge --yes    # ademas borra ~/.capamedia/ y .mcp.json
+```
+
+Deteccion:
+  1. `uv tool list` para buscar `capamedia-cli` -> `uv tool uninstall`
+  2. `pip show capamedia-cli` -> `pip uninstall -y capamedia-cli`
+  3. Si no lo encuentra en ninguno, avisa y termina exit 0
+
+Flag `--purge` (opcional): ademas del package, borra:
+  - `~/.capamedia/` (carpeta con auth.env, caches, etc.)
+  - `~/.mcp.json` (registro global del MCP Fabrics)
+  - `./.mcp.json` (registro del proyecto actual)
+
+### Testing
+
+- **324/324 tests PASS** (+10 en `test_version_uninstall.py`):
+  - `version` imprime version correcta
+  - `_has_uv_tool` detecta presencia, ausencia, y `uv` no-instalado
+  - `_has_pip_install` detecta presencia y ausencia
+  - `_purge_user_files` borra paths reales y con `--dry-run` solo lista
+  - `uninstall_command` con nada instalado exit 0, dry-run no llama subprocess
+
+### Uso completo (desde cero)
+
+Ya que tenemos `install` + `check-install` + `version` + `uninstall`, el
+ciclo completo desde una maquina vacia queda:
+
+```powershell
+# Descargar
+git clone https://github.com/CreattorMatter/capamedia-cli.git
+cd capamedia-cli
+
+# Instalar (elegir uno)
+uv tool install --from .                                # preferido (isolated)
+# o
+pip install -e .                                        # editable desde source
+
+# Verificar
+capamedia version
+capamedia --help
+
+# Usar (flujo completo)
+capamedia install              # toolchain: git, java 21, gradle, node, codex, etc.
+capamedia auth bootstrap ...   # credenciales Azure + OpenAI + artifacts
+capamedia clone <servicio>     # legacy + UMPs + TX
+capamedia fabrics generate <servicio> --namespace tnd
+capamedia check <path>         # checklist BPTPSRE
+capamedia validate-hexagonal summary <path>  # gate oficial del banco
+capamedia review <path>        # pipeline end-to-end
+
+# Desinstalar
+capamedia uninstall --purge --yes
+```
+
+---
+
 ## [0.13.0] - 2026-04-22
 
 ### Added - `capamedia review` — pipeline end-to-end para proyectos migrados externamente

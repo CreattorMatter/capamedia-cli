@@ -42,8 +42,10 @@ from capamedia_cli.commands import (
     init,
     install,
     review,
+    uninstall,
     upgrade,
     validate,
+    version as version_cmd,
 )
 
 console = Console()
@@ -80,6 +82,8 @@ def main(
 
 
 app.command("install")(install.install_toolchain)
+app.command("uninstall")(uninstall.uninstall_command)
+app.command("version")(version_cmd.version_command)
 app.command("check-install")(check_install.check_install)
 app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
