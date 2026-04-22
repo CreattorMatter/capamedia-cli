@@ -8,15 +8,16 @@ Ejecuta todos los BLOQUES de `core/checklist_rules.py` sin AI y genera:
 
 from __future__ import annotations
 
-import yaml
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from capamedia_cli.core.autofix import run_autofix_loop
 from capamedia_cli.core.checklist_rules import CheckContext, run_all_blocks
 
 console = Console()
@@ -133,6 +134,16 @@ def check_project(
         bool,
         typer.Option("--fail-on-medium", help="Exit 1 tambien si hay findings MEDIUM"),
     ] = False,
+    auto_fix: Annotated[
+        bool,
+        typer.Option(
+            "--auto-fix",
+            help=(
+                "Aplica fixes deterministicos para HIGH/MEDIUM autofixeables "
+                "(hasta 3 rondas). Lo que no converja queda NEEDS_HUMAN."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Corre el checklist BPTPSRE deterministico y escribe CHECKLIST_*.md."""
     migrated_path, legacy_path = _resolve_paths(migrated, legacy)
@@ -143,10 +154,28 @@ def check_project(
             f"[bold]CapaMedia check[/bold]\n"
             f"Migrated: [cyan]{migrated_path}[/cyan]\n"
             f"Legacy:   [cyan]{legacy_path or '(no provisto - 0.3/0.4 se saltan)'}[/cyan]\n"
-            f"Servicio: [cyan]{service}[/cyan]",
+            f"Servicio: [cyan]{service}[/cyan]\n"
+            f"Auto-fix: [cyan]{'on' if auto_fix else 'off'}[/cyan]",
             border_style="cyan",
         )
     )
+
+    def _run() -> list:
+        return run_all_blocks(
+            CheckContext(migrated_path=migrated_path, legacy_path=legacy_path)
+        )
+
+    autofix_report = None
+    if auto_fix:
+        log_dir = migrated_path / ".capamedia" / "autofix"
+        autofix_report = run_autofix_loop(migrated_path, _run, log_dir=log_dir)
+        console.print(
+            f"[bold]Autofix:[/bold] {autofix_report.total_applied} fix(es) aplicado(s) "
+            f"en {autofix_report.iterations} iteracion(es); "
+            f"{'CONVERGED' if autofix_report.converged else 'NEEDS_HUMAN'}"
+        )
+        if autofix_report.log_path:
+            console.print(f"[dim]Log: {autofix_report.log_path}[/dim]")
 
     ctx = CheckContext(migrated_path=migrated_path, legacy_path=legacy_path)
     results = run_all_blocks(ctx)
@@ -189,6 +218,18 @@ def check_project(
         verdict = "READY_TO_MERGE"
 
     console.print(f"\n[bold {verdict_color}]Veredicto: {verdict}[/bold {verdict_color}]")
+
+    if autofix_report is not None:
+        auto_ids = [r["check_id"] for r in autofix_report.remaining if r["autofixable"]]
+        manual_ids = [r["check_id"] for r in autofix_report.remaining if not r["autofixable"]]
+        console.print(
+            f"[dim]Autofix breakdown: applied={autofix_report.total_applied} "
+            f"still-autofixable={len(auto_ids)} needs-human={len(manual_ids)}[/dim]"
+        )
+        if auto_ids:
+            console.print(f"[dim]  no converge: {sorted(set(auto_ids))}[/dim]")
+        if manual_ids:
+            console.print(f"[dim]  sin autofix: {sorted(set(manual_ids))}[/dim]")
 
     if total_high > 0 or (fail_on_medium and total_medium > 0):
         raise typer.Exit(1)
