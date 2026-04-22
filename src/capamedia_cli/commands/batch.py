@@ -1404,8 +1404,22 @@ def batch_watch(
         bool, typer.Option("--follow", help="Refresca periodicamente hasta Ctrl+C")
     ] = False,
     interval_seconds: Annotated[
-        int, typer.Option("--interval-seconds", help="Intervalo de refresh en modo --follow")
+        int, typer.Option("--interval-seconds", help="Intervalo de refresh en modo --follow (legacy)")
     ] = 15,
+    rich_mode: Annotated[
+        bool | None,
+        typer.Option(
+            "--rich/--plain",
+            help="Dashboard rich con barras (default: TTY si, pipe no). --plain fuerza tabla plana.",
+        ),
+    ] = None,
+    refresh_seconds: Annotated[
+        float,
+        typer.Option("--refresh-seconds", help="Refresh del dashboard rich (default 2s)"),
+    ] = 2.0,
+    engine: Annotated[
+        str, typer.Option("--engine", help="Etiqueta del engine mostrado en el footer")
+    ] = "codex",
 ) -> None:
     """Mirador operativo de lotes batch usando el estado persistente por servicio."""
     root = root.resolve()
@@ -1426,6 +1440,51 @@ def batch_watch(
     if not services:
         console.print(f"[yellow]No se encontraron servicios bajo {root}[/yellow]")
         raise typer.Exit(0)
+
+    use_rich = console.is_terminal if rich_mode is None else rich_mode
+
+    if use_rich:
+        from rich.live import Live
+
+        from capamedia_cli.core.dashboard import Dashboard, render_rich
+
+        dashboard = Dashboard(root, services=services, kind=kind, engine=engine)
+
+        def _build_renderable():
+            snaps = dashboard.snapshot()
+            if failures_only:
+                snaps = [s for s in snaps if s.status == "failed"]
+            agg = dashboard.aggregate(snaps)
+            return snaps, agg, render_rich(
+                snaps,
+                agg,
+                title=f"Batch migration: {root}",
+            )
+
+        snaps, agg, renderable = _build_renderable()
+
+        if not follow:
+            console.print(renderable)
+            md = _write_markdown_report(
+                f"watch-{kind}", _collect_watch_rows(root, services, kind), root, WATCH_FIELD_ORDER
+            )
+            console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+            return
+
+        refresh_every = max(0.5, float(refresh_seconds))
+        try:
+            with Live(renderable, console=console, refresh_per_second=max(1, int(1 / refresh_every))) as live:
+                while True:
+                    time.sleep(refresh_every)
+                    snaps, agg, renderable = _build_renderable()
+                    live.update(renderable)
+                    if agg.total > 0 and (agg.done + agg.failed) == agg.total:
+                        break
+        except KeyboardInterrupt:
+            console.print("\n[yellow]watch cancelado por el usuario[/yellow]")
+
+        _print_rich_summary(snaps, agg)
+        return
 
     def render_snapshot() -> list[BatchRow]:
         rows = _collect_watch_rows(root, services, kind)
@@ -1463,6 +1522,29 @@ def batch_watch(
     rows = render_snapshot()
     md = _write_markdown_report(f"watch-{kind}", rows, root, WATCH_FIELD_ORDER)
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+
+
+def _print_rich_summary(snaps, aggregate) -> None:
+    """Imprime tabla final tras `watch --rich --follow`."""
+    table = Table(title="Batch watch: resumen final", title_style="bold cyan")
+    table.add_column("Servicio", style="cyan")
+    table.add_column("Fase")
+    table.add_column("Status")
+    table.add_column("Intentos", justify="right")
+    for snap in snaps:
+        style = "red" if snap.status == "failed" else "green" if snap.status == "done" else "cyan"
+        table.add_row(
+            snap.name,
+            snap.phase,
+            f"[{style}]{snap.status}[/{style}]",
+            str(snap.attempts),
+        )
+    console.print(table)
+    console.print(
+        f"[bold]Totales:[/bold] done={aggregate.done} failed={aggregate.failed} "
+        f"running={aggregate.running} queued={aggregate.queued} "
+        f"success_rate={aggregate.success_rate * 100:.0f}%"
+    )
 
 
 @app.command("pipeline")
