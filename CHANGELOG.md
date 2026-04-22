@@ -4,6 +4,56 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.15.0] - 2026-04-22
+
+### Added - `capamedia status` — readiness check sin tokens API
+
+Comando corto que responde una sola pregunta: **"estoy listo para migrar?"**.
+Tabla rich + veredicto global. Exit 0 si todo OK, exit 1 si falta algo
+obligatorio.
+
+```powershell
+capamedia status
+```
+
+Chequea:
+
+- **Toolchain**: `git`, Java 21 (JAVA_HOME o PATH), `gradle`, `node`
+- **AI engine (suscripcion)**: al menos `claude` o `codex` autenticado
+  (usa la suscripcion del usuario — Claude Max / ChatGPT Plus/Pro — NO
+  tokens API pagos)
+- **Azure DevOps PAT**: env `CAPAMEDIA_AZDO_PAT` o `AZURE_DEVOPS_EXT_PAT`
+- **Azure Artifacts token**: env `CAPAMEDIA_ARTIFACT_TOKEN` o `ARTIFACT_TOKEN`
+- **MCP Fabrics**: server `fabrics` registrado en `.mcp.json` (proyecto o home)
+
+**Explicitamente NO chequea `OPENAI_API_KEY`**. El engine headless usa
+la suscripcion del usuario (login interactivo del CLI), no una API key
+de billing. El test `test_check_engines_never_looks_at_openai_api_key`
+documenta esta invariante.
+
+Si algun check obligatorio falla, imprime los pasos sugeridos en orden:
+
+```
+Pasos sugeridos:
+  1. `capamedia install`                  # toolchain
+  2. `claude login` o `codex login`       # suscripcion
+  3. `capamedia auth bootstrap --artifact-token T --azure-pat T --scope global`
+  4. `capamedia fabrics setup --refresh-npmrc`
+```
+
+### Testing
+
+- **339/339 tests PASS** (+15 en `test_status.py`):
+  - `StatusCheck` dataclass smoke
+  - `_check_binary` en 3 escenarios (missing / found / with-version)
+  - `_check_engines` en 4 escenarios (claude-only OK, codex-only OK,
+    ninguno, y test explicito que confirma que NUNCA lee `OPENAI_API_KEY`)
+  - `_check_azure_pat` y `_check_artifacts_token` con env vars alternativas
+    y ausentes
+  - `status_command` fail path (exit 1) + all-green path (no exit)
+
+---
+
 ## [0.14.0] - 2026-04-22
 
 ### Added - Comandos `version` y `uninstall`
