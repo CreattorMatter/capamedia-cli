@@ -4,6 +4,72 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.9.0] - 2026-04-22
+
+### Added - Matriz de decision MCP Fabrics corregida (4 fixes JGarcia/Julian)
+
+La matriz que usa `capamedia fabrics generate` para deducir `projectType`,
+`webFramework` e `invocaBancs` estaba confundiendo dos casos: WAS con 2+
+endpoints que debian ser SOAP+MVC recibian WebFlux, y IIBs con BANCS
+detectados solo por UMP perdian el override cuando el BANCS se invocaba via
+TX directa, HTTPRequest o BancsClient en Java. Se consolido la regla con
+4 fixes deterministas:
+
+**Fix 1 - `detect_bancs_connection()` (nuevo en `legacy_analyzer.py`):**
+Detecta conexion a BANCS por 4 senales en vez de solo UMP references:
+  1. UMPs referenciadas en ESQL/msgflow (patron indirecto legacy)
+  2. TX BANCS literal `'0NNNNN'` en ESQL (llamada directa sin UMP)
+  3. HTTPRequest node apuntando a BANCS en msgflows
+  4. `BancsClient` / `@BancsService` en Java (WAS con adapter del banco)
+
+Devuelve `(bool, list[str] evidence)` para que el log exponga que senal
+disparo la deteccion.
+
+**Fix 2 - `count_was_endpoints()` (nuevo en `legacy_analyzer.py`):**
+Cascada de 3 intentos para contar endpoints de un WAS cuando no hay WSDL
+suelto en el repo (caso comun con UMP0028 y pares sin fuente en Azure):
+  1. Extrae WSDL embebido en `.ear` / `.war` y cuenta operations dedup
+  2. `web.xml` -> `servlet-class` -> anotaciones `@WebMethod` en el Java
+  3. Fallback: metodos publicos del servlet-class (excluye get/set/is/main)
+
+**Fix 3 - `analyze_legacy()` usa los detectores nuevos:**
+  - Agrega `has_bancs: bool` y `bancs_evidence: list[str]` al dataclass
+    `LegacyAnalysis` (defaults compatibles con constructores existentes).
+  - Para WAS sin WSDL, sintetiza un `WsdlInfo` minimo con el count
+    inferido por `count_was_endpoints` y deja un warning explicito.
+  - Nueva logica de `framework_recommendation`:
+    * ORQ siempre `rest`
+    * IIB con BANCS siempre `rest` (override gana sobre op count)
+    * Resto decide por `wsdl.operation_count` (1 -> rest, 2+ -> soap)
+
+**Fix 4 - `fabrics.py generate()` aplica la matriz correcta:**
+  - `invoca_bancs = analysis.has_bancs` (no `bool(analysis.umps)`)
+  - `webFramework`: WAS siempre `mvc`, resto `webflux`
+  - `projectType`: ORQ/IIB-con-BANCS forzado a `rest`, resto delega a
+    `framework_recommendation`.
+
+**Matriz consolidada (ahora respetada por el deducer):**
+
+| Caso | projectType | webFramework | invocaBancs |
+|---|---|---|---|
+| IIB con BANCS, 1 op | rest | webflux | true |
+| IIB con BANCS, 2+ ops | rest | webflux | true |
+| IIB sin BANCS, 1 op | rest | webflux | false |
+| IIB sin BANCS, 2+ ops | soap | mvc | false |
+| WAS con 1 endpoint | rest | mvc | false |
+| WAS con 2+ endpoints | soap | mvc | false |
+| ORQ | rest | webflux | true |
+
+**Tests agregados:** `tests/test_mcp_decision_matrix.py` con 13 tests
+(7 filas de la matriz + 4 de `detect_bancs_connection` + 4 de
+`count_was_endpoints`). Total suite: 264 -> 277 tests, todos verdes.
+
+**Gotcha conocido:** `invocaBancs` en ORQ lo asume `true` en la matriz,
+pero `analyze_legacy` para un ORQ sin llamadas a BANCS directas puede
+devolver `has_bancs=False`. El MCP tolera esto porque los ORQ tambien
+pueden ser puros fan-out SOAP sin BANCS (ej. ORQClientes0028). Queda
+como dato derivado de la evidencia real, no impuesto por source_kind.
+
 ## [0.8.0] - 2026-04-22
 
 ### Added - Sync prompts JGarcia + integracion bank-fix al check + audit completo

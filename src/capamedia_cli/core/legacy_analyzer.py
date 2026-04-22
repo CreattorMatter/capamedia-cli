@@ -60,6 +60,8 @@ class LegacyAnalysis:
     framework_recommendation: str = ""  # "rest" | "soap"
     complexity: str = ""  # "low" | "medium" | "high"
     warnings: list[str] = field(default_factory=list)
+    has_bancs: bool = False
+    bancs_evidence: list[str] = field(default_factory=list)
 
 
 # -- WSDL parsing (portType-only, skip binding) -----------------------------
@@ -257,6 +259,120 @@ def score_complexity(op_count: int, ump_count: int, has_db: bool) -> str:
     return "high"
 
 
+# -- BANCS connection detection ---------------------------------------------
+
+
+def detect_bancs_connection(legacy_root: Path) -> tuple[bool, list[str]]:
+    """True si el servicio conecta a BANCS por cualquier via.
+
+    4 senales:
+      1. UMPs referenciadas (patron indirecto)
+      2. TX BANCS literal (0NNNNN) en ESQL sin prefijo UMP adyacente
+      3. HTTPRequest node apuntando a BANCS en msgflows
+      4. BancsClient / @BancsService en Java
+    """
+    evidence: list[str] = []
+    # 1. UMPs
+    if detect_ump_references(legacy_root):
+        evidence.append("UMP references")
+    # 2. TX literal 0NNNNN en ESQL
+    tx_pattern = re.compile(r"['\"]0\d{5}['\"]")
+    for esql in legacy_root.rglob("*.esql"):
+        try:
+            text = esql.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if tx_pattern.search(text):
+            evidence.append(f"TX literal en {esql.name}")
+            break
+    # 3. HTTPRequest con BANCS en msgflow
+    for msgflow in legacy_root.rglob("*.msgflow"):
+        try:
+            text = msgflow.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if re.search(r"HTTPRequest", text) and re.search(r"bancs", text, re.IGNORECASE):
+            evidence.append(f"HTTPRequest BANCS en {msgflow.name}")
+            break
+    # 4. BancsClient / @BancsService en Java
+    for java in legacy_root.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts:
+            continue
+        try:
+            text = java.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "BancsClient" in text or "@BancsService" in text:
+            evidence.append(f"BancsClient en {java.name}")
+            break
+    return (len(evidence) > 0, evidence)
+
+
+# -- WAS endpoint count via Java fallback -----------------------------------
+
+
+def count_was_endpoints(legacy_root: Path) -> tuple[int, str]:
+    """Cuenta endpoints de un WAS cuando no hay WSDL suelto.
+
+    Cascada:
+      1. WSDL embebido en .ear/.war (extrae y parsea)
+      2. Metodos @WebMethod del servlet-class del web.xml
+      3. Metodos publicos no-getter/setter del servlet-class
+    Retorna (count, source). count=0 si no se pudo determinar.
+    """
+    import zipfile
+    # 1. WSDL en .ear/.war
+    for archive in list(legacy_root.rglob("*.ear")) + list(legacy_root.rglob("*.war")):
+        try:
+            with zipfile.ZipFile(archive) as z:
+                wsdl_names = [n for n in z.namelist() if n.lower().endswith(".wsdl")]
+                for wsdl_name in wsdl_names:
+                    try:
+                        content = z.read(wsdl_name).decode("utf-8", errors="ignore")
+                        # Dedup operations by name attribute
+                        ops = set(re.findall(r"<(?:\w+:)?operation\s+name=\"([^\"]+)\"", content))
+                        if ops:
+                            return (len(ops), f"WSDL embebido en {archive.name}")
+                    except (KeyError, zipfile.BadZipFile, UnicodeDecodeError):
+                        continue
+        except (zipfile.BadZipFile, OSError):
+            continue
+    # 2/3. web.xml -> servlet-class -> metodos
+    for webxml in legacy_root.rglob("web.xml"):
+        if "target" in webxml.parts:
+            continue
+        try:
+            text = webxml.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        m = re.search(r"<servlet-class>([^<]+)</servlet-class>", text)
+        if not m:
+            continue
+        servlet_class = m.group(1).strip()
+        class_simple = servlet_class.split(".")[-1]
+        for java in legacy_root.rglob(f"{class_simple}.java"):
+            if "target" in java.parts or "build" in java.parts:
+                continue
+            try:
+                jtext = java.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            # 2. @WebMethod
+            webmethods = re.findall(r"@WebMethod\b", jtext)
+            if webmethods:
+                return (len(webmethods), f"@WebMethod en {class_simple}.java")
+            # 3. Publics no getter/setter/main
+            publics = re.findall(
+                r"public\s+(?!class\b)(?!static\s+void\s+main\b)"
+                r"[\w<>\[\],\s?]+?\s+(?!get)(?!set)(?!is)(\w+)\s*\(",
+                jtext,
+            )
+            uniq = set(publics)
+            if uniq:
+                return (len(uniq), f"metodos publicos en {class_simple}.java")
+    return (0, "no se pudo determinar")
+
+
 # -- Full analysis orchestration --------------------------------------------
 
 
@@ -292,9 +408,32 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
     if source_kind == "was":
         has_db, db_evidence = detect_database_usage(legacy_root)
 
-    # Framework recommendation (matriz oficial, sin excepciones)
+    # Detectar BANCS por cualquier via (no solo UMPs)
+    has_bancs, bancs_evidence = detect_bancs_connection(legacy_root)
+
+    # Para WAS sin WSDL suelto, contar endpoints por codigo Java
+    if source_kind == "was" and wsdl_info is None:
+        endpoint_count, endpoint_source = count_was_endpoints(legacy_root)
+        if endpoint_count > 0:
+            warnings.append(
+                f"WAS sin WSDL suelto. Endpoints inferidos: {endpoint_count} "
+                f"(fuente: {endpoint_source})"
+            )
+            # Sintetizar un WsdlInfo minimo con el count
+            wsdl_info = WsdlInfo(
+                path=Path("<inferred-from-java>"),
+                operation_count=endpoint_count,
+                operation_names=[],
+                target_namespace="",
+            )
+
+    # Framework recommendation segun matriz actualizada:
+    # ORQ siempre REST. IIB con BANCS siempre REST (override).
+    # Resto decide por op_count del WSDL.
     framework = ""
-    if wsdl_info:
+    if source_kind == "orq" or (source_kind == "iib" and has_bancs):
+        framework = "rest"
+    elif wsdl_info:
         framework = "rest" if wsdl_info.operation_count == 1 else "soap"
 
     op_count = wsdl_info.operation_count if wsdl_info else 0
@@ -309,4 +448,6 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
         framework_recommendation=framework,
         complexity=complexity,
         warnings=warnings,
+        has_bancs=has_bancs,
+        bancs_evidence=bancs_evidence,
     )

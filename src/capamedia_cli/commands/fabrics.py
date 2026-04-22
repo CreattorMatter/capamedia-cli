@@ -671,10 +671,20 @@ def generate(
         raise typer.Exit(1)
 
     # Step 3: Deduce MCP params
-    project_type = analysis.framework_recommendation or "soap"
-    web_framework = "webflux" if project_type == "rest" else "mvc"
-    tecnologia = "bus" if analysis.source_kind == "iib" else ("was" if analysis.source_kind == "was" else "bus")
-    invoca_bancs = bool(analysis.umps)
+    # invocaBancs: deteccion robusta (UMP + TX directa + HTTPRequest + BancsClient)
+    invoca_bancs = analysis.has_bancs
+
+    # projectType: invocaBancs gana sobre op count salvo en WAS
+    if analysis.source_kind == "orq" or (analysis.source_kind == "iib" and invoca_bancs):
+        project_type = "rest"
+    else:
+        project_type = analysis.framework_recommendation or "soap"
+
+    # webFramework: WAS siempre MVC, resto WebFlux
+    web_framework = "mvc" if analysis.source_kind == "was" else "webflux"
+
+    # tecnologia: mismo mapping que antes
+    tecnologia = "was" if analysis.source_kind == "was" else "bus"
     wsdl_abs = str(analysis.wsdl.path.resolve())
     project_name = f"tnd-msa-sp-{service_name.lower()}"
     project_path = str((ws / "destino").resolve())
