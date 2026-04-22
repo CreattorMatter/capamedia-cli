@@ -4,6 +4,57 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.12.0] - 2026-04-22
+
+### Changed - Normalizar `lib-bnc-api-client` a `1.1.0` estable
+
+El equipo del banco libero la version estable `com.pichincha.bnc:
+lib-bnc-api-client:1.1.0` (Apr 2026). Antes la ultima variante disponible
+era `1.1.0-alpha.20260409115137` (pre-release). Ambas pasaban el check
+oficial `validate_hexagonal.py` (substring match contra `1.1.0`), pero
+el estandar nuevo para proyectos migrados es **la estable limpia**:
+
+```gradle
+implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
+```
+
+**`fix_add_libbnc_dependency` ahora hace 2 pasos:**
+
+1. **Normaliza** cualquier variante pre-release de `1.1.0` a la estable:
+   - `1.1.0-alpha.xxx` -> `1.1.0`
+   - `1.1.0-SNAPSHOT` -> `1.1.0`
+   - `1.1.0-rc*` / `1.1.0-beta*` -> `1.1.0`
+   - `1.1.0.RELEASE` / `1.1.0.M*` -> `1.1.0`
+2. Si la libreria no esta declarada, la inserta (comportamiento previo).
+
+Regex utilizado:
+
+```python
+r"(com\.pichincha\.bnc:lib-bnc-api-client:1\.1\.0)"
+r"[-.](?:alpha|beta|rc|snapshot|release|m)[\w.\-]*"
+```
+
+**Canonical `context/bank-official-rules.md` - regla 8 actualizada**:
+
+- MUST: usar `1.1.0` estable literal.
+- NEVER: mantener pre-releases `-alpha/-SNAPSHOT/-rc/-beta/.RELEASE` en
+  proyectos migrados nuevos. La estable salio, ir a ella.
+- Autofix documentado como parte de la regla.
+
+### Testing
+
+- **300/300 tests PASS** (vs 296 de v0.11.0). +4 tests nuevos en
+  `test_bank_autofix.py`:
+  - `test_libbnc_normalizes_alpha_to_stable`
+  - `test_libbnc_normalizes_snapshot_to_stable`
+  - `test_libbnc_stable_version_untouched`
+  - `test_libbnc_normalizes_rc_variant`
+- 1 test existente actualizado por cambio de semantica:
+  `test_libbnc_no_change_if_already_present` → `test_libbnc_alpha_normalized_to_stable`
+  (antes aceptaba alpha como ya presente, ahora lo normaliza).
+
+---
+
 ## [0.11.0] - 2026-04-22
 
 ### Added - Block 16: SonarCloud custom rule - test class annotations

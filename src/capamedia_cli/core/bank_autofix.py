@@ -252,9 +252,26 @@ _REQUIRED_DEP_LINE = (
     "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'"
 )
 
+# Matchea variantes no-estables de 1.1.0 que deben normalizarse a 1.1.0 limpio.
+# Ejemplos: 1.1.0-alpha.20260409115137, 1.1.0-SNAPSHOT, 1.1.0.RELEASE, 1.1.0-rc1
+_LIBBNC_PRE_1_1_0_RE = re.compile(
+    r"(com\.pichincha\.bnc:lib-bnc-api-client:1\.1\.0)"
+    r"[-.](?:alpha|beta|rc|snapshot|release|m)[\w.\-]*",
+    re.IGNORECASE,
+)
+
 
 def fix_add_libbnc_dependency(project_root: Path) -> BankAutofixResult:
-    """Agrega `lib-bnc-api-client:1.1.0` al `build.gradle` si falta."""
+    """Normaliza `lib-bnc-api-client` a `1.1.0` estable y lo agrega si falta.
+
+    Comportamiento:
+      1. Si hay `1.1.0-alpha.*` / `1.1.0-SNAPSHOT` / `1.1.0.RELEASE` / etc.,
+         lo reemplaza por `1.1.0` limpio (ahora que la estable esta
+         liberada).
+      2. Si no hay ninguna version de la libreria, la inserta en
+         `dependencies { }` o crea el bloque.
+      3. Si ya esta `1.1.0` limpio, no toca.
+    """
     result = BankAutofixResult(rule="8", applied=False)
 
     gradle_files = [
@@ -276,29 +293,38 @@ def fix_add_libbnc_dependency(project_root: Path) -> BankAutofixResult:
             text = gf.read_text(encoding="utf-8")
         except OSError:
             continue
-        if REQUIRED_LIBRARY_PREFIX in text:
-            continue  # ya la tiene (substring match igual que el script oficial)
 
         original = text
-        # Insertar dentro del bloque `dependencies { ... }` si existe
-        m = re.search(r"dependencies\s*\{", text)
-        if not m:
-            # No hay bloque — al final del archivo
-            text = text.rstrip() + "\n\ndependencies {\n" + _REQUIRED_DEP_LINE + "\n}\n"
-        else:
-            insert_pos = m.end()
-            text = text[:insert_pos] + "\n" + _REQUIRED_DEP_LINE + text[insert_pos:]
+
+        # Paso 1: normalizar versiones pre-release de 1.1.0 a 1.1.0 estable
+        normalized, n_replaced = _LIBBNC_PRE_1_1_0_RE.subn(r"\1", text)
+        if n_replaced > 0:
+            text = normalized
+            result.changes.append(
+                f"{gf.relative_to(project_root)}: {n_replaced} version(es) "
+                f"pre-release de lib-bnc-api-client normalizada(s) a 1.1.0"
+            )
+
+        # Paso 2: si aun no esta la libreria, agregarla
+        if REQUIRED_LIBRARY_PREFIX not in text:
+            # Insertar dentro del bloque `dependencies { ... }` si existe
+            m = re.search(r"dependencies\s*\{", text)
+            if not m:
+                text = text.rstrip() + "\n\ndependencies {\n" + _REQUIRED_DEP_LINE + "\n}\n"
+            else:
+                insert_pos = m.end()
+                text = text[:insert_pos] + "\n" + _REQUIRED_DEP_LINE + text[insert_pos:]
+            result.changes.append(
+                f"{gf.relative_to(project_root)}: +lib-bnc-api-client:1.1.0"
+            )
 
         if text != original:
             gf.write_text(text, encoding="utf-8")
             result.files_modified.append(gf)
-            result.changes.append(
-                f"{gf.relative_to(project_root)}: +lib-bnc-api-client:1.1.0"
-            )
             result.applied = True
 
     if not result.applied:
-        result.notes = "la libreria ya estaba declarada"
+        result.notes = "la libreria ya estaba en 1.1.0 estable"
     return result
 
 

@@ -143,7 +143,8 @@ def test_libbnc_added_if_missing(tmp_path: Path) -> None:
     assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in updated
 
 
-def test_libbnc_no_change_if_already_present(tmp_path: Path) -> None:
+def test_libbnc_alpha_normalized_to_stable(tmp_path: Path) -> None:
+    """Con la nueva regla v0.12.0, alpha se normaliza a 1.1.0 estable."""
     gradle = tmp_path / "build.gradle"
     gradle.write_text(
         "dependencies {\n"
@@ -152,12 +153,75 @@ def test_libbnc_no_change_if_already_present(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     result = fix_add_libbnc_dependency(tmp_path)
-    assert not result.applied
+    assert result.applied  # ahora SI aplica: normaliza
+    updated = gradle.read_text(encoding="utf-8")
+    assert "1.1.0-alpha" not in updated
+    assert "lib-bnc-api-client:1.1.0'" in updated
 
 
 def test_libbnc_no_gradle_file(tmp_path: Path) -> None:
     result = fix_add_libbnc_dependency(tmp_path)
     assert not result.applied
+
+
+def test_libbnc_normalizes_alpha_to_stable(tmp_path: Path) -> None:
+    """1.1.0-alpha.xxx -> 1.1.0 ahora que la estable esta liberada."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "dependencies {\n"
+        "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0-alpha.20260409115137'\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(tmp_path)
+    assert result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "1.1.0-alpha" not in updated
+    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0'" in updated
+    # No debe agregar linea duplicada
+    assert updated.count("lib-bnc-api-client:1.1.0") == 1
+
+
+def test_libbnc_normalizes_snapshot_to_stable(tmp_path: Path) -> None:
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "dependencies {\n"
+        "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0-SNAPSHOT'\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(tmp_path)
+    assert result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "SNAPSHOT" not in updated
+    assert "lib-bnc-api-client:1.1.0'" in updated
+
+
+def test_libbnc_stable_version_untouched(tmp_path: Path) -> None:
+    """Si ya esta en 1.1.0 estable, no tocar."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "dependencies {\n"
+        "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    original = gradle.read_text(encoding="utf-8")
+    result = fix_add_libbnc_dependency(tmp_path)
+    assert not result.applied
+    assert gradle.read_text(encoding="utf-8") == original
+
+
+def test_libbnc_normalizes_rc_variant(tmp_path: Path) -> None:
+    """Variantes -rc1, -rc.0, -beta tambien se normalizan."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0-rc1'\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(tmp_path)
+    assert result.applied
+    assert "rc1" not in gradle.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

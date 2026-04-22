@@ -275,18 +275,33 @@ optimus:
 
 ## Regla 8 - `lib-bnc-api-client:1.1.0` obligatoria
 
-**MUST**: el `build.gradle` DEBE declarar la libreria BANCS API client del banco:
+**MUST**: el `build.gradle` DEBE declarar la libreria BANCS API client del banco en la **version estable** `1.1.0`:
 
 ```gradle
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
 ```
 
-La version puede ser mayor (ej `1.1.0-alpha.20260409115137`, `1.2.0`, `1.1.0.RELEASE`) pero el prefijo `com.pichincha.bnc:lib-bnc-api-client:1.1.0` debe estar presente literal en el archivo.
+**Ahora que la version estable `1.1.0` esta liberada** (Apr 2026), los
+proyectos migrados van con `1.1.0` limpio. Antes estaba disponible solo
+en variante pre-release (`1.1.0-alpha.20260409115137`), que tambien pasaba
+el regex del validador oficial porque contenia el substring `1.1.0`. Esa
+version queda **deprecada** para proyectos nuevos.
 
 **NEVER**:
 - omitirla (implementar BANCS client a mano desde cero)
 - usar version `1.0.x` o menor
-- usar version sin prefijo `1.1.0` (el check busca substring match)
+- mantener `1.1.0-alpha.*`, `1.1.0-SNAPSHOT`, `1.1.0.RELEASE`, `1.1.0-rc*`,
+  `1.1.0-beta*` en proyectos migrados nuevos. La estable ya salio; ir a ella.
+- usar version sin prefijo `1.1.0` (el check oficial busca substring match)
+
+### Autofix
+
+`capamedia validate-hexagonal auto-fix --rules 8` aplica dos pasos:
+
+1. **Normaliza** cualquier variante pre-release de `1.1.0` (`-alpha.*`,
+   `-SNAPSHOT`, `-rc*`, `-beta*`, `.RELEASE`, `.M*`) a `1.1.0` estable.
+2. Si la libreria no esta declarada, la inserta en el bloque
+   `dependencies { }` del `build.gradle` (o crea el bloque si no existe).
 
 Esta libreria provee: `BancsClient`, `BancsClientHelper`, anotaciones `@BancsService`, mapeos de errores canonicos del banco. Sin ella el codigo se duplica.
 
