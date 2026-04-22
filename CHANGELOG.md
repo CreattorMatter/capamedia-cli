@@ -4,6 +4,76 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.11.0] - 2026-04-22
+
+### Added - Block 16: SonarCloud custom rule - test class annotations
+
+Regla que NO esta en el script oficial del banco (`validate_hexagonal.py`)
+pero que SonarCloud del banco reporta como violation en Quality Gate:
+
+```
+[Anotaciones] Faltan anotaciones requeridas: @SpringBootTest
+```
+
+El PR puede pasar los 9 checks oficiales y aun rechazarse por SonarCloud.
+
+**Nuevo `Block 16` en `core/checklist_rules.py`**:
+
+- Check `16.1` — Anotacion de test en `@Test classes`
+- Escanea `src/test/java/**/*Test.java` y `*Tests.java`
+- FAIL MEDIUM si alguno no tiene ninguna de: `@SpringBootTest`,
+  `@WebMvcTest`, `@WebFluxTest`, `@DataJpaTest`, `@JsonTest`,
+  `@RestClientTest`, `@JdbcTest`, `@ExtendWith`, `@RunWith`,
+  `@AutoConfigureMockMvc`
+- Severidad MEDIUM (no HIGH) porque el gate que lo rechaza es SonarCloud,
+  no `validate_hexagonal.py` que bloquea el merge duro.
+
+**Autofix `fix_add_test_annotation` en `core/autofix.py` registrado en
+`AUTOFIX_REGISTRY["16.1"]`**:
+
+Heuristica para elegir la anotacion correcta:
+
+- Si el test **usa hints de Spring context** (`@Autowired`, `@MockBean`,
+  `@SpyBean`, `TestRestTemplate`, `WebTestClient`, `MockMvc`,
+  `@ApplicationContext`) → agrega `@SpringBootTest` + import
+  `org.springframework.boot.test.context.SpringBootTest`.
+- Si NO los usa (unit test puro) → agrega
+  `@ExtendWith(MockitoExtension.class)` + imports de
+  `org.junit.jupiter.api.extension.ExtendWith` +
+  `org.mockito.junit.jupiter.MockitoExtension`. Es mas rapido: no carga
+  el ApplicationContext, solo inyecta mocks.
+
+**Canonical `context/sonar-custom-rules.md` (nuevo)**:
+
+Documento dedicado a reglas SonarCloud del banco que no estan en el script
+oficial. Primera regla: `S-1 — Anotacion de test class obligatoria` con
+tabla de anotaciones aceptadas, ejemplos YES/NO, heuristica de eleccion
+entre `@SpringBootTest` y `@ExtendWith(MockitoExtension.class)`.
+
+Incluye guia de "como agregar mas reglas SonarCloud" para cuando aparezcan
+violations nuevas en los PRs — mantener el pattern MUST/NEVER + ejemplo NO
++ autofix si es deterministico.
+
+### Testing
+
+- **296/296 tests PASS** (vs 285 de v0.10.0). 11 tests nuevos en
+  `test_block_16_test_annotations.py`:
+  - 7 del check (pass con cada anotacion, fail sin ninguna, count reporting,
+    sin src/test/, ignora files no-Test.java)
+  - 4 del autofix (Spring context → `@SpringBootTest`, unit → `@ExtendWith`,
+    skip si ya anotado, no explota sin test dir)
+
+### Pendiente para v0.12.0
+
+- Si el equipo publica un script oficial del Quality Gate SonarCloud
+  (similar a `validate_hexagonal.py`), vendor-pinarlo en `data/vendor/` y
+  exponerlo via `capamedia validate-sonar` (paralelo a
+  `validate-hexagonal`).
+- Mapeo de mas reglas SonarCloud que aparezcan en los PRs reales —
+  agregarlas al `context/sonar-custom-rules.md` como `S-2`, `S-3`, etc.
+
+---
+
 ## [0.10.0] - 2026-04-22
 
 ### Added - Autofix regla 6 + UUID sonar placeholder valido

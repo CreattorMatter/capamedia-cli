@@ -585,6 +585,145 @@ def fix_backend_from_catalog(root: Path, violation: Violation) -> AutofixResult:
     )
 
 
+# -- Block 16 — SonarCloud custom: test class annotations -----------------
+
+
+_TEST_ANNOTATIONS = (
+    "@SpringBootTest",
+    "@WebMvcTest",
+    "@WebFluxTest",
+    "@DataJpaTest",
+    "@JsonTest",
+    "@RestClientTest",
+    "@JdbcTest",
+    "@ExtendWith",
+    "@RunWith",
+    "@AutoConfigureMockMvc",
+)
+
+# Detecta si la clase usa tipos que implican Spring context (heuristica para
+# elegir @SpringBootTest vs @ExtendWith(MockitoExtension.class))
+_SPRING_CONTEXT_HINTS = (
+    "@Autowired",
+    "@MockBean",
+    "@SpyBean",
+    "TestRestTemplate",
+    "WebTestClient",
+    "MockMvc",
+    "@ApplicationContext",
+)
+
+_PUBLIC_CLASS_RE = re.compile(
+    r"(?P<prefix>(?:^|\n)(?:@\w+(?:\([^)]*\))?\s*\n)*)"
+    r"public\s+(?:abstract\s+|final\s+)?class\s+(?P<name>\w+)",
+    re.MULTILINE,
+)
+
+_TEST_ANNOTATION_IMPORTS = {
+    "@SpringBootTest": "org.springframework.boot.test.context.SpringBootTest",
+    "@ExtendWith": "org.junit.jupiter.api.extension.ExtendWith",
+}
+
+_MOCKITO_EXTENSION_IMPORT = "org.mockito.junit.jupiter.MockitoExtension"
+
+
+def fix_add_test_annotation(project_root: Path, violation: Violation) -> AutofixResult:
+    """Agrega `@SpringBootTest` a clases `*Test.java` que no tengan ninguna
+    anotacion de test reconocida. Si la clase luce como unit test puro (no
+    usa Spring context hints), usa `@ExtendWith(MockitoExtension.class)` —
+    mas barato que cargar el ApplicationContext.
+    """
+    _ = violation
+    test_root = project_root / "src" / "test" / "java"
+    if not test_root.exists():
+        return AutofixResult(applied=False, notes="no hay src/test/java/")
+
+    test_files = [
+        f
+        for f in test_root.rglob("*.java")
+        if f.name.endswith("Test.java") or f.name.endswith("Tests.java")
+    ]
+
+    modified: list[Path] = []
+    before_samples: list[str] = []
+    after_samples: list[str] = []
+
+    for f in test_files:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        original = text
+
+        # Ya tiene alguna anotacion -> skip
+        if any(ann in text for ann in _TEST_ANNOTATIONS):
+            continue
+
+        # Elegir anotacion segun heuristica
+        uses_spring_ctx = any(h in text for h in _SPRING_CONTEXT_HINTS)
+        if uses_spring_ctx:
+            chosen = "@SpringBootTest"
+            needed_imports = [_TEST_ANNOTATION_IMPORTS["@SpringBootTest"]]
+        else:
+            chosen = "@ExtendWith(MockitoExtension.class)"
+            needed_imports = [
+                _TEST_ANNOTATION_IMPORTS["@ExtendWith"],
+                _MOCKITO_EXTENSION_IMPORT,
+            ]
+
+        # Agregar imports si faltan
+        for imp in needed_imports:
+            if f"import {imp};" in text:
+                continue
+            m_imports = list(re.finditer(r"^import\s+[^\n]+;\n", text, re.MULTILINE))
+            if m_imports:
+                insert_at = m_imports[-1].end()
+                text = text[:insert_at] + f"import {imp};\n" + text[insert_at:]
+            else:
+                m_pkg = re.match(r"package\s+[^;]+;\n", text)
+                if m_pkg:
+                    insert_at = m_pkg.end()
+                    text = (
+                        text[:insert_at] + "\n" + f"import {imp};\n" + text[insert_at:]
+                    )
+
+        # Agregar la anotacion antes del `public class`
+        m_cls = _PUBLIC_CLASS_RE.search(text)
+        if not m_cls:
+            continue
+        # Buscar la linea exacta donde aparece `public class` para indent
+        line_before_class = text.rfind("\n", 0, m_cls.start("name")) + 1
+        indent_match = re.match(r"^(\s*)", text[line_before_class:])
+        indent = indent_match.group(1) if indent_match else ""
+        # Encontrar la posicion real de `public ... class`
+        public_pos = text.rfind("public", 0, m_cls.start("name"))
+        if public_pos < 0:
+            continue
+        text = (
+            text[:public_pos]
+            + f"{chosen}\n{indent}"
+            + text[public_pos:]
+        )
+
+        if text != original:
+            f.write_text(text, encoding="utf-8")
+            modified.append(f)
+            rel = f.relative_to(project_root)
+            before_samples.append(f"{rel}: sin anotacion test")
+            after_samples.append(f"{rel}: +{chosen}")
+
+    if not modified:
+        return AutofixResult(applied=False, notes="todos los tests ya tienen anotacion")
+
+    return AutofixResult(
+        applied=True,
+        files_modified=modified,
+        before="\n".join(before_samples[:3]),
+        after="\n".join(after_samples[:3]),
+        notes=f"anotacion test agregada a {len(modified)} archivo(s)",
+    )
+
+
 # -- Registry ---------------------------------------------------------------
 
 # La clave es el ID del checklist_rules (NO un slug inventado). Asi calza 1:1
@@ -598,6 +737,7 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "15.2": [fix_recurso_format],
     "15.3": [fix_componente_from_catalog],
     "15.4": [fix_backend_from_catalog],
+    "16.1": [fix_add_test_annotation],
 }
 
 

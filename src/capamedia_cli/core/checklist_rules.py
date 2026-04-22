@@ -704,6 +704,99 @@ def run_block_14(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+# -- Block 16: SonarCloud custom rules (non-official_bank_script) ----------
+#
+# Reglas que no estan en validate_hexagonal.py pero que SonarCloud del banco
+# reporta como violations en Quality Gate. Fuente: config custom del banco en
+# SonarCloud; no tenemos el script, solo la heuristica observada.
+
+
+TEST_CLASS_ANNOTATIONS = (
+    "@SpringBootTest",
+    "@WebMvcTest",
+    "@WebFluxTest",
+    "@DataJpaTest",
+    "@JsonTest",
+    "@RestClientTest",
+    "@JdbcTest",
+    "@ExtendWith",                 # JUnit 5 (SpringExtension, MockitoExtension)
+    "@RunWith",                    # JUnit 4 legacy (SpringRunner)
+    "@AutoConfigureMockMvc",
+)
+
+
+def run_block_16(ctx: CheckContext) -> list[CheckResult]:
+    """Block 16: SonarCloud custom rule — test classes must declare a test
+    annotation (@SpringBootTest / @WebMvcTest / @ExtendWith / etc.).
+
+    Busca `*Test.java` / `*Tests.java` bajo `src/test/java/**`. Si alguno no
+    tiene ninguna de las anotaciones reconocidas, lo flaggea con severidad
+    MEDIUM. Autofix disponible en `core/bank_autofix.fix_add_test_annotation`.
+    """
+    results: list[CheckResult] = []
+    test_root = ctx.migrated_path / "src" / "test" / "java"
+    if not test_root.exists():
+        results.append(
+            CheckResult(
+                "16.1", "Block 16", "Anotacion de test en @Test classes",
+                "pass", detail="sin src/test/java/",
+            )
+        )
+        return results
+
+    test_files = [
+        f
+        for f in test_root.rglob("*.java")
+        if f.name.endswith("Test.java") or f.name.endswith("Tests.java")
+    ]
+    if not test_files:
+        results.append(
+            CheckResult(
+                "16.1", "Block 16", "Anotacion de test en @Test classes",
+                "pass", detail="sin archivos *Test.java",
+            )
+        )
+        return results
+
+    missing: list[str] = []
+    for f in test_files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        has_any = any(ann in text for ann in TEST_CLASS_ANNOTATIONS)
+        if not has_any:
+            missing.append(str(f.relative_to(ctx.migrated_path)))
+
+    if missing:
+        results.append(
+            CheckResult(
+                "16.1", "Block 16", "Anotacion de test en @Test classes",
+                "fail", severity="medium",
+                detail=(
+                    f"{len(missing)}/{len(test_files)} sin anotacion de test "
+                    f"(SonarCloud custom). Requerida: @SpringBootTest, "
+                    f"@WebMvcTest, @WebFluxTest, @DataJpaTest, @ExtendWith, etc. "
+                    f"Primeros: {', '.join(missing[:3])}"
+                ),
+                suggested_fix=(
+                    "Agregar @SpringBootTest al test o usar @ExtendWith"
+                    "(MockitoExtension.class) para unit tests puros."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "16.1", "Block 16", "Anotacion de test en @Test classes",
+                "pass",
+                detail=f"{len(test_files)}/{len(test_files)} con anotacion correcta",
+            )
+        )
+
+    return results
+
+
 # -- Main orchestrator -----------------------------------------------------
 
 
@@ -716,6 +809,7 @@ ALL_BLOCKS = [
     ("Block 13", run_block_13),
     ("Block 14", run_block_14),
     ("Block 15", run_block_15),
+    ("Block 16", run_block_16),
 ]
 
 
