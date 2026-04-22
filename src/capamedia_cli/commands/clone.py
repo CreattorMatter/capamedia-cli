@@ -71,6 +71,24 @@ AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
+# UMPs pueden vivir en distintos proyectos segun el tipo del servicio que las
+# consume:
+#   - IIB/ORQ: UMPs en `tpl-bus-omnicanal/sqb-msa-<ump>` (patron clasico)
+#   - WAS:     UMPs en `tpl-integration-services-was/ump-<ump>-was`
+# El CLI intenta primero el patron correspondiente al source_kind del servicio
+# principal, despues los otros como fallback.
+UMP_AZURE_FALLBACK_PATTERNS_IIB: list[tuple[str, str]] = [
+    ("bus", "sqb-msa-{ump}"),                # IIB/ORQ clasico
+    ("was", "ump-{ump}-was"),                # por si una UMP se movio a WAS
+]
+
+UMP_AZURE_FALLBACK_PATTERNS_WAS: list[tuple[str, str]] = [
+    ("was", "ump-{ump}-was"),                # WAS (caso wstecnicos0008/umptecnicos0023)
+    ("was", "ms-{ump}-was"),                 # variante "ms"
+    ("bus", "sqb-msa-{ump}"),                # fallback IIB (por si la UMP vive aun alla)
+]
+
+
 def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tuple[Path | None, str, str]:
     """Intenta clonar el servicio probando todos los patrones Azure conocidos.
 
@@ -82,6 +100,39 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
         repo_name = pattern.format(svc=svc)
         dest = dest_root / "legacy" / repo_name
         ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+        if ok:
+            return (dest, project_key, repo_name)
+    return (None, "", "")
+
+
+def _resolve_ump_repo(
+    ump_name: str,
+    dest_root: Path,
+    shallow: bool,
+    *,
+    parent_kind: str = "iib",
+) -> tuple[Path | None, str, str]:
+    """Intenta clonar un repo de UMP probando los patrones conocidos.
+
+    `parent_kind`: tipo del servicio que usa la UMP (iib/was/orq). Determina
+    el orden de prueba. UMPs de servicios WAS suelen vivir en
+    `tpl-integration-services-was/ump-<ump>-was`; UMPs de IIB/ORQ en
+    `tpl-bus-omnicanal/sqb-msa-<ump>`.
+
+    Returns: (path_clonado, project_key, repo_name) o (None, "", "").
+    """
+    ump = ump_name.lower()
+    patterns = (
+        UMP_AZURE_FALLBACK_PATTERNS_WAS
+        if parent_kind == "was"
+        else UMP_AZURE_FALLBACK_PATTERNS_IIB
+    )
+    for project_key, pattern in patterns:
+        repo_name = pattern.format(ump=ump)
+        dest = dest_root / "umps" / repo_name
+        ok, err = _git_clone(
+            repo_name, dest, project_key=project_key, shallow=shallow
+        )
         if ok:
             return (dest, project_key, repo_name)
     return (None, "", "")
@@ -426,17 +477,22 @@ def clone_service(
     else:
         console.print("[dim]No se detectaron UMPs[/dim]")
 
-    # --- Step 3: Clone UMPs ---
+    # --- Step 3: Clone UMPs (fallback multi-patron segun tipo del servicio) ---
     if ump_names:
         console.print("\n[bold]3. Clonando UMPs...[/bold]")
         for ump in ump_names:
-            ump_repo = f"sqb-msa-{ump.lower()}"
-            ump_dest = ws / "umps" / ump_repo
-            ok, err = _git_clone(ump_repo, ump_dest, project_key="bus", shallow=shallow)
-            if ok:
-                console.print(f"  [green]OK[/green] {ump_repo}")
+            resolved, proj, repo_name = _resolve_ump_repo(
+                ump, ws, shallow=shallow, parent_kind=pre_kind
+            )
+            if resolved:
+                console.print(
+                    f"  [green]OK[/green] {proj}/{repo_name}"
+                )
             else:
-                console.print(f"  [yellow]SKIP[/yellow] {ump_repo}: {err}")
+                console.print(
+                    f"  [yellow]SKIP[/yellow] {ump}: no encontrado en "
+                    f"ninguno de los patrones ({pre_kind} parent)"
+                )
 
     # --- Step 4: Analyze (UMPs -> TX codes) ---
     console.print("\n[bold]4. Analizando WSDL + extrayendo TX codes de UMPs clonados...[/bold]")

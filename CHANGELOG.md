@@ -4,6 +4,64 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.2] - 2026-04-22
+
+### Fixed - UMPs de servicios WAS viven en otro proyecto Azure
+
+**Caso real reportado**: `capamedia clone wstecnicos0008` detectaba la UMP
+`umptecnicos0023` correctamente, pero al clonarla intentaba solo el patron
+IIB `tpl-bus-omnicanal/sqb-msa-umptecnicos0023` y fallaba con `repository
+not found`. El repo REAL vive en
+`tpl-integration-services-was/ump-umptecnicos0023-was`.
+
+**Fix** — dos patrones de fallback para UMPs segun el tipo del servicio que
+las consume:
+
+- `UMP_AZURE_FALLBACK_PATTERNS_IIB` (para servicios IIB/ORQ):
+  1. `tpl-bus-omnicanal/sqb-msa-{ump}` (clasico IIB)
+  2. `tpl-integration-services-was/ump-{ump}-was` (fallback por si la UMP
+     migro a WAS)
+
+- `UMP_AZURE_FALLBACK_PATTERNS_WAS` (para servicios WAS):
+  1. `tpl-integration-services-was/ump-{ump}-was` (tipico WAS, caso real)
+  2. `tpl-integration-services-was/ms-{ump}-was` (variante "ms")
+  3. `tpl-bus-omnicanal/sqb-msa-{ump}` (fallback IIB)
+
+Nueva funcion `_resolve_ump_repo(ump_name, dest_root, shallow, parent_kind)`
+que itera los patrones en orden y devuelve el primero que responde. El
+`parent_kind` (iib/was/orq) determina el orden de prueba — mismo `source_kind`
+del servicio principal detectado con `detect_source_kind()`.
+
+`commands/clone.py` Step 3: ahora usa `_resolve_ump_repo` en vez de un clone
+hardcoded. Mensaje actualizado:
+
+```
+3. Clonando UMPs...
+  OK was/ump-umptecnicos0023-was        # detectado con patron WAS
+  SKIP otraump0000: no encontrado en ninguno de los patrones (was parent)
+```
+
+### Observacion - UMPs WAS sin TX BANCS
+
+El usuario noto (correctamente) que las UMPs de WAS NO suelen tener llamadas
+TX BANCS — son mas bien stores de BD (JPA/SQL) o logica pura de dominio.
+`extract_tx_codes` no va a encontrar nada en esas UMPs. Queda documentado
+como comportamiento esperado; el reporte `COMPLEXITY_<svc>.md` mostrara
+`UMPs con TX extraido: 0/1` y eso es correcto para WAS.
+
+### Testing
+
+- **372/372 tests PASS** (+7 en `test_ump_resolver.py`):
+  - Patrones IIB priorizan `sqb-msa-{ump}`
+  - Patrones WAS priorizan `ump-{ump}-was`
+  - `_resolve_ump_repo` con `parent_kind=was` intenta `ump-X-was` primero
+  - `_resolve_ump_repo` con `parent_kind=iib` intenta `sqb-msa-X` primero
+  - Fallback a alternativa si la primera no matchea
+  - Retorna None si ninguno matchea
+  - IIB puede fallback a proyecto WAS si la UMP vive alla
+
+---
+
 ## [0.17.1] - 2026-04-22
 
 ### Fixed - Detector WAS: WSDL sin prefijo `wsdl:` + UMPs en pom.xml/Java
