@@ -4,6 +4,25 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.15.1] - 2026-04-22
+
+### Fixed - Doc: comando de instalacion con `uv` + warning de PATH en Windows
+
+**Sintaxis correcta de `uv tool install`** en el CHANGELOG (README ya estaba
+bien): el bug doc tenia `uv tool install --from .` que falla con "the
+following required arguments were not provided: <PACKAGE>". Corregido a
+`uv tool install capamedia-cli --from .`.
+
+**Nueva nota en README**: advertencia para usuarios de `pip install -e .`
+en Windows — el binario `capamedia.exe` se instala en
+`%USERPROFILE%\AppData\Local\Python\pythoncore-<ver>-64\Scripts\` y este
+directorio a menudo no esta en PATH por default. Se incluye snippet
+PowerShell para agregarlo a la sesion actual y al PATH del usuario.
+
+`uv tool install` no tiene este problema — uv maneja el PATH solo.
+
+---
+
 ## [0.15.0] - 2026-04-22
 
 ### Added - `capamedia status` — readiness check sin tokens API
@@ -111,7 +130,7 @@ git clone https://github.com/CreattorMatter/capamedia-cli.git
 cd capamedia-cli
 
 # Instalar (elegir uno)
-uv tool install --from .                                # preferido (isolated)
+uv tool install capamedia-cli --from .                  # preferido (isolated)
 # o
 pip install -e .                                        # editable desde source
 

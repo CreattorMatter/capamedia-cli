@@ -28,10 +28,31 @@ install -> check-install -> auth bootstrap -> init -> fabrics setup
 ## Instalacion
 
 ```bash
+# Recomendado — isolated con uv (agrega capamedia al PATH automatico)
 uv tool install capamedia-cli --from .
-# o
+
+# Alternativa — editable con pip
 pip install -e .
 ```
+
+**Importante si usas `pip install -e .`**: en Windows, el binario
+`capamedia.exe` se instala en `%USERPROFILE%\AppData\Local\Python\
+pythoncore-<ver>-64\Scripts\` y ese directorio no siempre esta en PATH
+por default. Si te da `capamedia: command not found`, agregalo:
+
+```powershell
+# Sesion actual
+$env:PATH += ";$env:USERPROFILE\AppData\Local\Python\pythoncore-3.14-64\Scripts"
+
+# Permanente (usuario)
+[Environment]::SetEnvironmentVariable(
+  "PATH",
+  [Environment]::GetEnvironmentVariable("PATH", "User") + ";$env:USERPROFILE\AppData\Local\Python\pythoncore-3.14-64\Scripts",
+  [EnvironmentVariableTarget]::User
+)
+```
+
+Con `uv tool install` este problema no aparece — uv resuelve el PATH solo.
 
 ## Setup de una maquina
 
