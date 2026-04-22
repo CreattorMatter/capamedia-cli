@@ -4,6 +4,100 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.7.0] - 2026-04-22
+
+### Added - Patrones oficiales al canonical + autofix para 4 reglas del banco
+
+**Objetivo del tech lead (Julian):** las 5 FAIL-reglas del script oficial
+(`validate_hexagonal.py`) no deben volver a faltar en nuestros migrados.
+El conocimiento vive en el canonical (con MUST/NEVER + ejemplos YES/NO) y
+4 de las 5 se auto-corrigen sin AI.
+
+**Nuevo canonical `context/bank-official-rules.md`** con las 9 reglas
+oficiales documentadas. Extrae el comportamiento estudiando el gold 0024
+del banco. NO se usa un servicio como referencia viva — el conocimiento
+queda en el prompt como regla.
+
+Patrones capturados de observar el gold:
+
+- **Regla 4**: import exacto `com.pichincha.common.trace.logger.annotation.BpLogger`
+  + `@BpLogger` en cada metodo publico del `@Service` (no en la clase).
+- **Regla 7**: ConfigMap de OpenShift + `${VAR}` sin default. Prefijo
+  convencional `CCC_*`. Excepcion `optimus.web.*`.
+- **Regla 8**: `implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'`
+  literal en `dependencies`. Version puede ser `1.1.0-alpha.xxx` pero
+  prefijo `1.1.0` debe estar.
+- **Regla 9**: `namespace: tnd-middleware` + `name: tpl-middleware` +
+  `lifecycle: test` literales. `sonarcloud.io/project-key` = UUID real
+  (leer de `.sonarlint/connectedMode.json`). Owner con `@pichincha.com`.
+- **Regla 6** (no autofixeable): Service orquesta, Utils transforman.
+  Ejemplos negativos explicitos con `static`, `normalize*`, `isBlank` en
+  el Service.
+
+**Nuevo `core/bank_autofix.py`** con 4 fixes deterministas:
+
+- `fix_add_bplogger_to_service`: agrega import + `@BpLogger` a cada
+  metodo publico del `@Service` que no lo tenga.
+- `fix_yml_remove_defaults`: reemplaza `${VAR:default}` por `${VAR}`
+  en `application.yml`. Preserva `optimus.web.*`. Sabe reconstruir el
+  path yaml para aplicar el excluir correcto.
+- `fix_add_libbnc_dependency`: inserta
+  `implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'` en el
+  bloque `dependencies` del `build.gradle`. Crea el bloque si no existe.
+- `fix_catalog_info_scaffold`: genera `catalog-info.yaml` valido con
+  - `namespace: tnd-middleware`, `name: tpl-middleware`, `lifecycle: test`
+  - `sonarcloud.io/project-key` leido de `.sonarlint/connectedMode.json`
+    si existe (UUID real)
+  - `spec.owner` leido del `git config user.email` si termina en
+    `@pichincha.com`
+  - `spec.dependsOn` poblado con cada `lib-bnc-*` / `lib-trace-*`
+    detectada en Gradle
+  - PRESERVA el archivo existente si ya tiene valores reales (no
+    sobreescribe buenos con plantillas).
+
+**Nuevo comando `capamedia validate-hexagonal auto-fix <path>`**:
+
+```bash
+# Corre los 4 autofixes. Flags opcionales para llenar valores del catalog.
+capamedia validate-hexagonal auto-fix <path> \
+    --description "Consulta contacto transaccional BANCS" \
+    --owner jusoria@pichincha.com
+
+# Subset explicito
+capamedia validate-hexagonal auto-fix <path> --rules 4,7
+
+# Dry run
+capamedia validate-hexagonal auto-fix <path> --dry-run
+```
+
+**Resultado end-to-end sobre `wsclientes0007`:**
+
+```
+Antes: 5/10 checks pasados
+Despues de `auto-fix`: 9/10 checks pasados
+Unico rojo: Check 6 (Service business logic — requiere refactor semantico)
+```
+
+El check 6 queda para el AI: el canonical ya documenta la regla con
+ejemplo negativo (`static boolean isBlank` → extraer a Util).
+
+### Testing
+
+- **264/264 tests PASS** (+15 nuevos en `test_bank_autofix.py`).
+- Smoke test end-to-end sobre `wsclientes0007`: autofix pasa de 5/10 a 9/10
+  en un solo comando.
+
+### Pendiente para v0.8.0
+
+- Integrar `bank_autofix` al flujo de `capamedia check --auto-fix`
+  (ahora esta solo en `validate-hexagonal auto-fix`).
+- Integrar el audit MUST/NEVER (`capamedia canonical audit`) al
+  pipeline CI para detectar reglas sin ejemplo.
+- Regla 6: explorar auto-fix semantico con LSP/JavaParser (extract
+  util de metodos con nombre `normalize*`, `pad*`, `isBlank`, etc.).
+
+---
+
 ## [0.6.0] - 2026-04-22
 
 ### Added - `validate-hexagonal` oficial del banco + WAS config extractor

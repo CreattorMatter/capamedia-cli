@@ -274,3 +274,99 @@ def validate_sync(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
     console.print(f"[green]OK[/green] script actualizado: {target}")
+
+
+@app.command("auto-fix")
+def validate_auto_fix(
+    project_path: Annotated[
+        Path,
+        typer.Argument(help="Ruta al proyecto migrado."),
+    ],
+    description: Annotated[
+        str | None,
+        typer.Option(
+            "--description",
+            help="Descripcion del servicio para catalog-info.yaml (regla 9)",
+        ),
+    ] = None,
+    owner: Annotated[
+        str | None,
+        typer.Option(
+            "--owner",
+            help="Email @pichincha.com para spec.owner de catalog-info.yaml",
+        ),
+    ] = None,
+    rules: Annotated[
+        str | None,
+        typer.Option(
+            "--rules",
+            help="Subset CSV de reglas a aplicar (ej '4,7'). Default: todas (4,7,8,9).",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Solo mostrar que se haria, sin modificar"),
+    ] = False,
+) -> None:
+    """Aplica los 4 autofixes deterministas del script oficial (reglas 4, 7, 8, 9)."""
+    from capamedia_cli.core.bank_autofix import run_bank_autofix
+
+    project_path = project_path.resolve()
+    if not project_path.is_dir():
+        console.print(f"[red]Proyecto no existe:[/red] {project_path}")
+        raise typer.Exit(code=2)
+
+    rules_list = None
+    if rules:
+        rules_list = [r.strip() for r in rules.split(",") if r.strip()]
+
+    console.print(
+        Panel.fit(
+            "[bold]validate-hexagonal auto-fix[/bold]\n"
+            f"Proyecto: [cyan]{project_path}[/cyan]\n"
+            f"Reglas: {rules_list or 'todas (4, 7, 8, 9)'}\n"
+            f"Dry run: {'SI' if dry_run else 'NO'}",
+            border_style="cyan",
+        )
+    )
+
+    if dry_run:
+        console.print(
+            "\n[yellow]dry-run:[/yellow] sin cambios aplicados. "
+            "Correr sin `--dry-run` para ejecutar."
+        )
+        return
+
+    results = run_bank_autofix(
+        project_path,
+        rules=rules_list,
+        description=description,
+        owner=owner,
+    )
+
+    table = Table(title="Bank autofix results", title_style="bold cyan")
+    table.add_column("Regla")
+    table.add_column("Status")
+    table.add_column("Cambios")
+    table.add_column("Notas")
+    for r in results:
+        status = "[green]APPLIED[/green]" if r.applied else "[dim]skip[/dim]"
+        changes = "\n".join(r.changes) if r.changes else "-"
+        table.add_row(r.rule, status, changes, r.notes or "-")
+    console.print(table)
+
+    applied = sum(1 for r in results if r.applied)
+    console.print(
+        f"\n[bold]Autofixes aplicados:[/bold] {applied}/{len(results)}"
+    )
+    manual = [r for r in results if r.applied and r.notes]
+    if manual:
+        console.print(
+            "\n[yellow]Revisar manualmente:[/yellow]"
+        )
+        for r in manual:
+            console.print(f"  - Regla {r.rule}: {r.notes}")
+    console.print(
+        "\n[dim]Sugerido:[/dim] re-correr `capamedia validate-hexagonal "
+        "summary <path>` para ver cuantos checks pasan ahora."
+    )
