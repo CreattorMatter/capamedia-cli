@@ -4,6 +4,55 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.18.0] - 2026-04-22
+
+### Added - Catalogo embebido de `generalservices.properties` + `catalogoaplicaciones.properties`
+
+**Feedback del user (Julian)**: despues de migrar `wstecnicos0008` el agente
+reporto como "blockers" 4 items en `MIGRATION_REPORT.md`, de los cuales 3 eran
+falsos positivos porque el agente NO sabia que `OMNI_COD_SERVICIO_OK`,
+`MIDDLEWARE_INTEGRACION_TECNICO_WAS`, `BANCS`, etc. son **constantes globales
+del banco** con valores literales conocidos (no env vars a resolver).
+
+**Solucion**: embeber ambos archivos de properties **compartidos** en el CLI
+para que los agentes los tengan disponibles desde el scaffold.
+
+- Nuevo canonical `context/bank-shared-properties.md` con:
+  - Los 2 archivos literales (`generalservices.properties` + `catalogoaplicaciones.properties`).
+  - Tabla de mapping `legacy key` → `application.yml path` → `valor literal`.
+  - Regla explicita para el agente: "busca en el catalogo antes de marcar
+    blocker; si esta, usa valor literal hardcoded en application.yml".
+  - Aclaracion de que SI depende del servicio: el `<ump>.properties` o
+    `<servicio>.properties` especifico (esos si se piden al usuario).
+
+- `bank-official-rules.md` ahora tiene **Regla 10 — Properties compartidas**
+  que referencia el nuevo catalogo y prohibe marcar claves del catalogo como
+  env vars faltantes en `MIGRATION_REPORT.md`.
+
+- El adapter de Claude concatena todos los `context/*.md` en `CLAUDE.md`
+  automaticamente — no hizo falta tocar adapters.
+
+### Motivacion concreta
+
+El MIGRATION_REPORT de `wstecnicos0008` decia:
+
+> 1. lib-bnc-api-client en 1.1.0-alpha.* (cache local) — subir a 1.1.0 stable
+>    cuando CI tenga credenciales Azure Artifacts.
+> 2. CCC_TX_ATTRIBUTES_XML_PATH requiere ConfigMap + volumen OpenShift...
+> 3. catalog-info.yaml: faltan sonarcloud.io/project-key real y URL Confluence.
+> 4. .sonarlint/connectedMode.json pendiente (BLOQUE 14).
+
+El #1 era error del agente (ya fixeado manualmente en este caso: build.gradle
+usa ahora `1.1.0` estable literal). El #2 SI es valido (URL_XML viene del
+umptecnicos0023.properties, no del catalogo compartido). El #3 y #4 son
+handoff/ops, no blockers de codigo.
+
+Con el catalogo embebido, el agente ahora puede:
+- Hardcodear `success-code: "0"`, `backend: "00633"`, `fatal-code: "9999"`, etc.
+  en `application.yml` en vez de dejarlos como `${CCC_*}`.
+- Diferenciar en el `MIGRATION_REPORT.md` entre "resuelto desde catalogo del
+  banco" (no es blocker) y "input pendiente del owner" (si es blocker de handoff).
+
 ## [0.17.5] - 2026-04-22
 
 ### Fixed - Log transaccional es EXCLUSIVO de ORQ (no WAS ni BUS)

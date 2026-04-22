@@ -404,6 +404,28 @@ spec:
 
 ---
 
+## Regla 10 - Properties compartidas del banco
+
+**MUST**: `generalservices.properties` y `catalogoaplicaciones.properties` son
+**catalogo global del banco** — los valores son constantes y estan embebidos
+en `bank-shared-properties.md`. El agente DEBE:
+
+1. Buscar la clave en el catalogo antes de marcarla como blocker.
+2. Si la clave esta en el catalogo → usar el **valor literal** en
+   `application.yml` (NO placeholder, NO `${CCC_*}`).
+3. Solo diferir a env var las claves que vienen del `<ump>.properties` o
+   `<servicio>.properties` especifico (inputs del owner).
+
+**NEVER**:
+- Marcar `OMNI_COD_SERVICIO_OK`, `OMNI_MSJ_SERVICIO_OK`, `MIDDLEWARE_INTEGRACION_TECNICO_WAS`,
+  `BANCS`, etc. como "env var faltante" en `MIGRATION_REPORT.md`.
+- Usar placeholder para estos valores — son literales del catalogo.
+
+Ver [bank-shared-properties.md](bank-shared-properties.md) para la tabla
+completa.
+
+---
+
 ## Automatizacion en el CLI
 
 - `capamedia validate-hexagonal summary <path>` — corre las 9 reglas oficiales

@@ -64,6 +64,43 @@ def test_context_are_loaded() -> None:
     assert "sonarlint" in names
 
 
+def test_bank_shared_properties_context_loaded() -> None:
+    """v0.18.0: catalogo de properties compartidas del banco debe estar cargado."""
+    assets = load_canonical_assets()
+    names = {a.name for a in assets["context"]}
+    assert "bank-shared-properties" in names, (
+        "bank-shared-properties.md debe existir para que el agente migrador "
+        "conozca los valores literales de generalservices.properties y "
+        "catalogoaplicaciones.properties"
+    )
+
+
+def test_bank_shared_properties_has_key_values() -> None:
+    """El catalogo debe contener las claves criticas que el agente necesita."""
+    path = CANONICAL_ROOT / "context" / "bank-shared-properties.md"
+    content = path.read_text(encoding="utf-8")
+
+    # generalservices.properties - claves criticas
+    assert "OMNI_COD_SERVICIO_OK=0" in content
+    assert "OMNI_MSJ_SERVICIO_OK=OK" in content
+    assert "OMNI_COD_FATAL=9999" in content
+    assert "OMNI_COD_NO_EXISTE_DATOS=1" in content
+
+    # catalogoaplicaciones.properties - codigos de backend criticos
+    assert "MIDDLEWARE_INTEGRACION_TECNICO_WAS=00633" in content
+    assert "MIDDLEWARE_INTEGRACION=00638" in content
+    assert "BANCS=00045" in content
+    assert "BASE_DE_DATOS_OMNICANAL=00634" in content
+
+
+def test_bank_official_rules_references_shared_properties() -> None:
+    """bank-official-rules.md debe incluir la Regla 10 con la referencia."""
+    path = CANONICAL_ROOT / "context" / "bank-official-rules.md"
+    content = path.read_text(encoding="utf-8")
+    assert "Regla 10" in content
+    assert "bank-shared-properties" in content
+
+
 def test_frontmatter_roundtrip() -> None:
     fm = {"name": "test", "description": "hello", "allowed_tools": ["Read", "Write"]}
     body = "# Title\n\nBody content.\n"
