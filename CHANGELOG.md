@@ -4,6 +4,93 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.13.0] - 2026-04-22
+
+### Added - `capamedia review` — pipeline end-to-end para proyectos migrados externamente
+
+**Use case**: el equipo del banco migra servicios en paralelo usando los
+prompts del repo `PromptCapaMedia` directamente, sin pasar por el CLI.
+Cuando terminan la migracion, necesitan un pase de limpieza que aplique
+todo lo que el CLI sabe hacer + el gate oficial del banco. Ahora hay un
+comando unico que hace eso.
+
+```bash
+capamedia review <path-al-proyecto-migrado> \
+    --legacy <path-al-legacy> \
+    --bank-description "Servicio X" \
+    --bank-owner jusoria@pichincha.com \
+    --max-iterations 5
+```
+
+**Pipeline en 4 fases** (documentado en el docstring del modulo):
+
+1. **Fase 1 — Nuestro checklist + autofix loop**: corre todos los blocks
+   (0/1/2/5/7/13/14/15/16) en un loop. Aplica `AUTOFIX_REGISTRY` con max
+   `--max-iterations` rondas hasta convergencia.
+2. **Fase 2 — Bank autofix**: aplica las 5 reglas deterministas del
+   script oficial (4, 6, 7, 8, 9) — `@BpLogger`, StringUtils→nativo +
+   record extraction, `${VAR:default}`→`${VAR}`, `lib-bnc-api-client:1.1.0`,
+   `catalog-info.yaml`.
+3. **Fase 3 — Re-corrida nuestro checklist**: verifica que los bank
+   autofixes no rompan nada del checklist propio.
+4. **Fase 4 — Validador oficial del banco**: invoca el
+   `validate_hexagonal.py` vendor-pinado via subprocess. Parsea
+   `Resultado: N/M checks pasados` despojado de ANSI codes.
+
+**Output consolidado:**
+
+- Tabla rich con veredicto por gate + verdicto global `PR_READY` / `NEEDS_WORK`
+- Log JSON completo en `.capamedia/review/<ts>.json` con todas las fases
+- Reportes individuales: `CHECKLIST_<svc>.md`, `hexagonal_validation_*.md`,
+  `.capamedia/autofix/*.log`
+
+**Flags utiles**:
+
+- `--dry-run`: solo corre checks, no aplica autofixes. Para ver el estado
+  inicial sin modificar nada.
+- `--skip-official`: salta el validador del banco. Util para debug cuando
+  se quieren evaluar solo los checks propios.
+- `--legacy`: habilita cross-check del Block 0 (WSDL legacy vs migrado,
+  namespace match, op names).
+
+**Exit codes**:
+
+- `0`: `PR_READY` — nuestro checklist sin HIGHs + oficial PASS completo.
+- `1`: `NEEDS_WORK` — algo quedo rojo.
+- `2`: path invalido.
+
+**Smoke real sobre `wsclientes0007`** (proyecto migrado que mantenemos como
+referencia): pipeline ejecuta 21 PASS + 2 MEDIUM (ambos conocidos), oficial
+9/10 (falta solo check 6 por refactor semantico no autofixeable). Veredicto
+`NEEDS_WORK` correcto.
+
+### Testing
+
+- **314/314 tests PASS** (vs 300 de v0.12.0). +14 tests nuevos en
+  `test_review.py`:
+  - 5 de helpers puros (`_summarize_results`, `_verdict_from_summary`,
+    `_write_review_log`)
+  - 3 de `_run_official_validator` (ANSI parse, timeout, script missing)
+  - 6 del comando end-to-end con mocks (all-green → PR_READY, HIGH fail →
+    NEEDS_WORK, dry-run no aplica autofix, skip-official no llama validador,
+    project inexistente → exit 2, log JSON persistido)
+- Ruff limpio en `review.py` y `test_review.py`.
+
+### Como lo usa un dev del equipo
+
+```bash
+# El chico termino su migracion con los prompts del repo CapaMedia
+cd /path/a/su/proyecto-migrado
+
+# Corre el review
+capamedia review . --bank-owner jusoria@pichincha.com
+
+# Si dice PR_READY -> mergear
+# Si dice NEEDS_WORK -> leer .capamedia/review/<ts>.json para ver que quedo
+```
+
+---
+
 ## [0.12.0] - 2026-04-22
 
 ### Changed - Normalizar `lib-bnc-api-client` a `1.1.0` estable

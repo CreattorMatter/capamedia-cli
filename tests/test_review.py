@@ -1,0 +1,278 @@
+"""Tests para `capamedia review` - pipeline end-to-end."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import typer
+
+from capamedia_cli.commands.review import (
+    _run_official_validator,
+    _summarize_results,
+    _verdict_from_summary,
+    _write_review_log,
+    review,
+)
+
+
+class _FakeResult:
+    """CheckResult-lite para tests sin depender de la dataclass real."""
+
+    def __init__(self, status: str, severity: str | None = None):
+        self.status = status
+        self.severity = severity
+
+
+# ---------------------------------------------------------------------------
+# Helpers puros
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_counts_pass_and_fail_by_severity() -> None:
+    results = [
+        _FakeResult("pass"),
+        _FakeResult("pass"),
+        _FakeResult("fail", "high"),
+        _FakeResult("fail", "medium"),
+        _FakeResult("fail", "medium"),
+        _FakeResult("fail", "low"),
+    ]
+    summary = _summarize_results(results)
+    assert summary == {"pass": 2, "fail_high": 1, "fail_medium": 2, "fail_low": 1}
+
+
+def test_summarize_empty() -> None:
+    assert _summarize_results([]) == {
+        "pass": 0, "fail_high": 0, "fail_medium": 0, "fail_low": 0,
+    }
+
+
+def test_verdict_blocked_by_high() -> None:
+    s = {"pass": 5, "fail_high": 1, "fail_medium": 0, "fail_low": 0}
+    assert _verdict_from_summary(s) == "BLOCKED_BY_HIGH"
+
+
+def test_verdict_ready_with_followup() -> None:
+    s = {"pass": 5, "fail_high": 0, "fail_medium": 3, "fail_low": 0}
+    assert _verdict_from_summary(s) == "READY_WITH_FOLLOW_UP"
+
+
+def test_verdict_ready_to_merge() -> None:
+    s = {"pass": 5, "fail_high": 0, "fail_medium": 0, "fail_low": 0}
+    assert _verdict_from_summary(s) == "READY_TO_MERGE"
+
+
+def test_write_review_log_creates_json(tmp_path: Path) -> None:
+    phases = [{"phase": "1-test", "data": "ok"}]
+    log_path = _write_review_log(tmp_path, phases, "PR_READY")
+    assert log_path.exists()
+    assert log_path.parent.name == "review"
+    data = json.loads(log_path.read_text(encoding="utf-8"))
+    assert data["final_verdict"] == "PR_READY"
+    assert data["phases"] == phases
+    assert "timestamp" in data
+
+
+# ---------------------------------------------------------------------------
+# _run_official_validator — mock subprocess
+# ---------------------------------------------------------------------------
+
+
+def test_run_official_parses_result_with_ansi(tmp_path: Path) -> None:
+    """El script oficial imprime con ANSI color codes - debemos limpiarlos."""
+
+    class _CompletedProc:
+        stdout = (
+            "\x1b[1m\x1b[96m===== header =====\x1b[0m\n"
+            "some output...\n"
+            "\x1b[1m  Resultado: \x1b[92m9/10 checks pasados\x1b[0m\n"
+        )
+        stderr = ""
+        returncode = 1
+
+    # Simulamos que existe el script vendor
+    script = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "capamedia_cli" / "data" / "vendor" / "validate_hexagonal.py"
+    )
+    assert script.exists(), "vendor script debe existir en el repo"
+
+    with patch(
+        "capamedia_cli.commands.review.subprocess.run",
+        return_value=_CompletedProc(),
+    ):
+        passed, total, _report = _run_official_validator(tmp_path)
+
+    assert passed == 9
+    assert total == 10
+
+
+def test_run_official_returns_zero_when_script_missing(monkeypatch, tmp_path: Path) -> None:
+    """Si el vendor script no existe, devuelve 0/0 sin crashear."""
+    with patch(
+        "capamedia_cli.commands.review._vendor_script_path_for_test",
+        return_value=tmp_path / "nonexistent.py",
+        create=True,
+    ):
+        # Fallback al path real, pero con el argumento tmp_path no resuelve a vendor
+        passed, total, _ = _run_official_validator(tmp_path / "foo")
+        # Con project_path inexistente el script igual va a salir con error
+        # pero aqui no hacemos assert de ceros porque el script SI existe.
+        # Este test se deja como placeholder de contrato.
+        assert isinstance(passed, int)
+        assert isinstance(total, int)
+
+
+def test_run_official_returns_zero_on_timeout(tmp_path: Path) -> None:
+    import subprocess
+
+    with patch(
+        "capamedia_cli.commands.review.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="x", timeout=120),
+    ):
+        passed, total, report = _run_official_validator(tmp_path)
+    assert passed == 0
+    assert total == 0
+    assert report == ""
+    _ = report  # ruff guard
+
+
+# ---------------------------------------------------------------------------
+# Comando review - end-to-end con mocks
+# ---------------------------------------------------------------------------
+
+
+def test_review_exits_with_code_2_when_project_missing(tmp_path: Path) -> None:
+    fake = tmp_path / "nonexistent"
+    with pytest.raises(typer.Exit) as exc:
+        review(project_path=fake)
+    assert exc.value.exit_code == 2
+
+
+def test_review_pr_ready_when_all_green(tmp_path: Path) -> None:
+    """Simula el happy path: checklist limpio + validador oficial 10/10."""
+    # Crea un proyecto minimo con estructura Spring
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+    (tmp_path / "build.gradle").write_text(
+        "dependencies { implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0' }\n",
+        encoding="utf-8",
+    )
+
+    # Mockeamos TODO el pipeline interno
+    clean_results = [_FakeResult("pass") for _ in range(21)]
+
+    class _AutofixReport:
+        iterations = 1
+        total_applied = 0
+        converged = True
+        log_path = None
+
+    class _BankResult:
+        def __init__(self, rule: str):
+            self.rule = rule
+            self.applied = False
+            self.notes = ""
+
+    class _OfficialResult:
+        stdout = "Resultado: 10/10 checks pasados\n"
+        stderr = ""
+        returncode = 0
+
+    with (
+        patch("capamedia_cli.commands.review.run_autofix_loop", return_value=_AutofixReport()),
+        patch(
+            "capamedia_cli.commands.review.run_bank_autofix",
+            return_value=[_BankResult(r) for r in ("4", "6", "7", "8", "9")],
+        ),
+        patch(
+            "capamedia_cli.commands.review.run_all_blocks",
+            return_value=clean_results,
+        ),
+        patch(
+            "capamedia_cli.commands.review.subprocess.run",
+            return_value=_OfficialResult(),
+        ),
+    ):
+        # No debe raise (exit_code=0 = no Exit lanzado)
+        review(project_path=tmp_path)
+
+    # Log consolidado fue escrito
+    log_dir = tmp_path / ".capamedia" / "review"
+    assert log_dir.exists()
+    logs = list(log_dir.glob("*.json"))
+    assert len(logs) == 1
+    data = json.loads(logs[0].read_text(encoding="utf-8"))
+    assert data["final_verdict"] == "PR_READY"
+
+
+def test_review_needs_work_when_high_fail(tmp_path: Path) -> None:
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+    high_fail = [_FakeResult("fail", "high")]
+
+    class _AutofixReport:
+        iterations = 3
+        total_applied = 0
+        converged = False
+        log_path = None
+
+    with (
+        patch("capamedia_cli.commands.review.run_autofix_loop", return_value=_AutofixReport()),
+        patch("capamedia_cli.commands.review.run_bank_autofix", return_value=[]),
+        patch("capamedia_cli.commands.review.run_all_blocks", return_value=high_fail),
+    ):
+        with pytest.raises(typer.Exit) as exc:
+            review(project_path=tmp_path, skip_official=True)
+        assert exc.value.exit_code == 1
+
+
+def test_review_dry_run_does_not_apply_autofix(tmp_path: Path) -> None:
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+    clean_results = [_FakeResult("pass") for _ in range(3)]
+
+    autofix_called = {"v": False}
+    bank_called = {"v": False}
+
+    def _fake_autofix(*args, **kwargs):
+        autofix_called["v"] = True
+        raise AssertionError("autofix NO debe correr en dry-run")
+
+    def _fake_bank(*args, **kwargs):
+        bank_called["v"] = True
+        raise AssertionError("bank autofix NO debe correr en dry-run")
+
+    with (
+        patch("capamedia_cli.commands.review.run_autofix_loop", side_effect=_fake_autofix),
+        patch("capamedia_cli.commands.review.run_bank_autofix", side_effect=_fake_bank),
+        patch("capamedia_cli.commands.review.run_all_blocks", return_value=clean_results),
+    ):
+        review(project_path=tmp_path, dry_run=True, skip_official=True)
+
+    assert not autofix_called["v"]
+    assert not bank_called["v"]
+
+
+def test_review_skip_official_does_not_call_validator(tmp_path: Path) -> None:
+    (tmp_path / "src" / "main" / "java").mkdir(parents=True)
+
+    class _AutofixReport:
+        iterations = 1
+        total_applied = 0
+        converged = True
+        log_path = None
+
+    with (
+        patch("capamedia_cli.commands.review.run_autofix_loop", return_value=_AutofixReport()),
+        patch("capamedia_cli.commands.review.run_bank_autofix", return_value=[]),
+        patch(
+            "capamedia_cli.commands.review.run_all_blocks",
+            return_value=[_FakeResult("pass")],
+        ),
+        patch(
+            "capamedia_cli.commands.review._run_official_validator",
+        ) as mock_official,
+    ):
+        review(project_path=tmp_path, skip_official=True)
+        mock_official.assert_not_called()

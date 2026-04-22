@@ -41,6 +41,7 @@ from capamedia_cli.commands import (
     fabrics,
     init,
     install,
+    review,
     upgrade,
     validate,
 )
@@ -84,6 +85,7 @@ app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("check")(check.check_project)
+app.command("review")(review.review)
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")
