@@ -18,7 +18,7 @@ from pathlib import Path
 
 # -- Regex patterns ---------------------------------------------------------
 
-RE_WSDL_OPERATION = re.compile(r'<wsdl:operation\s+name="([^"]+)"', re.IGNORECASE)
+RE_WSDL_OPERATION = re.compile(r'<(?:wsdl:)?operation\s+name="([^"]+)"', re.IGNORECASE)
 RE_WSDL_TARGETNS = re.compile(r'targetNamespace="([^"]+)"')
 RE_UMP_REFERENCE = re.compile(r"\b(UMP[A-Z][a-zA-Z]+\d{4})\b")
 RE_TX_CODE = re.compile(r"'(\d{6})'")
@@ -139,6 +139,54 @@ def detect_ump_references(legacy_root: Path) -> list[str]:
             except OSError:
                 continue
             refs.update(RE_UMP_REFERENCE.findall(text))
+    return sorted(refs)
+
+
+# WAS declara UMPs como Maven dependencies (artifactId = umpXxx0000-*) y las
+# usa via imports Java. El regex captura ambos casos.
+RE_UMP_WAS_MAVEN = re.compile(
+    r"<artifactId>\s*(ump[a-z]+\d{4})[-a-z]*\s*</artifactId>",
+    re.IGNORECASE,
+)
+RE_UMP_WAS_JAVA_IMPORT = re.compile(
+    r"import\s+com\.pichincha\.[a-z]+\.(ump[a-z]+\d{4})\.",
+    re.IGNORECASE,
+)
+
+
+def detect_ump_references_was(legacy_root: Path) -> list[str]:
+    """Scan pom.xml + Java sources for UMP references in WAS projects.
+
+    WAS no usa ESQL — las UMPs se referencian como:
+      1. Maven dependencies en pom.xml (<artifactId>umpXxx0000-dominio</artifactId>)
+      2. Imports Java (`import com.pichincha.<dominio>.umpXxx0000.pojo.*`)
+
+    Returns deduplicated UMP names (lowercase), sorted. Ej: ["umptecnicos0023"].
+    """
+    refs: set[str] = set()
+
+    # 1. pom.xml Maven dependencies
+    for pom in legacy_root.rglob("pom.xml"):
+        if ".git" in pom.parts or "target" in pom.parts:
+            continue
+        try:
+            text = pom.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in RE_UMP_WAS_MAVEN.findall(text):
+            refs.add(match.lower())
+
+    # 2. Java imports
+    for java in legacy_root.rglob("*.java"):
+        if ".git" in java.parts or "target" in java.parts or "build" in java.parts:
+            continue
+        try:
+            text = java.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in RE_UMP_WAS_JAVA_IMPORT.findall(text):
+            refs.add(match.lower())
+
     return sorted(refs)
 
 
@@ -387,7 +435,13 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
     if wsdl_info is None:
         warnings.append("No se encontro ningun *.wsdl en el legacy")
 
-    ump_names = detect_ump_references(legacy_root) if source_kind != "was" else []
+    # Detector UMP depende del tipo de legacy:
+    # - IIB/ORQ: buscar en ESQL + msgflow (referencias tipo "UMPClientes0002")
+    # - WAS: buscar en pom.xml deps (Maven) + imports Java (ej umptecnicos0023)
+    if source_kind == "was":
+        ump_names = detect_ump_references_was(legacy_root)
+    else:
+        ump_names = detect_ump_references(legacy_root)
     umps: list[UmpInfo] = []
     if umps_root and umps_root.exists():
         for ump in ump_names:

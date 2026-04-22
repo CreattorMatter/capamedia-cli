@@ -402,15 +402,29 @@ def clone_service(
             raise typer.Exit(1)
         console.print(f"[green]OK[/green] {project_key}/{repo_name} clonado en {legacy_dest}")
 
-    # --- Step 2: Detect UMPs ---
-    console.print("\n[bold]2. Detectando UMPs referenciados en ESQL/msgflow...[/bold]")
-    from capamedia_cli.core.legacy_analyzer import detect_ump_references
+    # --- Step 2: Detect UMPs (WAS busca en pom.xml + Java; IIB/ORQ en ESQL) ---
+    from capamedia_cli.core.legacy_analyzer import (
+        detect_source_kind,
+        detect_ump_references,
+        detect_ump_references_was,
+    )
 
-    ump_names = detect_ump_references(legacy_dest)
+    pre_kind = detect_source_kind(legacy_dest, service_name)
+    if pre_kind == "was":
+        console.print(
+            "\n[bold]2. Detectando UMPs en pom.xml + imports Java (WAS)...[/bold]"
+        )
+        ump_names = detect_ump_references_was(legacy_dest)
+    else:
+        console.print(
+            "\n[bold]2. Detectando UMPs referenciados en ESQL/msgflow...[/bold]"
+        )
+        ump_names = detect_ump_references(legacy_dest)
+
     if ump_names:
         console.print(f"[green]OK[/green] {len(ump_names)} UMP(s) detectado(s): {', '.join(ump_names)}")
     else:
-        console.print("[dim]No se detectaron UMPs (servicio standalone o WAS)[/dim]")
+        console.print("[dim]No se detectaron UMPs[/dim]")
 
     # --- Step 3: Clone UMPs ---
     if ump_names:

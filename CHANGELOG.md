@@ -4,6 +4,75 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.1] - 2026-04-22
+
+### Fixed - Detector WAS: WSDL sin prefijo `wsdl:` + UMPs en pom.xml/Java
+
+**Caso real**: `capamedia clone wstecnicos0008` reporto falsamente
+`0 operaciones WSDL` y `0 UMPs` cuando el servicio tiene 2 ops y 1 UMP.
+Investigacion del legacy revelo dos bugs del detector.
+
+**Bug 1 - `RE_WSDL_OPERATION` exigia prefijo `wsdl:`**:
+
+El regex era `r'<wsdl:operation\s+name="([^"]+)"'` y solo matcheaba
+`<wsdl:operation>`. El WSDL del wstecnicos0008 usa
+`<operation>` sin prefix (el namespace default ya es WSDL):
+
+```xml
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">
+  <portType name="WSTecnicos0008">
+    <operation name="ConsultarAtributosTransaccion01">
+```
+
+Fix: `r'<(?:wsdl:)?operation\s+name="([^"]+)"'`. Matchea ambos
+con y sin prefijo. `_extract_portType_block` ya tenia el fallback.
+
+**Bug 2 - `detect_ump_references` no busca en WAS**:
+
+La funcion solo escanea `.esql` + `.msgflow` + `.subflow` (patron IIB).
+En un WAS las UMPs no viven en ESQL — se declaran:
+  1. Como dependencias Maven en `pom.xml`:
+     `<artifactId>umptecnicos0023-dominio</artifactId>`
+  2. Como imports Java:
+     `import com.pichincha.tecnicos.umptecnicos0023.pojo.E;`
+
+Nueva funcion `detect_ump_references_was()` que escanea esos dos
+patrones via regex y deduplica (ej: `umptecnicos0023-core-dominio` y
+`umptecnicos0023-dominio` -> un solo `umptecnicos0023`).
+
+`analyze_legacy()` ahora elige el detector segun `source_kind`:
+  - `iib` / `orq` -> `detect_ump_references` (ESQL)
+  - `was` -> `detect_ump_references_was` (pom.xml + Java)
+
+`commands/clone.py` hace lo mismo en el Step 2 del clone. Mensaje
+actualizado: "Detectando UMPs en pom.xml + imports Java (WAS)" vs
+"Detectando UMPs referenciados en ESQL/msgflow".
+
+**Verificacion sobre el caso real**:
+
+```
+antes v0.17.1:        despues v0.17.1:
+  ops: 0                ops: 2 [ConsultarAtributosTransaccion01, ...02]
+  UMPs: []              UMPs: ['umptecnicos0023']
+  framework: soap       framework: soap
+  (default)             (2 ops + no invoca BANCS directo)
+```
+
+### Testing
+
+- **365/365 tests PASS** (+9 en `test_was_detectors.py`):
+  - WSDL sin prefijo `wsdl:` parseado correctamente
+  - WSDL con prefijo `wsdl:` sigue funcionando (regresion)
+  - `find_wsdl` encuentra WSDL en `webapp/WEB-INF/wsdl/` (path WAS)
+  - UMPs detectadas en `pom.xml` Maven deps
+  - UMPs detectadas en Java imports
+  - `detect_ump_references_was` NO mira ESQL (eso es IIB)
+  - Combinando pom + Java, dedup correcto
+  - Multiples UMPs distintas ordenadas
+  - `analyze_legacy` integracion end-to-end WAS con UMPs + WSDL en webapp
+
+---
+
 ## [0.17.0] - 2026-04-22
 
 ### Added - 4 updates del feedback real (Julian + JGarcia a91bda8)
