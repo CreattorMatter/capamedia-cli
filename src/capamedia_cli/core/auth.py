@@ -7,7 +7,8 @@ import os
 
 AZURE_PAT_ENV_VARS = ("CAPAMEDIA_AZDO_PAT", "AZURE_DEVOPS_EXT_PAT")
 ARTIFACT_TOKEN_ENV_VARS = ("CAPAMEDIA_ARTIFACT_TOKEN", "ARTIFACT_TOKEN")
-OPENAI_API_KEY_ENV_VARS = ("OPENAI_API_KEY",)
+CODEX_API_KEY_ENV_VARS = ("CODEX_API_KEY", "OPENAI_API_KEY")
+OPENAI_API_KEY_ENV_VARS = CODEX_API_KEY_ENV_VARS
 
 
 def _first_non_empty(value: str | None, env_vars: tuple[str, ...]) -> str | None:
@@ -31,9 +32,14 @@ def resolve_artifact_token(value: str | None = None) -> str | None:
     return _first_non_empty(value, ARTIFACT_TOKEN_ENV_VARS)
 
 
+def resolve_codex_api_key(value: str | None = None) -> str | None:
+    """Return the Codex API key from an explicit value or known env vars."""
+    return _first_non_empty(value, CODEX_API_KEY_ENV_VARS)
+
+
 def resolve_openai_api_key(value: str | None = None) -> str | None:
-    """Return the OpenAI API key from an explicit value or known env vars."""
-    return _first_non_empty(value, OPENAI_API_KEY_ENV_VARS)
+    """Backward-compatible alias for resolving the Codex/OpenAI API key."""
+    return resolve_codex_api_key(value)
 
 
 def build_azure_git_env(value: str | None = None) -> dict[str, str]:
@@ -42,7 +48,7 @@ def build_azure_git_env(value: str | None = None) -> dict[str, str]:
     if not pat:
         return {}
 
-    basic = base64.b64encode(f"capamedia:{pat}".encode("utf-8")).decode("ascii")
+    basic = base64.b64encode(f"capamedia:{pat}".encode()).decode("ascii")
     return {
         "GCM_INTERACTIVE": "Never",
         "GIT_TERMINAL_PROMPT": "0",

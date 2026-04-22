@@ -13,7 +13,7 @@ Ejecuta la auditoria de calidad post-migracion contra las reglas vivas del equip
 ## Prerequisitos
 - Proyecto Java migrado en el directorio actual
 - ANALISIS_<ServiceName>.md disponible para cross-reference
-- Acceso a `prompts/post-migracion/03-checklist.md` (cargado via CLAUDE.md)
+- Acceso a `prompts/post-migracion/03-checklist.md` (cargado via `AGENTS.md` o `CLAUDE.md`, segun el harness)
 
 ## Cuando se usa
 - Despues de correr `/migrar` y antes de abrir PR

@@ -12,7 +12,7 @@ def test_git_clone_uses_env_auth_when_pat_is_present(tmp_path: Path, monkeypatch
     dest = tmp_path / "legacy" / "sqb-msa-wsclientes0007"
     captured: dict[str, object] = {}
 
-    def fake_run(cmd, capture_output, text, check, timeout, env):  # noqa: ANN001
+    def fake_run(cmd, capture_output, text, check, timeout, env):
         captured["cmd"] = cmd
         captured["env"] = env
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")

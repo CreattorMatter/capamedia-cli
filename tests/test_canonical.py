@@ -100,3 +100,15 @@ def test_canonical_migration_assets_align_ports_with_interfaces() -> None:
         content = path.read_text(encoding="utf-8")
         for phrase in forbidden:
             assert phrase not in content, f"{Path(path).name} still contains outdated rule: {phrase}"
+
+
+def test_canonical_batch_prompts_are_not_claude_only_or_gold_ref_driven() -> None:
+    migrate = (CANONICAL_ROOT / "prompts" / "migrate.md").read_text(encoding="utf-8")
+    fabric = (CANONICAL_ROOT / "prompts" / "fabric.md").read_text(encoding="utf-8")
+    clone = (CANONICAL_ROOT / "prompts" / "clone.md").read_text(encoding="utf-8")
+
+    assert ".claude/agents/migrador.md" not in migrate
+    assert "gold-ref/" not in migrate
+    assert "cp -r .codex destino" in fabric
+    assert "Artefactos del harness" in fabric
+    assert "mkdir -p gold-ref" not in clone

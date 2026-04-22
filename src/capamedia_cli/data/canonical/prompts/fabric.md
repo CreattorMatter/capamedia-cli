@@ -102,16 +102,19 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 
 ### Gap 3 — Versiones desactualizadas
 
-Verificar y actualizar (si aplica) las versiones de Spring Boot, Jackson, Peer Review en `build.gradle` comparando con el gold standard clonado en `gold-ref/`.
+Verificar y actualizar (si aplica) las versiones de Spring Boot, Jackson y Peer Review en `build.gradle` comparando con la matriz canónica del CLI y con lo que genere el schema actual del MCP.
 
 ## Paso 6 — Completar con artefactos CapaMedia
 
 Después del scaffold del MCP, copiar al destino:
 
 ```bash
-# Copiar .claude/ generado por capamedia init al destino
-cp -r .claude destino/tnd-msa-sp-<servicio>/
-cp CLAUDE.md destino/tnd-msa-sp-<servicio>/
+# Copiar los assets del harness generado por capamedia init al destino
+cp -r .codex destino/tnd-msa-sp-<servicio>/ 2>/dev/null || true
+cp -r .agents destino/tnd-msa-sp-<servicio>/ 2>/dev/null || true
+cp AGENTS.md destino/tnd-msa-sp-<servicio>/ 2>/dev/null || true
+cp -r .claude destino/tnd-msa-sp-<servicio>/ 2>/dev/null || true
+cp CLAUDE.md destino/tnd-msa-sp-<servicio>/ 2>/dev/null || true
 cp .sonarlint/connectedMode.json destino/tnd-msa-sp-<servicio>/.sonarlint/ 2>/dev/null || true
 cp .mcp.json destino/tnd-msa-sp-<servicio>/  # (el .gitignore lo ignora)
 ```
@@ -151,14 +154,14 @@ Escribir `destino/tnd-msa-sp-<servicio>/migration-context.json`:
 **Workarounds aplicados:**
 - Gap 1 (webflux starter) — AGREGADO
 - Gap 2 (jaxws-rt) — NO aplica (projectType=rest)
-- Gap 3 (versiones) — sincronizado con gold-ref
+- Gap 3 (versiones) — sincronizado con la matriz canónica del CLI
 
 **Destino generado:** `./destino/tnd-msa-sp-<servicio>/`
 
 Revisá:
 1. `build.gradle` — que las dependencias sean las esperadas
 2. `src/main/resources/wsdl/` — que el WSDL esté copiado
-3. `.claude/` y `CLAUDE.md` — que estén adentro
+3. Artefactos del harness (`.codex/` + `.agents/` + `AGENTS.md`, o `.claude/` + `CLAUDE.md`) — que estén adentro
 
 Si está todo bien, abrí esa carpeta en el IDE y corré `/migrate`.
 ```

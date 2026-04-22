@@ -9,7 +9,6 @@ from capamedia_cli.core.caveats import (
     caveats_summary,
     caveats_to_markdown_table,
     detect_external_endpoints,
-    detect_non_bancs_caveats,
     detect_orq_dependencies,
     detect_ump_caveats,
 )
@@ -80,7 +79,7 @@ def test_detect_orq_dependencies_finds_delegations(tmp_path: Path) -> None:
 def test_detect_orq_dependencies_non_orq_returns_empty(tmp_path: Path) -> None:
     esql = tmp_path / "ws.esql"
     esql.write_text("SET ump = 'UMPClientes0002';", encoding="utf-8")
-    deps, is_orq = detect_orq_dependencies(tmp_path, "WSClientes0007")
+    _deps, is_orq = detect_orq_dependencies(tmp_path, "WSClientes0007")
     assert is_orq is False
 
 

@@ -27,7 +27,7 @@ Migra toda la lógica del servicio legacy al arquetipo destino generado por Fabr
 
 ## Prerequisitos
 
-1. Haber corrido `/clone <servicio>` — deja `legacy/`, `umps/`, `tx/`, `gold-ref/`, `COMPLEXITY_*.md`.
+1. Haber corrido `/clone <servicio>` — deja `legacy/`, `umps/`, `tx/` y `COMPLEXITY_*.md`.
 2. Haber corrido `/fabric` — deja `destino/tnd-msa-sp-<servicio>/` con el scaffold base.
 3. Estar **dentro** de `destino/tnd-msa-sp-<servicio>/` o en la raíz del workspace (el comando detecta ambos).
 
@@ -41,13 +41,13 @@ Leer `COMPLEXITY_<servicio>.md` y `migration-context.json` en `destino/`:
 
 ## Paso 2 — Lanzar agente migrador
 
-Usar el sub-agente `migrador` (definido en `.claude/agents/migrador.md` del proyecto) con este contexto:
+Usar el sub-agente repo-scoped `migrador` (renderizado por el harness activo; en Codex queda en `.codex/agents/migrador.toml`) con este contexto:
 
 - `legacy/` — fuente original (ESQL, WSDL, XSDs, msgflows)
 - `umps/` — UMPs asociados con sus ESQL (para extraer TX reales)
-- `gold-ref/` — proyecto gold (0024 para REST, 0015 para SOAP) como referencia de patrones
 - `destino/tnd-msa-sp-<servicio>/` — destino donde se implementa
 - `COMPLEXITY_<servicio>.md` — análisis previo
+- `AGENTS.md` + skills/prompts locales — reglas vivas del workspace y patrones canónicos del CLI
 
 El agente ejecuta los 7 bloques del prompt de migración:
 

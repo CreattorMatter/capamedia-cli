@@ -2,6 +2,7 @@
 
 Agrupa los chequeos por categoria:
   - Toolchain base (Git, Java, Gradle, Node, Codex, Python, uv)
+  - Runners AI opcionales (Claude Code)
   - IDE + extensions
   - Integraciones del banco (Azure DevOps, Fabrics, SonarCloud)
   - Auth de Codex
@@ -20,7 +21,11 @@ from rich.console import Console
 from rich.table import Table
 
 from capamedia_cli.commands.fabrics import inspect_fabrics_workspace
-from capamedia_cli.core.auth import AZURE_PAT_ENV_VARS, OPENAI_API_KEY_ENV_VARS, resolve_azure_devops_pat
+from capamedia_cli.core.auth import (
+    AZURE_PAT_ENV_VARS,
+    CODEX_API_KEY_ENV_VARS,
+    resolve_azure_devops_pat,
+)
 
 console = Console()
 
@@ -84,6 +89,18 @@ def _check_codex() -> CheckResult:
         "fail",
         "no instalado (requerido por batch migrate/pipeline)",
         "capamedia install",
+    )
+
+
+def _check_claude() -> CheckResult:
+    ok, ver = _run_command(["claude", "--version"])
+    if ok:
+        return CheckResult("Claude Code CLI", "ok", ver)
+    return CheckResult(
+        "Claude Code CLI",
+        "warn",
+        "no instalado (opcional; necesario si queres runner=claude)",
+        "npm install -g @anthropic-ai/claude-code",
     )
 
 
@@ -185,8 +202,28 @@ def _check_codex_auth() -> CheckResult:
     return CheckResult(
         "Codex auth",
         "fail",
-        f"sin login activo (tambien podes bootstrapear por API key en {'/'.join(OPENAI_API_KEY_ENV_VARS)})",
-        "capamedia auth bootstrap --openai-api-key ...",
+        f"sin login activo (tambien podes bootstrapear por API key en {'/'.join(CODEX_API_KEY_ENV_VARS)})",
+        "capamedia auth bootstrap --codex-api-key ...",
+    )
+
+
+def _check_claude_auth() -> CheckResult:
+    if shutil.which("claude") is None:
+        return CheckResult(
+            "Claude auth",
+            "warn",
+            "Claude Code CLI no instalado",
+            "npm install -g @anthropic-ai/claude-code",
+        )
+
+    ok, detail = _run_command(["claude", "auth", "status", "--text"])
+    if ok:
+        return CheckResult("Claude auth", "ok", detail)
+    return CheckResult(
+        "Claude auth",
+        "warn",
+        "sin login activo para Claude Code",
+        "claude auth login",
     )
 
 
@@ -233,6 +270,9 @@ CHECKS = {
         _check_python,
         _check_uv,
     ],
+    "Runners AI": [
+        _check_claude,
+    ],
     "IDE y extensions": [
         _check_vscode,
         _check_sonarlint_extension,
@@ -241,34 +281,49 @@ CHECKS = {
         _check_azure_devops_auth,
         _check_mcp_fabrics_config,
         _check_codex_auth,
+        _check_claude_auth,
         _check_sonarcloud_binding,
     ],
 }
 
 
-def check_install() -> None:
-    """Verifica el estado de todo el toolchain para trabajar con CapaMedia."""
+def collect_check_results() -> dict[str, list[CheckResult]]:
+    return {category: [check_fn() for check_fn in checks] for category, checks in CHECKS.items()}
+
+
+def summarize_check_results(results: dict[str, list[CheckResult]]) -> tuple[int, int, int]:
     total_ok = 0
     total_warn = 0
     total_fail = 0
+    for checks in results.values():
+        for result in checks:
+            if result.status == "ok":
+                total_ok += 1
+            elif result.status == "warn":
+                total_warn += 1
+            else:
+                total_fail += 1
+    return (total_ok, total_warn, total_fail)
 
-    for category, checks in CHECKS.items():
+
+def check_install() -> None:
+    """Verifica el estado de todo el toolchain para trabajar con CapaMedia."""
+    results = collect_check_results()
+    total_ok, total_warn, total_fail = summarize_check_results(results)
+
+    for category, checks in results.items():
         table = Table(title=category, title_style="bold cyan", show_lines=False)
         table.add_column("Componente", style="cyan", no_wrap=True)
         table.add_column("Estado", style="bold", width=6)
         table.add_column("Detalle")
         table.add_column("Fix sugerido", style="yellow")
 
-        for check_fn in checks:
-            result = check_fn()
+        for result in checks:
             if result.status == "ok":
-                total_ok += 1
                 icon = "[green]OK[/green]"
             elif result.status == "warn":
-                total_warn += 1
                 icon = "[yellow]WARN[/yellow]"
             else:
-                total_fail += 1
                 icon = "[red]FAIL[/red]"
             table.add_row(result.name, icon, result.detail, result.fix or "-")
 

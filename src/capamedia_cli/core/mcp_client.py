@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,10 +76,8 @@ class MCPClient:
             self._proc.terminate()
             self._proc.wait(timeout=5)
         except (subprocess.TimeoutExpired, OSError):
-            try:
+            with suppress(OSError):
                 self._proc.kill()
-            except OSError:
-                pass
 
     # -- Internal ------------------------------------------------------------
 
@@ -89,7 +88,7 @@ class MCPClient:
             for raw in iter(self._proc.stderr.readline, b""):
                 try:
                     line = raw.decode("utf-8", errors="replace").rstrip()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     line = str(raw)
                 if line:
                     self._stderr_buffer.append(line)

@@ -127,6 +127,9 @@ def test_build_batch_migrate_prompt_contains_workspace_context(tmp_path: Path) -
     assert "Servicio objetivo: svc" in prompt
     assert str(project) in prompt
     assert "PROMPT BASE" in prompt
+    assert "NO es un" in prompt
+    assert "status=blocked" in prompt
+    assert "No uses sub-agentes" in prompt
 
 
 def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
@@ -144,8 +147,19 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
 
     schema_path = _ensure_migrate_schema(root)
 
-    def fake_run(cmd, *, input, text, capture_output, check, timeout):  # noqa: ANN001
-        assert cmd[:2] == ["codex", "exec"]
+    def fake_run(cmd, *, input=None, text=None, capture_output=None, check=None, timeout=None, env=None, cwd=None):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        assert Path(cmd[0]).name == "codex"
+        assert cmd[1] == "exec"
+        assert "--ignore-user-config" in cmd
+        assert "--ephemeral" in cmd
+        assert "--full-auto" in cmd
+        assert "--json" in cmd
+        assert "--model" in cmd
+        assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
         output_idx = cmd.index("--output-last-message") + 1
         output_path = Path(cmd[output_idx])
         output_path.write_text(
@@ -160,12 +174,17 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
             ),
             encoding="utf-8",
         )
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='{"type":"thread.started","thread_id":"session-123"}\n',
+            stderr="",
+        )
 
     monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fake_run)
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._run_batch_check",
-        lambda service_name, migrated_project, legacy_root: {  # noqa: ARG005
+        lambda service_name, migrated_project, legacy_root: {
             "verdict": "READY_TO_MERGE",
             "HIGH": "0",
             "MEDIUM": "0",
@@ -192,6 +211,154 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
     assert row.fields["build"] == "green"
     assert row.fields["check"] == "READY_TO_MERGE"
     assert row.detail == "Migracion completa"
+
+
+def test_process_migrate_service_host_build_fallback_promotes_result(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path
+    service = "orqclientes0002"
+    workspace = root / service
+    project = workspace / "destino" / "tnd-msa-sp-orqclientes0002"
+    prompt_file = workspace / ".codex" / "prompts" / "migrate.md"
+    project.mkdir(parents=True)
+    prompt_file.parent.mkdir(parents=True)
+    (project / "build.gradle").write_text("plugins {}", encoding="utf-8")
+    prompt_file.write_text("prompt real", encoding="utf-8")
+    (workspace / "legacy").mkdir(parents=True)
+    _write_fabrics_metadata(workspace, service)
+
+    schema_path = _ensure_migrate_schema(root)
+
+    def fake_run(cmd, *, input=None, text=None, capture_output=None, check=None, timeout=None, env=None, cwd=None):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        output_idx = cmd.index("--output-last-message") + 1
+        output_path = Path(cmd[output_idx])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "summary": "Migracion completa, pero el sandbox no pudo correr Gradle por falta de Java Runtime.",
+                    "framework": "REST + Spring WebFlux",
+                    "build_status": "blocked: `./gradlew generateFromWsdl` fallo con `Unable to locate a Java Runtime`",
+                    "migrated_project": str(project),
+                    "artifacts": [],
+                    "notes": ["Se aplicaron los cambios del servicio en `destino/`."],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='{"type":"thread.started","thread_id":"session-456"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "capamedia_cli.commands.batch._run_host_build_fallback",
+        lambda migrated_project, ts: ("green", "green: build host-side ejecutado con exito"),
+    )
+    monkeypatch.setattr(
+        "capamedia_cli.commands.batch._run_batch_check",
+        lambda service_name, migrated_project, legacy_root: {
+            "verdict": "READY_TO_MERGE",
+            "HIGH": "0",
+            "MEDIUM": "0",
+            "LOW": "0",
+            "report": str(migrated_project / f"CHECKLIST_{service_name}.md"),
+        },
+    )
+
+    row = _process_migrate_service(
+        service,
+        root,
+        schema_path,
+        codex_bin="codex",
+        model=None,
+        prompt_file=None,
+        timeout_minutes=5,
+        run_check=True,
+        unsafe=False,
+    )
+
+    assert row.status == "ok"
+    assert row.fields["result"] == "ok"
+    assert row.fields["build"] == "green: build host-side ejecutado con exito"
+    assert row.fields["check"] == "READY_TO_MERGE"
+    assert "Validacion host-side" in row.detail
+
+
+def test_process_migrate_service_host_build_fallback_keeps_blocked_when_codex_reported_no_edits(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path
+    service = "orqclientes0005"
+    workspace = root / service
+    project = workspace / "destino" / "tnd-msa-sp-orqclientes0005"
+    prompt_file = workspace / ".codex" / "prompts" / "migrate.md"
+    project.mkdir(parents=True)
+    prompt_file.parent.mkdir(parents=True)
+    (project / "build.gradle").write_text("plugins {}", encoding="utf-8")
+    prompt_file.write_text("prompt real", encoding="utf-8")
+    (workspace / "legacy").mkdir(parents=True)
+    _write_fabrics_metadata(workspace, service)
+
+    schema_path = _ensure_migrate_schema(root)
+
+    def fake_run(cmd, *, input=None, text=None, capture_output=None, check=None, timeout=None, env=None, cwd=None):
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        if cmd[:2] == ["git", "init"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        output_idx = cmd.index("--output-last-message") + 1
+        output_path = Path(cmd[output_idx])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "summary": "Migracion no iniciada. Falta Java Runtime en el sandbox.",
+                    "framework": "REST + Spring WebFlux",
+                    "build_status": "blocked: `./gradlew generateFromWsdl` fallo con `Unable to locate a Java Runtime`",
+                    "migrated_project": str(project),
+                    "artifacts": [],
+                    "notes": ["No hice ediciones en el workspace por este bloqueo previo."],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout='{"type":"thread.started","thread_id":"session-789"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "capamedia_cli.commands.batch._run_host_build_fallback",
+        lambda migrated_project, ts: ("green", "green: build host-side ejecutado con exito"),
+    )
+
+    row = _process_migrate_service(
+        service,
+        root,
+        schema_path,
+        codex_bin="codex",
+        model=None,
+        prompt_file=None,
+        timeout_minutes=5,
+        run_check=False,
+        unsafe=False,
+    )
+
+    assert row.status == "fail"
+    assert row.fields["result"] == "blocked"
+    assert row.fields["build"] == "green: build host-side ejecutado con exito"
+    assert "no hizo ediciones" in row.detail
 
 
 def test_process_migrate_service_fails_without_destino(tmp_path: Path) -> None:
@@ -269,7 +436,7 @@ def test_process_migrate_service_resume_skips_successful_run(tmp_path: Path, mon
     )
     schema_path = _ensure_migrate_schema(root)
 
-    def fail_run(*args, **kwargs):  # noqa: ANN001,ARG001
+    def fail_run(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called on resume")
 
     monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fail_run)
@@ -309,23 +476,23 @@ def test_process_pipeline_service_success(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(
         "capamedia_cli.commands.clone.clone_service",
-        lambda service_name, workspace, shallow, skip_tx: None,  # noqa: ARG005
+        lambda service_name, workspace, shallow, skip_tx: None,
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.init.scaffold_project",
-        lambda target_dir, service_name, harnesses, artifact_token: (7, []),  # noqa: ARG005
+        lambda target_dir, service_name, harnesses, artifact_token: (7, []),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.inspect_fabrics_workspace",
-        lambda workspace: {"status": "ok", "detail": f"config={workspace}"},  # noqa: ARG005
+        lambda workspace: {"status": "ok", "detail": f"config={workspace}"},
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.generate",
-        lambda service_name, workspace, namespace, group_id, dry_run: _write_fabrics_metadata(workspace, service_name),  # noqa: ARG005
+        lambda service_name, workspace, namespace, group_id, dry_run: _write_fabrics_metadata(workspace, service_name),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._process_migrate_service",
-        lambda *args, **kwargs: BatchRow(  # noqa: ARG005
+        lambda *args, **kwargs: BatchRow(
             service,
             "ok",
             "pipeline ok",
@@ -402,7 +569,7 @@ def test_process_pipeline_service_resume_skips_completed_stages(tmp_path: Path, 
 
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._process_migrate_service",
-        lambda *args, **kwargs: BatchRow(  # noqa: ARG005
+        lambda *args, **kwargs: BatchRow(
             service,
             "ok",
             "resume migrate",
@@ -462,15 +629,15 @@ def test_process_pipeline_service_fails_on_fabrics_preflight(tmp_path: Path, mon
 
     monkeypatch.setattr(
         "capamedia_cli.commands.clone.clone_service",
-        lambda service_name, workspace, shallow, skip_tx: None,  # noqa: ARG005
+        lambda service_name, workspace, shallow, skip_tx: None,
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.init.scaffold_project",
-        lambda target_dir, service_name, harnesses, artifact_token: (7, []),  # noqa: ARG005
+        lambda target_dir, service_name, harnesses, artifact_token: (7, []),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.inspect_fabrics_workspace",
-        lambda workspace: {"status": "fail", "detail": "token faltante"},  # noqa: ARG005
+        lambda workspace: {"status": "fail", "detail": "token faltante"},
     )
 
     row = _process_pipeline_service(

@@ -30,8 +30,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from capamedia_cli.core.legacy_analyzer import analyze_legacy
 from capamedia_cli.core.auth import build_azure_git_env
+from capamedia_cli.core.legacy_analyzer import analyze_legacy
 
 console = Console()
 
@@ -75,7 +75,7 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
     for project_key, pattern in AZURE_FALLBACK_PATTERNS:
         repo_name = pattern.format(svc=svc)
         dest = dest_root / "legacy" / repo_name
-        ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+        ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
         if ok:
             return (dest, project_key, repo_name)
     return (None, "", "")
@@ -318,10 +318,10 @@ def clone_service(
             f"\n[bold]1. Legacy detectado LOCALMENTE[/bold] (no requiere clone): {legacy_dest}"
         )
     else:
-        console.print(f"\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
+        console.print("\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
         legacy_dest, project_key, repo_name = _resolve_azure_repo(service_name, ws, shallow)
         if legacy_dest is None:
-            console.print(f"[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
+            console.print("[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
             console.print(
                 "[yellow]Tip:[/yellow] verifica que el servicio exista o agrega un nuevo "
                 "patron a AZURE_FALLBACK_PATTERNS en clone.py."

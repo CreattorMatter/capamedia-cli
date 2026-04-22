@@ -11,6 +11,7 @@ Componentes automatizables:
   - Gradle 8.x
   - Node.js LTS (requerido por el MCP Fabrics via npx)
   - Codex CLI (requerido por batch migrate / batch pipeline)
+  - Claude Code CLI (opcional como runner session-based)
   - Python 3.12 (para este CLI mismo)
   - uv (gestor de paquetes Python)
   - VS Code (IDE principal soportado)
@@ -30,7 +31,6 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass
 
 import typer
@@ -109,6 +109,15 @@ PACKAGES: list[Package] = [
         macos_install_command=["npm", "install", "-g", "@openai/codex"],
         linux_install_command=["npm", "install", "-g", "@openai/codex"],
         note="Despues autentica con `capamedia auth bootstrap` o `codex login`",
+    ),
+    Package(
+        name="Claude Code CLI",
+        check_command=["claude", "--version"],
+        windows_install_command=["npm", "install", "-g", "@anthropic-ai/claude-code"],
+        macos_install_command=["npm", "install", "-g", "@anthropic-ai/claude-code"],
+        linux_install_command=["npm", "install", "-g", "@anthropic-ai/claude-code"],
+        optional=True,
+        note="Opcional: autentica con `claude auth login` si queres usar runner=claude",
     ),
     Package(
         name="Python 3.12",
@@ -320,7 +329,9 @@ def _print_manual_steps() -> None:
                 "   -> corre: [bold]capamedia auth bootstrap --scope global[/bold]\n"
                 "      y pasa `--artifact-token`, `--openai-api-key` o usa env vars segun necesites\n"
                 "      Azure DevOps puede quedar por env (`CAPAMEDIA_AZDO_PAT`) o por GCM interactivo\n\n"
-                "2. [cyan]SonarCloud binding[/cyan]\n"
+                "2. [cyan]Claude Code[/cyan] (opcional como runner principal sin API key)\n"
+                "   -> corre: [bold]claude auth login[/bold]\n\n"
+                "3. [cyan]SonarCloud binding[/cyan]\n"
                 "   -> abri VS Code, ve al sidebar de SonarQube\n"
                 "   -> 'Add SonarQube Cloud Connection' - login con Azure DevOps\n"
                 "   -> nombre de conexion: [bold]bancopichinchaec[/bold] (literal)\n\n"

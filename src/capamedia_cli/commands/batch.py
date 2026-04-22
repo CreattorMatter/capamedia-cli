@@ -4,7 +4,7 @@ Subcomandos:
   - complexity <file>   Analiza complejidad de N servicios legacy (leer de txt)
   - clone      <file>   Clone masivo (legacy + UMPs + TX) con ThreadPool
   - check      <root>   Audita todos los proyectos migrados bajo un path
-  - init       <file>   Inicializa N workspaces con .claude/ + CLAUDE.md
+  - init       <file>   Inicializa N workspaces con el scaffold AI del proyecto
   - pipeline   <file>   Ejecuta clone -> init -> fabric -> migrate -> check
   - migrate    <file>   Ejecuta `codex exec` sobre N workspaces listos
   - watch      <root>   Mirador operativo de estados persistentes del batch
@@ -23,6 +23,7 @@ from __future__ import annotations
 import csv
 import datetime
 import json
+import os
 import shutil
 import subprocess
 import textwrap
@@ -30,7 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -38,13 +39,18 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from capamedia_cli.core.auth import (
+    resolve_artifact_token,
+    resolve_azure_devops_pat,
+    resolve_codex_api_key,
+)
 from capamedia_cli.core.batch_state import (
     load_state,
     mark_stage,
     save_state,
     set_result,
-    state_file,
     stage_ok,
+    state_file,
 )
 
 console = Console()
@@ -61,6 +67,17 @@ class BatchRow:
     status: str  # "ok" | "fail" | "skip" | "wait"
     detail: str
     fields: dict[str, str]
+
+
+@dataclass
+class RunnerExecution:
+    provider: str
+    returncode: int
+    stdout_text: str
+    stderr_text: str
+    payload: dict[str, Any]
+    session_id: str | None = None
+    summary_fallback: str = ""
 
 
 MIGRATE_FIELD_ORDER = ["codex", "result", "framework", "build", "check", "seconds", "project"]
@@ -90,10 +107,23 @@ WATCH_FIELD_ORDER = [
     "project",
 ]
 
+DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_CODEX_REASONING_EFFORT = "high"
+DEFAULT_CLAUDE_MODEL = "opus"
+DEFAULT_CLAUDE_EFFORT = "high"
+
 MIGRATE_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["status", "summary"],
+    "required": [
+        "status",
+        "summary",
+        "framework",
+        "build_status",
+        "migrated_project",
+        "artifacts",
+        "notes",
+    ],
     "properties": {
         "status": {
             "type": "string",
@@ -117,12 +147,291 @@ FALLBACK_MIGRATE_PROMPT = textwrap.dedent(
     Requisitos:
     - trabaja solo dentro del workspace actual;
     - preserva la matriz oficial del proyecto (1 op -> REST/WebFlux, 2+ ops -> SOAP/MVC);
-    - valida con build real del proyecto migrado si existe;
-    - si falta un prerequisito, no inventes nada: reportalo como `blocked`.
+    - intenta validar con un build real del proyecto migrado si existe;
+    - si el sandbox no tiene Java/JDK/Gradle o no permite correr el build real, eso NO bloquea
+      las ediciones: igual debes completar la migracion y reportar ese limite en `build_status`;
+    - usa `status=blocked` solo cuando falten insumos esenciales o no puedas completar la
+      migracion de codigo de forma confiable;
+    - no uses sub-agentes ni esperes interaccion del usuario; resuelve todo dentro de esta misma
+      ejecucion;
+    - si hay una ambiguedad menor, toma la mejor decision con la evidencia del workspace y
+      documentala en `notes` en lugar de preguntar;
+    - no te detengas antes de editar solo porque el build no corre dentro del sandbox.
+    - devuelve SIEMPRE todos los campos del schema; usa string vacio ("") o lista vacia ([])
+      cuando un dato no aplique o no este disponible.
 
     Tu respuesta final debe ser SOLO un JSON valido segun el schema provisto.
     """
 ).strip()
+
+KNOWN_CODEX_BIN_PATHS = (
+    "/Applications/Codex.app/Contents/Resources/codex",
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+)
+
+KNOWN_CLAUDE_BIN_PATHS = (
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+)
+
+
+def _ensure_workspace_git_repo(workspace: Path) -> None:
+    """Initialize a lightweight git repo so Codex can attach normal repo context."""
+    if (workspace / ".git").exists():
+        return
+
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    if probe.returncode == 0:
+        return
+
+    init = subprocess.run(
+        ["git", "init", "-q"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if init.returncode != 0:
+        detail = (init.stderr or init.stdout or "git init fallo").strip()
+        raise RuntimeError(detail.splitlines()[-1] if detail else "git init fallo")
+
+
+def _resolve_cli_bin(bin_name: str, known_paths: tuple[str, ...]) -> str:
+    resolved = shutil.which(bin_name)
+    if resolved:
+        return resolved
+
+    candidate = Path(bin_name).expanduser()
+    if candidate.exists():
+        return str(candidate)
+
+    for raw in known_paths:
+        known = Path(raw)
+        if known.exists():
+            return str(known)
+
+    return bin_name
+
+
+def _resolve_codex_bin(codex_bin: str) -> str:
+    return _resolve_cli_bin(codex_bin, KNOWN_CODEX_BIN_PATHS)
+
+
+def _resolve_claude_bin(claude_bin: str) -> str:
+    return _resolve_cli_bin(claude_bin, KNOWN_CLAUDE_BIN_PATHS)
+
+
+def _build_codex_exec_env() -> dict[str, str]:
+    env = os.environ.copy()
+    api_key = resolve_codex_api_key()
+    if api_key and not env.get("CODEX_API_KEY"):
+        env["CODEX_API_KEY"] = api_key
+    return env
+
+
+def _build_claude_exec_env() -> dict[str, str]:
+    return os.environ.copy()
+
+
+def _resolve_java21_home() -> str | None:
+    try:
+        from capamedia_cli.commands.fabrics import _find_java21_home
+    except Exception:
+        return None
+    return _find_java21_home()
+
+
+def _needs_host_build_fallback(summary: str, build_detail: str) -> bool:
+    haystack = f"{summary}\n{build_detail}".lower()
+    blockers = (
+        "unable to locate a java runtime",
+        "no java runtime",
+        "no hay un java runtime",
+        "no hay jdk",
+        "no jdk available",
+        "missing a required build prerequisite: no java runtime is available",
+        "falta un runtime de java",
+        "falta un prerequisito operativo critico: no hay jdk",
+    )
+    return any(token in haystack for token in blockers)
+
+
+def _reported_no_edits(summary: str, notes: list[str]) -> bool:
+    haystack = "\n".join([summary, *notes]).lower()
+    markers = (
+        "no realicé ediciones",
+        "no realice ediciones",
+        "no hice ediciones",
+        "no edite archivos",
+        "no edité archivos",
+        "before any file edits",
+        "before edits",
+        "before file edits",
+        "migration blocked before edits",
+        "migracion no iniciada",
+        "migración no iniciada",
+        "detuve el proceso antes de editar",
+        "prerequisite failure detected before any file edits",
+    )
+    return any(marker in haystack for marker in markers)
+
+
+def _run_host_build_fallback(migrated_project: Path, *, ts: str) -> tuple[str, str]:
+    java_home = _resolve_java21_home()
+    if not java_home:
+        return ("blocked", "blocked: no se encontro Java 21 local para ejecutar el build host-side")
+
+    gradle_cmd = ["./gradlew", "clean", "build", "jacocoTestReport", "--no-daemon"]
+    if not (migrated_project / "gradlew").exists():
+        gradle_cmd = ["gradle", "clean", "build", "jacocoTestReport", "--no-daemon"]
+
+    env = os.environ.copy()
+    env["JAVA_HOME"] = java_home
+    env["PATH"] = f"{java_home}/bin:{env.get('PATH', '')}"
+    env["GRADLE_USER_HOME"] = str(migrated_project / ".gradle-user-home-host")
+
+    artifact_token = resolve_artifact_token() or resolve_azure_devops_pat()
+    if artifact_token and not env.get("ARTIFACT_TOKEN"):
+        env["ARTIFACT_TOKEN"] = artifact_token
+    env.setdefault("ARTIFACT_USERNAME", "BancoPichinchaEC")
+
+    workspace = migrated_project.parent.parent if migrated_project.parent.name == "destino" else migrated_project.parent
+    run_dir = workspace / ".capamedia" / "batch-migrate"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    log_path = run_dir / f"host-build-{ts}.log"
+
+    try:
+        result = subprocess.run(
+            gradle_cmd,
+            cwd=migrated_project,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20 * 60,
+            env=env,
+        )
+    except FileNotFoundError:
+        return ("blocked", f"blocked: no se encontro `{gradle_cmd[0]}` para validar el build host-side")
+    except subprocess.TimeoutExpired:
+        return ("blocked", "blocked: el build host-side excedio 20 minutos")
+
+    combined = "\n".join(
+        chunk for chunk in (result.stdout or "", result.stderr or "") if chunk
+    ).strip()
+    if combined:
+        log_path.write_text(combined + "\n", encoding="utf-8")
+    log_hint = f" Log: `{log_path}`." if log_path.exists() else ""
+
+    if result.returncode == 0:
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        command = " ".join(gradle_cmd)
+        return (
+            "green",
+            (
+                f"green: build real host-side ejecutado con exito el {stamp} en "
+                f"`{migrated_project}` usando `{command}`.{log_hint}"
+            ),
+        )
+
+    tail = (result.stderr or result.stdout or "build host-side fallo").strip().splitlines()
+    last_line = tail[-1].strip() if tail else "build host-side fallo"
+    return (
+        "red",
+        f"red: build host-side fallo con `{gradle_cmd[0]}`: {last_line[:220]}.{log_hint}",
+    )
+
+
+def _iter_codex_jsonl(stdout_text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for raw_line in stdout_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events
+
+
+def _extract_codex_session_id(stdout_text: str) -> str | None:
+    for payload in _iter_codex_jsonl(stdout_text):
+        session_id = payload.get("session_id") or payload.get("thread_id")
+        if isinstance(session_id, str) and session_id.strip():
+            return session_id.strip()
+        item = payload.get("item")
+        if isinstance(item, dict):
+            nested = item.get("session_id") or item.get("thread_id")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
+
+
+def _extract_codex_agent_message(stdout_text: str) -> str:
+    last_message = ""
+    for payload in _iter_codex_jsonl(stdout_text):
+        item = payload.get("item")
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                last_message = text.strip()
+        text = payload.get("text")
+        if isinstance(text, str) and text.strip():
+            last_message = text.strip()
+    return last_message
+
+
+def _extract_claude_execution(stdout_text: str) -> tuple[dict[str, Any], str | None, str]:
+    raw = stdout_text.strip()
+    if not raw:
+        return ({}, None, "")
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return ({}, None, "")
+
+    items: list[dict[str, Any]]
+    if isinstance(data, dict):
+        items = [data]
+    elif isinstance(data, list):
+        items = [item for item in data if isinstance(item, dict)]
+    else:
+        items = []
+
+    payload: dict[str, Any] = {}
+    session_id: str | None = None
+    summary = ""
+    for item in items:
+        if session_id is None:
+            candidate = item.get("session_id") or item.get("sessionId")
+            if isinstance(candidate, str) and candidate.strip():
+                session_id = candidate.strip()
+        structured = item.get("structured_output")
+        if isinstance(structured, dict):
+            payload = structured
+        elif not payload and isinstance(item.get("result"), dict):
+            payload = item["result"]
+        if not summary:
+            text = item.get("result")
+            if isinstance(text, str) and text.strip():
+                summary = text.strip()
+        if not summary:
+            message = item.get("message")
+            if isinstance(message, str) and message.strip():
+                summary = message.strip()
+    return (payload, session_id, summary)
 
 
 def _read_services_file(path: Path, sheet: str | None = None) -> list[str]:
@@ -212,7 +521,7 @@ def _write_markdown_report(
     lines.append(f"**OK:** {ok} · **FAIL:** {fail} · **WAIT:** {wait} · **SKIP:** {skip}\n")
 
     if rows:
-        cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+        cols = field_order or sorted({k for r in rows for k in r.fields})
         header = ["service", "status", "detail", *cols]
         lines.append("")
         lines.append("| " + " | ".join(header) + " |")
@@ -230,7 +539,7 @@ def _write_csv_report(
 ) -> Path:
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     dest = workspace / f"batch-{cmd}-{ts}.csv"
-    cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+    cols = field_order or sorted({k for r in rows for k in r.fields})
     with dest.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["service", "status", "detail", *cols])
@@ -240,7 +549,7 @@ def _write_csv_report(
 
 
 def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None = None) -> None:
-    cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+    cols = field_order or sorted({k for r in rows for k in r.fields})
     table = Table(title=f"Batch {cmd}: {len(rows)} servicios", title_style="bold cyan")
     table.add_column("Servicio", style="cyan")
     table.add_column("Status", style="bold", width=6)
@@ -535,11 +844,21 @@ def _build_batch_migrate_prompt(
         Antes de editar:
         1. Lee `AGENTS.md` si existe.
         2. Usa el prompt base incluido abajo como fuente principal del workflow.
-        3. Si falta un prerequisito importante, devolve `status=blocked` con detalle concreto.
+        3. Estas reglas de batch tienen prioridad sobre el prompt base si hay conflicto.
 
         Requisitos operativos:
         - Trabaja solo dentro de este workspace.
-        - Corre al menos un build real del proyecto migrado si el proyecto existe.
+        - Intenta correr al menos un build real del proyecto migrado si el proyecto existe.
+        - Si el sandbox no tiene Java/JDK/Gradle o no permite correr Gradle, eso NO es un
+          prerequisito bloqueante para editar el codigo.
+        - En ese caso igual completa la migracion y devuelve `build_status` explicando el
+          bloqueo del sandbox para que el host valide despues.
+        - Usa `status=blocked` solo cuando falten insumos esenciales o no puedas completar la
+          migracion del codigo de forma confiable.
+        - No uses sub-agentes ni esperes interaccion del usuario; resuelve la migracion dentro
+          de esta misma ejecucion no interactiva.
+        - Si el prompt base pide preguntar al usuario o escalar por una ambiguedad menor, toma
+          la mejor decision con la evidencia del workspace y documentala en `notes`.
         - No incluyas Markdown ni explicaciones fuera del JSON final.
         - La respuesta final debe ser SOLO el objeto JSON pedido por el schema.
 
@@ -584,6 +903,165 @@ def _read_structured_message(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _run_codex_migrate_execution(
+    *,
+    codex_bin: str,
+    model: str | None,
+    workspace: Path,
+    schema_path: Path,
+    output_path: Path,
+    prompt: str,
+    timeout_minutes: int,
+    unsafe: bool,
+) -> RunnerExecution:
+    resolved_model = model or DEFAULT_CODEX_MODEL
+    resolved_codex_bin = _resolve_codex_bin(codex_bin)
+    cmd = [
+        resolved_codex_bin,
+        "exec",
+        "--cd",
+        str(workspace),
+        "--ignore-user-config",
+        "--ephemeral",
+        "--model",
+        resolved_model,
+        "--output-schema",
+        str(schema_path),
+        "--output-last-message",
+        str(output_path),
+        "--json",
+        "--color",
+        "never",
+        "--config",
+        f'model_reasoning_effort="{DEFAULT_CODEX_REASONING_EFFORT}"',
+    ]
+    if unsafe:
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        cmd.append("--full-auto")
+    cmd.append("-")
+
+    result = subprocess.run(
+        cmd,
+        input=prompt,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout_minutes * 60,
+        env=_build_codex_exec_env(),
+    )
+    stdout_text = result.stdout or ""
+    payload = _read_structured_message(output_path)
+    return RunnerExecution(
+        provider="codex",
+        returncode=result.returncode,
+        stdout_text=stdout_text,
+        stderr_text=result.stderr or "",
+        payload=payload,
+        session_id=_extract_codex_session_id(stdout_text),
+        summary_fallback=_extract_codex_agent_message(stdout_text),
+    )
+
+
+def _run_claude_migrate_execution(
+    *,
+    claude_bin: str,
+    model: str | None,
+    workspace: Path,
+    schema_path: Path,
+    output_path: Path,
+    prompt: str,
+    timeout_minutes: int,
+    unsafe: bool,
+) -> RunnerExecution:
+    resolved_model = model or DEFAULT_CLAUDE_MODEL
+    resolved_claude_bin = _resolve_claude_bin(claude_bin)
+    schema_text = schema_path.read_text(encoding="utf-8")
+    query = (
+        "Lee la instruccion completa desde stdin, ejecutala dentro del workspace actual y "
+        "devuelve solo la salida estructurada requerida por el schema."
+    )
+    cmd = [
+        resolved_claude_bin,
+        "-p",
+        query,
+        "--output-format",
+        "json",
+        "--json-schema",
+        schema_text,
+        "--cwd",
+        str(workspace),
+        "--max-turns",
+        "40",
+        "--model",
+        resolved_model,
+        "--effort",
+        DEFAULT_CLAUDE_EFFORT,
+    ]
+    if unsafe:
+        cmd.append("--dangerously-skip-permissions")
+    else:
+        cmd.extend(["--permission-mode", "bypassPermissions"])
+
+    result = subprocess.run(
+        cmd,
+        input=prompt,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout_minutes * 60,
+        env=_build_claude_exec_env(),
+    )
+    stdout_text = result.stdout or ""
+    payload, session_id, summary_fallback = _extract_claude_execution(stdout_text)
+    if payload:
+        output_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return RunnerExecution(
+        provider="claude",
+        returncode=result.returncode,
+        stdout_text=stdout_text,
+        stderr_text=result.stderr or "",
+        payload=payload,
+        session_id=session_id,
+        summary_fallback=summary_fallback,
+    )
+
+
+def _run_migrate_execution(
+    *,
+    provider: str,
+    runner_bin: str,
+    model: str | None,
+    workspace: Path,
+    schema_path: Path,
+    output_path: Path,
+    prompt: str,
+    timeout_minutes: int,
+    unsafe: bool,
+) -> RunnerExecution:
+    if provider == "claude":
+        return _run_claude_migrate_execution(
+            claude_bin=runner_bin,
+            model=model,
+            workspace=workspace,
+            schema_path=schema_path,
+            output_path=output_path,
+            prompt=prompt,
+            timeout_minutes=timeout_minutes,
+            unsafe=unsafe,
+        )
+    return _run_codex_migrate_execution(
+        codex_bin=runner_bin,
+        model=model,
+        workspace=workspace,
+        schema_path=schema_path,
+        output_path=output_path,
+        prompt=prompt,
+        timeout_minutes=timeout_minutes,
+        unsafe=unsafe,
+    )
+
+
 def _as_text(value: Any, default: str = "") -> str:
     if value is None:
         return default
@@ -596,9 +1074,15 @@ def _normalize_build_status(value: str) -> str:
     lowered = value.strip().lower()
     if lowered in {"green", "ok", "passed", "pass", "success", "successful"}:
         return "green"
+    if lowered.startswith(("green:", "ok:", "passed:", "pass:", "success:", "successful:")):
+        return "green"
     if lowered in {"red", "fail", "failed", "error"}:
         return "red"
+    if lowered.startswith(("red:", "fail:", "failed:", "error:")):
+        return "red"
     if lowered in {"", "unknown", "not_run", "not run"}:
+        return "unknown"
+    if lowered.startswith(("unknown:", "not_run:", "not run:")):
         return "unknown"
     return value.strip() or "unknown"
 
@@ -636,7 +1120,9 @@ def _process_migrate_service(
     root: Path,
     schema_path: Path,
     *,
-    codex_bin: str,
+    provider: str = "codex",
+    runner_bin: str | None = None,
+    codex_bin: str | None = None,
     model: str | None,
     prompt_file: Path | None,
     timeout_minutes: int,
@@ -644,6 +1130,9 @@ def _process_migrate_service(
     unsafe: bool,
     resume: bool = False,
 ) -> BatchRow:
+    if runner_bin is None:
+        runner_bin = codex_bin or provider
+
     workspace = root / service
     if not workspace.exists():
         return BatchRow(service, "fail", f"workspace no existe: {workspace}", {})
@@ -710,26 +1199,16 @@ def _process_migrate_service(
     stderr_path = run_dir / f"codex-stderr-{ts}.log"
     prompt_path.write_text(prompt + "\n", encoding="utf-8")
 
-    cmd = [
-        codex_bin,
-        "exec",
-        "--skip-git-repo-check",
-        "--cd",
-        str(workspace),
-        "--output-schema",
-        str(schema_path),
-        "--output-last-message",
-        str(output_path),
-        "--color",
-        "never",
-    ]
-    if model:
-        cmd.extend(["--model", model])
-    if unsafe:
-        cmd.append("--dangerously-bypass-approvals-and-sandbox")
-    else:
-        cmd.append("--full-auto")
-    cmd.append("-")
+    try:
+        _ensure_workspace_git_repo(workspace)
+    except RuntimeError as exc:
+        fields = _hydrate_fields(base_fields, state_result.get("fields"))
+        fields["project"] = migrated_project.name
+        detail = f"no se pudo preparar git en workspace: {exc}"
+        set_result(state, status="fail", detail=detail, fields=fields)
+        mark_stage(state, "migrate", status="fail", detail=detail, fields=fields)
+        save_state(workspace, "migrate", state)
+        return BatchRow(service, "fail", detail, fields)
 
     started = time.perf_counter()
     skip_migrate = resume and stage_ok(state, "migrate")
@@ -749,23 +1228,25 @@ def _process_migrate_service(
         build_status = _normalize_build_status(_as_text(saved_fields.get("build"), "green"))
     else:
         try:
-            result = subprocess.run(
-                cmd,
-                input=prompt,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=timeout_minutes * 60,
+            execution = _run_migrate_execution(
+                provider=provider,
+                runner_bin=runner_bin,
+                model=model,
+                workspace=workspace,
+                schema_path=schema_path,
+                output_path=output_path,
+                prompt=prompt,
+                timeout_minutes=timeout_minutes,
+                unsafe=unsafe,
             )
-            stdout_text = result.stdout or ""
-            stderr_text = result.stderr or ""
         except FileNotFoundError:
             fields = _hydrate_fields(base_fields, state_result.get("fields"))
             fields["project"] = migrated_project.name
-            set_result(state, status="fail", detail=f"no se encontro el binario `{codex_bin}`", fields=fields)
-            mark_stage(state, "migrate", status="fail", detail=f"no se encontro el binario `{codex_bin}`", fields=fields)
+            detail = f"no se encontro el binario `{runner_bin}`"
+            set_result(state, status="fail", detail=detail, fields=fields)
+            mark_stage(state, "migrate", status="fail", detail=detail, fields=fields)
             save_state(workspace, "migrate", state)
-            return BatchRow(service, "fail", f"no se encontro el binario `{codex_bin}`", fields)
+            return BatchRow(service, "fail", detail, fields)
         except subprocess.TimeoutExpired as exc:
             stdout_text = _as_text(exc.stdout)
             stderr_text = _as_text(exc.stderr)
@@ -789,28 +1270,84 @@ def _process_migrate_service(
             return BatchRow(service, "fail", f"timeout despues de {timeout_minutes}m", fields)
 
         elapsed = time.perf_counter() - started
+        stdout_text = execution.stdout_text
+        stderr_text = execution.stderr_text
         stdout_path.write_text(stdout_text, encoding="utf-8")
         stderr_path.write_text(stderr_text, encoding="utf-8")
 
-        payload = _read_structured_message(output_path)
-        result_status = _as_text(payload.get("status"), "ok" if result.returncode == 0 else "failed").lower()
+        payload = execution.payload or _read_structured_message(output_path)
+        session_id = execution.session_id
+        result_status = _as_text(payload.get("status"), "ok" if execution.returncode == 0 else "failed").lower()
         summary = _as_text(payload.get("summary")).strip()
         if not summary:
-            summary = stderr_text.strip() or stdout_text.strip() or "codex exec termino sin resumen estructurado"
+            summary = (
+                stderr_text.strip()
+                or execution.summary_fallback
+                or f"{provider} termino sin resumen estructurado"
+            )
         framework = _as_text(payload.get("framework"), "?").strip() or "?"
-        build_status = _normalize_build_status(_as_text(payload.get("build_status"), "unknown"))
+        notes = payload.get("notes")
+        reported_notes = []
+        if isinstance(notes, list):
+            reported_notes = [_as_text(item).strip() for item in notes if _as_text(item).strip()]
+        reported_build = _as_text(payload.get("build_status"), "unknown").strip() or "unknown"
+        build_status = _normalize_build_status(reported_build)
         reported_project = _as_text(payload.get("migrated_project"), str(migrated_project)).strip()
-        project_name = Path(reported_project).name if reported_project else migrated_project.name
+        reported_project_path = Path(reported_project) if reported_project else migrated_project
+        if not reported_project_path.is_absolute():
+            reported_project_path = workspace / reported_project_path
+        if not reported_project_path.exists():
+            reported_project_path = migrated_project
+        project_name = reported_project_path.name
+
+        if _needs_host_build_fallback(summary, reported_build):
+            host_build_status, host_build_detail = _run_host_build_fallback(reported_project_path, ts=ts)
+            build_status = host_build_status
+            reported_build = host_build_detail
+            if host_build_status == "green":
+                if _reported_no_edits(summary, reported_notes):
+                    summary = (
+                        f"{summary} Validacion host-side: {host_build_detail} "
+                        "Codex reporto que no hizo ediciones; requiere reintento."
+                    ).strip()
+                else:
+                    result_status = "ok"
+                    summary = (
+                        f"{summary} Validacion host-side: {host_build_detail}"
+                        if summary
+                        else host_build_detail
+                    )
+            elif host_build_detail:
+                summary = (
+                    f"{summary} Validacion host-side: {host_build_detail}"
+                    if summary
+                    else host_build_detail
+                )
+
         migrate_fields = {
-            "codex": "ok" if result.returncode == 0 else f"exit_{result.returncode}",
+            "codex": (
+                "ok"
+                if provider == "codex" and execution.returncode == 0
+                else (
+                    f"exit_{execution.returncode}"
+                    if provider == "codex"
+                    else (
+                        f"{provider}:ok"
+                        if execution.returncode == 0
+                        else f"{provider}:exit_{execution.returncode}"
+                    )
+                )
+            ),
             "result": result_status,
             "framework": framework,
-            "build": build_status,
+            "build": reported_build,
             "check": "not_run" if run_check else "skip",
             "seconds": f"{elapsed:.1f}",
             "project": project_name,
         }
-        migrate_stage_status = "ok" if result.returncode == 0 and result_status == "ok" and build_status == "green" else "fail"
+        if session_id:
+            migrate_fields["session_id"] = session_id
+        migrate_stage_status = "ok" if execution.returncode == 0 and result_status == "ok" and build_status == "green" else "fail"
         mark_stage(state, "migrate", status=migrate_stage_status, detail=summary.splitlines()[0][:160], fields=migrate_fields)
         save_state(workspace, "migrate", state)
 
@@ -844,20 +1381,23 @@ def _process_migrate_service(
                     detail=check_status,
                     fields={"check": check_status, "report": check_result["report"]},
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 check_status = f"CHECK_ERROR: {type(exc).__name__}"
                 fields["check"] = check_status
                 mark_stage(state, "check", status="fail", detail=check_status, fields={"check": check_status})
             save_state(workspace, "migrate", state)
 
     row_status = "ok"
-    if fields.get("codex") not in {"ok"}:
-        row_status = "fail"
-    elif result_status != "ok":
-        row_status = "fail"
-    elif build_status != "green":
-        row_status = "fail"
-    elif check_status.startswith("BLOCKED_BY_HIGH") or check_status.startswith("CHECK_ERROR"):
+    if (
+        (
+            fields.get("codex", "") not in {"ok"}
+            and not fields.get("codex", "").endswith(":ok")
+        )
+        or result_status != "ok"
+        or build_status != "green"
+        or check_status.startswith("BLOCKED_BY_HIGH")
+        or check_status.startswith("CHECK_ERROR")
+    ):
         row_status = "fail"
 
     detail = (summary or _as_text(state_result.get("detail")) or "migrate completed").splitlines()[0][:160]
@@ -875,7 +1415,9 @@ def _process_pipeline_service(
     artifact_token: str | None,
     namespace: str,
     group_id: str,
-    codex_bin: str,
+    provider: str = "codex",
+    runner_bin: str | None = None,
+    codex_bin: str | None = None,
     model: str | None,
     prompt_file: Path | None,
     timeout_minutes: int,
@@ -885,6 +1427,9 @@ def _process_pipeline_service(
     unsafe: bool,
     resume: bool = False,
 ) -> BatchRow:
+    if runner_bin is None:
+        runner_bin = codex_bin or provider
+
     from capamedia_cli.commands.clone import clone_service
     from capamedia_cli.commands.fabrics import generate, inspect_fabrics_workspace
     from capamedia_cli.commands.init import scaffold_project
@@ -920,7 +1465,7 @@ def _process_pipeline_service(
             set_result(state, status="fail", detail="clone failed", fields=fields)
             save_state(workspace, "pipeline", state)
             return BatchRow(service, "fail", "clone failed", fields)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             fields["clone"] = "fail"
             fields["seconds"] = f"{time.perf_counter() - started:.1f}"
             detail = f"clone error: {type(exc).__name__}: {exc}"
@@ -942,7 +1487,7 @@ def _process_pipeline_service(
             fields["init"] = "ok"
             mark_stage(state, "init", status="ok", detail="init completed", fields={"init": "ok"})
             save_state(workspace, "pipeline", state)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             fields["init"] = "fail"
             fields["seconds"] = f"{time.perf_counter() - started:.1f}"
             detail = f"init error: {type(exc).__name__}: {exc}"
@@ -993,7 +1538,7 @@ def _process_pipeline_service(
             set_result(state, status="fail", detail="fabric failed", fields=fields)
             save_state(workspace, "pipeline", state)
             return BatchRow(service, "fail", "fabric failed", fields)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             fields["fabric"] = "fail"
             fields["seconds"] = f"{time.perf_counter() - started:.1f}"
             detail = f"fabric error: {type(exc).__name__}: {exc}"
@@ -1010,7 +1555,8 @@ def _process_pipeline_service(
         service,
         root,
         schema_path,
-        codex_bin=codex_bin,
+        provider=provider,
+        runner_bin=runner_bin,
         model=model,
         prompt_file=prompt_file,
         timeout_minutes=timeout_minutes,
@@ -1090,12 +1636,12 @@ def batch_complexity(
         typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con un servicio por linea"),
     ],
     sheet: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--sheet", help="Hoja del .xlsx (default: primera)"),
     ] = None,
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
     root: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--root", help="Carpeta raiz donde clonar workspaces (default: CWD)"),
     ] = None,
     shallow: Annotated[bool, typer.Option("--shallow")] = True,
@@ -1123,7 +1669,7 @@ def batch_complexity(
             return BatchRow(service, "fail", msg, {})
         try:
             analysis = analyze_legacy(legacy_root, service_name=service, umps_root=None)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return BatchRow(service, "fail", f"analyze error: {e}", {})
 
         # Detectar dominios distintos via UMPs
@@ -1178,10 +1724,10 @@ def batch_clone(
         Path, typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios")
     ],
     sheet: Annotated[
-        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
     ] = None,
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
-    root: Annotated[Optional[Path], typer.Option("--root")] = None,
+    root: Annotated[Path | None, typer.Option("--root")] = None,
     shallow: Annotated[bool, typer.Option("--shallow")] = False,
 ) -> None:
     """Clone masivo (legacy + UMPs + TX) en paralelo."""
@@ -1210,7 +1756,7 @@ def batch_clone(
             return BatchRow(service, "ok", str(svc_ws), {"workspace": str(svc_ws.name)})
         except typer.Exit:
             return BatchRow(service, "fail", "clone failed (typer.Exit)", {})
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return BatchRow(service, "fail", f"{type(e).__name__}: {e}", {})
 
     with Progress(
@@ -1273,7 +1819,7 @@ def batch_check(
         ctx = CheckContext(migrated_path=proj, legacy_path=legacy_path)
         try:
             results = run_all_blocks(ctx)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return BatchRow(proj.name, "fail", f"check error: {e}", {})
 
         high = sum(1 for r in results if r.status == "fail" and r.severity == "high")
@@ -1327,13 +1873,13 @@ def batch_init(
         Path, typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios")
     ],
     sheet: Annotated[
-        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
     ] = None,
     ai: Annotated[str, typer.Option("--ai", help="Harness(es) CSV o 'all'")] = "claude",
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
-    root: Annotated[Optional[Path], typer.Option("--root")] = None,
+    root: Annotated[Path | None, typer.Option("--root")] = None,
 ) -> None:
-    """Inicializa N workspaces con .claude/ + CLAUDE.md + .mcp.json."""
+    """Inicializa N workspaces con el scaffold AI del proyecto + .mcp.json."""
     from capamedia_cli.adapters import resolve_harnesses
     from capamedia_cli.commands.init import scaffold_project
 
@@ -1360,8 +1906,8 @@ def batch_init(
                 harnesses=harnesses,
                 artifact_token=None,
             )
-            return BatchRow(service, "ok", f"inicializado", {"harness": ai})
-        except Exception as e:  # noqa: BLE001
+            return BatchRow(service, "ok", "inicializado", {"harness": ai})
+        except Exception as e:
             return BatchRow(service, "fail", f"{type(e).__name__}: {e}", {})
 
     with Progress(
@@ -1387,11 +1933,11 @@ def batch_init(
 def batch_watch(
     root: Annotated[Path, typer.Argument(help="Directorio raiz donde viven los workspaces")],
     file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--from", "-f", help="Archivo opcional .txt / .csv / .xlsx con servicios"),
     ] = None,
     sheet: Annotated[
-        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
     ] = None,
     kind: Annotated[
         str,
@@ -1480,7 +2026,7 @@ def batch_pipeline(
         ),
     ],
     sheet: Annotated[
-        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
     ] = None,
     ai: Annotated[
         str,
@@ -1490,18 +2036,26 @@ def batch_pipeline(
         ),
     ] = "codex",
     workers: Annotated[int, typer.Option("--workers", "-w")] = 2,
-    root: Annotated[Optional[Path], typer.Option("--root")] = None,
+    root: Annotated[Path | None, typer.Option("--root")] = None,
     group_id: Annotated[str, typer.Option("--group-id")] = "com.pichincha.sp",
     artifact_token: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--artifact-token", help="Override del token para renderizar .mcp.json"),
     ] = None,
-    codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
+    provider: Annotated[
+        str,
+        typer.Option("--provider", help="Runner headless: codex o claude.", case_sensitive=False),
+    ] = "codex",
+    runner_bin: Annotated[
+        str,
+        typer.Option("--runner-bin", help="Binario del runner seleccionado."),
+    ] = "",
     model: Annotated[
-        Optional[str], typer.Option("--model", help="Override del modelo para `codex exec`")
+        str | None,
+        typer.Option("--model", help="Override del modelo para el runner seleccionado."),
     ] = None,
     prompt_file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--prompt-file",
             help="Prompt base alternativo para todos los servicios. Default: <workspace>/.codex/prompts/migrate.md",
@@ -1536,6 +2090,10 @@ def batch_pipeline(
     """Ejecuta el pipeline completo por servicio en paralelo."""
     from capamedia_cli.adapters import resolve_harnesses
 
+    provider = provider.strip().lower()
+    if provider not in {"codex", "claude"}:
+        raise typer.BadParameter("provider debe ser `codex` o `claude`")
+
     services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
 
@@ -1554,7 +2112,8 @@ def batch_pipeline(
         Panel.fit(
             f"[bold]batch pipeline[/bold]\n"
             f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
-            f"Harnesses: {', '.join(harnesses)} · Namespace: {namespace} · Codex: {codex_bin}\n"
+            f"Harnesses: {', '.join(harnesses)} · Namespace: {namespace} · Runner: {provider}\n"
+            f"Model: {model or (DEFAULT_CLAUDE_MODEL if provider == 'claude' else DEFAULT_CODEX_MODEL)}\n"
             f"Resume: {'SI' if resume else 'NO'} · Retries: {retries}",
             border_style="cyan",
         )
@@ -1583,7 +2142,8 @@ def batch_pipeline(
                         artifact_token=artifact_token,
                         namespace=namespace,
                         group_id=group_id,
-                        codex_bin=codex_bin,
+                        provider=provider,
+                        runner_bin=runner_bin or provider,
                         model=model,
                         prompt_file=prompt_file,
                         timeout_minutes=timeout_minutes,
@@ -1614,16 +2174,24 @@ def batch_migrate(
         typer.Option("--from", "-f", help="Archivo .txt / .csv / .xlsx con servicios"),
     ],
     sheet: Annotated[
-        Optional[str], typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx (default: primera)")
     ] = None,
     workers: Annotated[int, typer.Option("--workers", "-w")] = 2,
-    root: Annotated[Optional[Path], typer.Option("--root")] = None,
-    codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
+    root: Annotated[Path | None, typer.Option("--root")] = None,
+    provider: Annotated[
+        str,
+        typer.Option("--provider", help="Runner headless: codex o claude.", case_sensitive=False),
+    ] = "codex",
+    runner_bin: Annotated[
+        str,
+        typer.Option("--runner-bin", help="Binario del runner seleccionado."),
+    ] = "",
     model: Annotated[
-        Optional[str], typer.Option("--model", help="Override del modelo para `codex exec`")
+        str | None,
+        typer.Option("--model", help="Override del modelo para el runner seleccionado."),
     ] = None,
     prompt_file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--prompt-file",
             help="Prompt base alternativo para todos los servicios. Default: <workspace>/.codex/prompts/migrate.md",
@@ -1650,6 +2218,10 @@ def batch_migrate(
     ] = False,
 ) -> None:
     """Ejecuta `codex exec` en paralelo sobre workspaces ya preparados."""
+    provider = provider.strip().lower()
+    if provider not in {"codex", "claude"}:
+        raise typer.BadParameter("provider debe ser `codex` o `claude`")
+
     services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
 
@@ -1664,7 +2236,7 @@ def batch_migrate(
         Panel.fit(
             f"[bold]batch migrate[/bold]\n"
             f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
-            f"Codex: {codex_bin} · Model: {model or '(default)'} · Checklist: {'NO' if skip_check else 'SI'}\n"
+            f"Runner: {provider} · Model: {model or (DEFAULT_CLAUDE_MODEL if provider == 'claude' else DEFAULT_CODEX_MODEL)} · Checklist: {'NO' if skip_check else 'SI'}\n"
             f"Resume: {'SI' if resume else 'NO'} · Retries: {retries}",
             border_style="cyan",
         )
@@ -1689,7 +2261,8 @@ def batch_migrate(
                         svc,
                         ws,
                         schema_path,
-                        codex_bin=codex_bin,
+                        provider=provider,
+                        runner_bin=runner_bin or provider,
                         model=model,
                         prompt_file=prompt_file,
                         timeout_minutes=timeout_minutes,

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
-from capamedia_cli.adapters import ADAPTERS, ALL_HARNESSES, get_adapter, resolve_harnesses
+from capamedia_cli.adapters import ALL_HARNESSES, get_adapter, resolve_harnesses
 from capamedia_cli.core.canonical import load_canonical_assets
 
 
@@ -56,7 +57,7 @@ def test_claude_adapter_renders_to_tmp(tmp_path: Path) -> None:
     """Smoke test: the Claude adapter renders all canonicals without crashing."""
     assets = load_canonical_assets()
     adapter = get_adapter("claude")
-    written, warnings = adapter.render_all(assets, tmp_path)
+    written, _warnings = adapter.render_all(assets, tmp_path)
     assert len(written) > 0
     # Should create .claude/ subtree
     assert (tmp_path / ".claude").exists()
@@ -77,3 +78,6 @@ def test_codex_adapter_renders_agents_and_skills(tmp_path: Path) -> None:
     assert (tmp_path / ".codex" / "agents" / "migrador.toml").exists()
     assert (tmp_path / ".agents" / "skills" / "migrar" / "SKILL.md").exists()
     assert (tmp_path / ".codex" / "config.toml").exists()
+    assert (tmp_path / ".codex" / "rules" / "default.rules").exists()
+    config = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    assert "capamedia" in config["mcp_servers"]

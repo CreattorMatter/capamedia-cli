@@ -9,7 +9,6 @@ from capamedia_cli.adapters.base import HarnessAdapter
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
 
-
 MODEL_MAP = {
     "opus": "claude-opus-4-7",
     "sonnet": "claude-sonnet-4-6",

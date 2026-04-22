@@ -11,7 +11,6 @@ from capamedia_cli.core.legacy_analyzer import (
     score_complexity,
 )
 
-
 SAMPLE_WSDL = """<?xml version="1.0" encoding="UTF-8"?>
 <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
                   targetNamespace="http://pichincha.com/ws/test">
@@ -41,7 +40,7 @@ SAMPLE_WSDL = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def test_wsdl_counts_portType_only_not_binding(tmp_path: Path) -> None:
+def test_wsdl_counts_port_type_only_not_binding(tmp_path: Path) -> None:
     """Critical: must count ops in <portType> only, not the binding duplication."""
     wsdl = tmp_path / "test.wsdl"
     wsdl.write_text(SAMPLE_WSDL, encoding="utf-8")

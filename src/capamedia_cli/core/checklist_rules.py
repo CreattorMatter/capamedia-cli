@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # -- Result dataclass -------------------------------------------------------
@@ -133,7 +132,7 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=dialogo))
     else:
         if ops_migrated == 1 and actual_fw == "soap" and ctx.has_database:
-            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=f"1 op + BD => SOAP MVC (excepcion JPA)"))
+            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail="1 op + BD => SOAP MVC (excepcion JPA)"))
         else:
             dialogo = f"Son {ops_ref} op(s) => deberia ir {expected_fw.upper()}. Se migro como {actual_fw.upper()} => MAL-CLASIFICADO"
             results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "fail", severity="high", detail=dialogo, suggested_fix="Reclasificar el proyecto al framework correcto"))
@@ -192,7 +191,7 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
 
     # 1.1 - Capas presentes
     expected_layers = ["application", "domain", "infrastructure"]
-    present = [l for l in expected_layers if any(src_java.rglob(f"{l}/"))]
+    present = [layer for layer in expected_layers if any(src_java.rglob(f"{layer}/"))]
     if len(present) == 3:
         results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "pass", detail=f"{', '.join(present)}"))
     else:
@@ -200,7 +199,6 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "fail", severity="high", detail=f"faltan: {missing}"))
 
     # 1.2 - Domain sin imports framework
-    domain_root = src_java.rglob("domain")
     forbidden_imports = r"import (org\.springframework|jakarta\.persistence|org\.springframework\.web|javax\.ws)"
     forbidden_found: list[str] = []
     for d in src_java.rglob("domain"):
@@ -244,7 +242,6 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
     # Regla actualizada (v0.3.2): el numero de output ports debe coincidir con la
     # cantidad de dominios distintos de UMPs invocados por el servicio. Cada UMP
     # de un mismo dominio se consolida en 1 solo port/adapter del dominio.
-    from capamedia_cli.core.domain_mapping import domains_for_umps
 
     # Listar todos los *OutputPort en application/**/port/output/
     actual_ports: list[str] = []
@@ -440,9 +437,8 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     text = _read_or_empty(app_yml)
     hardcoded: list[str] = []
     for line in text.splitlines():
-        if re.search(r"(password|token|secret|user):\s*[^$\s][^\s]*", line, re.IGNORECASE):
-            if "${" not in line:
-                hardcoded.append(line.strip())
+        if re.search(r"(password|token|secret|user):\s*[^$\s][^\s]*", line, re.IGNORECASE) and "${" not in line:
+            hardcoded.append(line.strip())
     if hardcoded:
         results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "fail", severity="high", detail=f"{len(hardcoded)} valores hardcoded"))
     else:
@@ -727,6 +723,6 @@ def run_all_blocks(ctx: CheckContext) -> list[CheckResult]:
     for name, fn in ALL_BLOCKS:
         try:
             all_results.extend(fn(ctx))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             all_results.append(CheckResult(f"{name}-error", name, f"{name} orchestration", "fail", severity="medium", detail=f"error ejecutando bloque: {e}"))
     return all_results

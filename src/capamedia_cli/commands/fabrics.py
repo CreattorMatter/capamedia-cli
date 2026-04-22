@@ -12,7 +12,7 @@ import datetime as dt
 import json
 import os
 import subprocess
-import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
 
@@ -103,12 +103,25 @@ def _discover_fabrics_config(workspace: Path) -> tuple[Path | None, dict[str, st
     return (None, {}, "", first_invalid_hint)
 
 
-def inspect_fabrics_workspace(workspace: Path) -> dict[str, str]:
-    """Return a structured preflight verdict for Fabrics in a workspace."""
+def _resolve_npx_bin() -> str | None:
     from shutil import which
 
+    resolved = which("npx")
+    if resolved:
+        return resolved
+
+    for raw in ("/opt/homebrew/bin/npx", "/usr/local/bin/npx"):
+        candidate = Path(raw)
+        if candidate.exists():
+            return str(candidate)
+
+    return None
+
+
+def inspect_fabrics_workspace(workspace: Path) -> dict[str, str]:
+    """Return a structured preflight verdict for Fabrics in a workspace."""
     ws = workspace.resolve()
-    if which("npx") is None:
+    if _resolve_npx_bin() is None:
         return {
             "status": "fail",
             "detail": "npx no esta disponible (instala Node.js LTS antes de correr Fabrics)",
@@ -378,6 +391,8 @@ def _find_java21_home() -> Path | None:
     candidates.extend(Path("C:/Program Files/Java").glob("jdk-21*")) if Path("C:/Program Files/Java").exists() else None
     # macOS
     candidates.append(Path("/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home"))
+    candidates.append(Path("/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"))
+    candidates.append(Path("/opt/homebrew/opt/openjdk@21"))
     # Linux
     candidates.append(Path("/usr/lib/jvm/java-21-openjdk-amd64"))
     candidates.append(Path("/usr/lib/jvm/temurin-21-jdk-amd64"))
@@ -513,19 +528,15 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
 
     # 3. Ejecutable: en Unix marcar como ejecutable
     if not is_windows:
-        try:
+        with suppress(OSError):
             wrapper.chmod(0o755)
-        except OSError:
-            pass
 
     # 4. Limpiar caches previos del proyecto (evita class files de otras versiones de Java)
     import shutil as _sh
     for stale in (proj_dir / ".gradle", proj_dir / "build"):
         if stale.exists():
-            try:
+            with suppress(OSError):
                 _sh.rmtree(stale, ignore_errors=True)
-            except OSError:
-                pass
 
     try:
         result = subprocess.run(
@@ -558,28 +569,26 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
 @app.command("generate")
 def generate(
     service_name: str = typer.Argument(..., help="Nombre del servicio (ej: wsclientes0008)"),
-    workspace: Path | None = typer.Option(
-        None,
-        "--workspace",
-        "-w",
-        help="Workspace root (default: CWD)",
-    ),
-    namespace: str | None = typer.Option(
-        None,
-        "--namespace",
-        "-n",
-        help=f"Namespace del catalogo: {' | '.join(NAMESPACE_OPTIONS)}. Si se omite, se pregunta interactivamente.",
-    ),
-    group_id: str = typer.Option(
-        "com.pichincha.sp",
-        "--group-id",
-        help="Maven groupId del proyecto",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="No invocar el MCP, solo mostrar los parametros que se usarian",
-    ),
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Workspace root (default: CWD)"),
+    ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--namespace",
+            "-n",
+            help=f"Namespace del catalogo: {' | '.join(NAMESPACE_OPTIONS)}. Si se omite, se pregunta interactivamente.",
+        ),
+    ] = None,
+    group_id: Annotated[
+        str,
+        typer.Option("--group-id", help="Maven groupId del proyecto"),
+    ] = "com.pichincha.sp",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="No invocar el MCP, solo mostrar los parametros que se usarian"),
+    ] = False,
 ) -> None:
     """Invoca el MCP Fabrics del banco y genera el arquetipo en ./destino/.
 
@@ -816,8 +825,8 @@ def generate(
                 f"Proximos pasos:\n"
                 f"{recovery_line}"
                 f"  1. Revisa `{proj_dir.name}/build.gradle` y aplica workarounds conocidos.\n"
-                f"  2. Corre `capamedia init --here` dentro de destino/{project_name}/ para sumar .claude/ y CLAUDE.md.\n"
-                f"  3. Abri en Claude Code y corre `/migrate` en el chat.",
+                f"  2. Corre `capamedia init --here --ai codex` dentro de destino/{project_name}/ para sumar .codex/, .agents/ y AGENTS.md.\n"
+                f"  3. Abri ese proyecto en Codex y corre `/migrate`, o usa `capamedia batch migrate`.",
                 border_style="green",
                 title="OK",
             )
@@ -864,7 +873,7 @@ def preflight() -> None:
     """Verifica que el MCP Fabrics este configurado y accesible.
 
     Chequea:
-      - .mcp.json o ~/.claude/settings.json tiene el server 'fabrics'
+      - la config MCP del proyecto o del usuario tiene el server 'fabrics'
       - El token no esta vacio
       - npx esta disponible (necesario para invocar el MCP)
       - Puede hacer un dry-run del MCP para verificar conectividad

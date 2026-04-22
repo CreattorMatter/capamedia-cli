@@ -65,7 +65,7 @@ class LegacyAnalysis:
 # -- WSDL parsing (portType-only, skip binding) -----------------------------
 
 
-def _extract_portType_block(text: str) -> str:
+def _extract_port_type_block(text: str) -> str:
     """Extract the text between <wsdl:portType> and </wsdl:portType>.
 
     Necesario porque `<wsdl:binding>` tambien tiene `<wsdl:operation>` y no
@@ -89,7 +89,7 @@ def analyze_wsdl(path: Path) -> WsdlInfo:
     """Extract operation count, names, namespace and schema imports from a WSDL."""
     content = path.read_text(encoding="utf-8", errors="replace")
 
-    porttype_block = _extract_portType_block(content)
+    porttype_block = _extract_port_type_block(content)
     op_names = RE_WSDL_OPERATION.findall(porttype_block)
 
     ns_match = RE_WSDL_TARGETNS.search(content)

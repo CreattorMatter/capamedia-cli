@@ -9,7 +9,6 @@ from typing import Annotated
 import typer
 import yaml
 from rich.console import Console
-from rich.prompt import Confirm
 
 from capamedia_cli import __version__
 from capamedia_cli.adapters import ALL_HARNESSES, get_adapter, resolve_harnesses

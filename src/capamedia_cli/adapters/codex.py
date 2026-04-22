@@ -8,36 +8,112 @@ import tomli_w
 
 from capamedia_cli.adapters.base import HarnessAdapter, model_hint_comment
 from capamedia_cli.core.canonical import CanonicalAsset
+from capamedia_cli.core.codex_mcp import (
+    ensure_capamedia_mcp_server,
+    load_codex_config,
+    write_codex_config,
+)
 from capamedia_cli.core.frontmatter import serialize_frontmatter
 
+DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_CODEX_REASONING_EFFORT = "high"
 
-MODEL_MAP = {
-    "opus": "gpt-5.3-codex",
-    "sonnet": "gpt-5.1-codex",
-    "haiku": "gpt-5.4-mini",
-}
+
+def _override(asset: CanonicalAsset) -> dict[str, object]:
+    raw = asset.override_for("codex")
+    return raw if isinstance(raw, dict) else {}
 
 
 def _resolve_model(asset: CanonicalAsset) -> str:
-    preferred = asset.preferred_model.get("openai")
-    if preferred:
-        return preferred
-    return MODEL_MAP.get(asset.fallback_model, "gpt-5.1-codex")
+    override = _override(asset)
+    model = override.get("model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return DEFAULT_CODEX_MODEL
 
 
 def _resolve_reasoning(asset: CanonicalAsset) -> str:
-    if asset.complexity == "high":
-        return "high"
-    if asset.complexity == "low":
-        return "low"
-    return "medium"
+    override = _override(asset)
+    effort = override.get("model_reasoning_effort")
+    if isinstance(effort, str) and effort.strip():
+        return effort.strip()
+    return DEFAULT_CODEX_REASONING_EFFORT
 
 
 def _resolve_sandbox_mode(asset: CanonicalAsset) -> str:
+    override = _override(asset)
+    sandbox_mode = override.get("sandbox_mode")
+    if isinstance(sandbox_mode, str) and sandbox_mode.strip():
+        return sandbox_mode.strip()
     write_like_tools = {"Write", "Edit", "Task", "Agent"}
     if any(tool in write_like_tools for tool in asset.allowed_tools):
         return "workspace-write"
     return "read-only"
+
+
+def _resolve_description(asset: CanonicalAsset) -> str:
+    override = _override(asset)
+    description = override.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    return asset.description
+
+
+def _merge_doc_fallbacks(raw: object) -> list[str]:
+    values = list(raw) if isinstance(raw, list) else []
+    required = ["CLAUDE.md", ".claude.md"]
+    seen: set[str] = set()
+    merged: list[str] = []
+    for value in [*values, *required]:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return merged
+
+
+def _build_codex_settings(target_dir: Path, existing: dict[str, object]) -> dict[str, object]:
+    data = dict(existing)
+    data.setdefault("model", DEFAULT_CODEX_MODEL)
+    data.setdefault("model_reasoning_effort", DEFAULT_CODEX_REASONING_EFFORT)
+    data.setdefault("approval_policy", "on-request")
+    data.setdefault("sandbox_mode", "workspace-write")
+    data["project_doc_fallback_filenames"] = _merge_doc_fallbacks(
+        data.get("project_doc_fallback_filenames")
+    )
+
+    agents = dict(data.get("agents") or {})
+    agents.setdefault("max_threads", 6)
+    agents.setdefault("max_depth", 1)
+    data["agents"] = agents
+
+    sandbox_workspace_write = dict(data.get("sandbox_workspace_write") or {})
+    sandbox_workspace_write.setdefault("network_access", True)
+    data["sandbox_workspace_write"] = sandbox_workspace_write
+
+    profiles = dict(data.get("profiles") or {})
+    batch = dict(profiles.get("batch") or {})
+    batch.setdefault("model", DEFAULT_CODEX_MODEL)
+    batch.setdefault("model_reasoning_effort", DEFAULT_CODEX_REASONING_EFFORT)
+    batch.setdefault("approval_policy", "never")
+    batch.setdefault("sandbox_mode", "workspace-write")
+    batch_workspace = dict(batch.get("sandbox_workspace_write") or {})
+    batch_workspace.setdefault("network_access", True)
+    batch["sandbox_workspace_write"] = batch_workspace
+    profiles["batch"] = batch
+    data["profiles"] = profiles
+
+    ensure_capamedia_mcp_server(data, root=target_dir)
+    return data
+
+
+def _resolve_body(asset: CanonicalAsset) -> str:
+    override = _override(asset)
+    body = override.get("body")
+    if isinstance(body, str) and body.strip():
+        return body
+    return asset.body
 
 
 class CodexAdapter(HarnessAdapter):
@@ -49,9 +125,10 @@ class CodexAdapter(HarnessAdapter):
         out_dir = target_dir / ".codex" / "prompts"
         out_dir.mkdir(parents=True, exist_ok=True)
         dest = out_dir / f"{asset.name}.md"
-        fm = {"name": asset.name, "description": asset.description}
+        fm = {"name": asset.name, "description": _resolve_description(asset)}
         hint = model_hint_comment(asset)
-        body = f"{hint}\n\n{asset.body}" if hint else asset.body
+        body = _resolve_body(asset)
+        body = f"{hint}\n\n{body}" if hint else body
         dest.write_text(serialize_frontmatter(fm, body), encoding="utf-8")
         return [dest]
 
@@ -61,11 +138,11 @@ class CodexAdapter(HarnessAdapter):
         dest = out_dir / f"{asset.name}.toml"
         payload = {
             "name": asset.name,
-            "description": asset.description,
+            "description": _resolve_description(asset),
             "model": _resolve_model(asset),
             "model_reasoning_effort": _resolve_reasoning(asset),
             "sandbox_mode": _resolve_sandbox_mode(asset),
-            "developer_instructions": asset.body.strip(),
+            "developer_instructions": _resolve_body(asset).strip(),
         }
         dest.write_bytes(tomli_w.dumps(payload).encode("utf-8"))
         return [dest]
@@ -110,18 +187,57 @@ class CodexAdapter(HarnessAdapter):
         codex_dir = target_dir / ".codex"
         codex_dir.mkdir(parents=True, exist_ok=True)
         config = codex_dir / "config.toml"
-        if not config.exists():
-            config.write_bytes(
-                tomli_w.dumps(
-                    {
-                        "model": "gpt-5.1-codex",
-                        "approval-policy": "on-failure",
-                        "agents": {
-                            "max_threads": 6,
-                            "max_depth": 1,
-                        },
-                    }
-                ).encode("utf-8")
+        existing = load_codex_config(config)
+        write_codex_config(config, _build_codex_settings(target_dir, existing))
+        rules_dir = codex_dir / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        rules = rules_dir / "default.rules"
+        if not rules.exists():
+            rules.write_text(
+                "# Conservative rules for unattended migration workspaces.\n"
+                "prefix_rule(\n"
+                "    pattern = [\"git\", \"status\"],\n"
+                "    decision = \"allow\",\n"
+                "    justification = \"Workspace status checks are safe in automation.\",\n"
+                "    match = [\"git status --short\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"git\", \"diff\"],\n"
+                "    decision = \"allow\",\n"
+                "    justification = \"Diff inspection is safe in automation.\",\n"
+                "    match = [\"git diff --stat\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"rg\"],\n"
+                "    decision = \"allow\",\n"
+                "    justification = \"Fast repo search is safe in automation.\",\n"
+                "    match = [\"rg build.gradle destino\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"./gradlew\"],\n"
+                "    decision = \"allow\",\n"
+                "    justification = \"Project-local Gradle validation is expected in migration runs.\",\n"
+                "    match = [\"./gradlew clean build\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"git\", \"reset\", \"--hard\"],\n"
+                "    decision = \"forbidden\",\n"
+                "    justification = \"Do not discard workspace changes during migration runs.\",\n"
+                "    match = [\"git reset --hard HEAD\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"git\", \"checkout\", \"--\"],\n"
+                "    decision = \"forbidden\",\n"
+                "    justification = \"Do not revert files to an old revision during migration runs.\",\n"
+                "    match = [\"git checkout -- src/main/java/App.java\"],\n"
+                ")\n\n"
+                "prefix_rule(\n"
+                "    pattern = [\"rm\", \"-rf\"],\n"
+                "    decision = \"forbidden\",\n"
+                "    justification = \"Use targeted file edits instead of recursive deletion.\",\n"
+                "    match = [\"rm -rf build\"],\n"
+                ")\n",
+                encoding="utf-8",
             )
         manifest = target_dir / ".agents" / "README.md"
         if not manifest.exists():
@@ -131,4 +247,4 @@ class CodexAdapter(HarnessAdapter):
                 "This directory contains repo-scoped Codex skills discovered automatically by Codex.\n",
                 encoding="utf-8",
             )
-        return [config, manifest]
+        return [config, rules, manifest]

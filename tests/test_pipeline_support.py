@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from capamedia_cli.commands.fabrics import _artifact_env_from_mcp, _resolve_legacy_root
@@ -27,6 +28,8 @@ def test_scaffold_project_generates_codex_assets(tmp_path: Path) -> None:
     assert (target / "AGENTS.md").exists()
     assert (target / ".mcp.json").exists()
     assert '"command": "npx"' in (target / ".mcp.json").read_text(encoding="utf-8")
+    codex_config = tomllib.loads((target / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    assert "capamedia" in codex_config["mcp_servers"]
 
 
 def test_resolve_legacy_root_prefers_workspace_then_local_fallback(tmp_path: Path) -> None:

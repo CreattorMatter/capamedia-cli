@@ -55,7 +55,7 @@ mkdir -p legacy
 git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-msa-<servicio> legacy/sqb-msa-<servicio>
 ```
 
-Si el clone falla por auth, avisá al usuario que corra `git clone` manual primero para cachear el PAT via GCM (ver guía en `CLAUDE.md`).
+Si el clone falla por auth, avisá al usuario que primero deje un PAT disponible via `CAPAMEDIA_AZDO_PAT` o que haga un `git clone` interactivo una vez para cachear credenciales en GCM.
 
 ### Paso 2 — Detectar UMPs referenciados
 
@@ -87,34 +87,20 @@ done
 
 Registrá el mapping `UMP -> TX code` en una tabla del reporte.
 
-### Paso 4 — Clonar catálogos de referencia
+### Paso 4 — Clonar repos individuales de TX
 
-Cloná los catálogos del banco (son comunes a todos los servicios):
+Para cada TX code detectado, cloná su repo específico en `./tx/`:
 
 ```bash
 mkdir -p tx
-git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-cfg-codigosBackend-config tx/sqb-cfg-codigosBackend-config
-git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-cfg-errores-errors tx/sqb-cfg-errores-errors
+for TX in <lista>; do
+  git clone https://dev.azure.com/BancoPichinchaEC/tpl-integrationbus-config/_git/sqb-cfg-${TX}-TX tx/sqb-cfg-${TX}-TX
+done
 ```
 
-### Paso 5 — Clonar el gold standard correspondiente
+### Paso 5 — No traer referencias globales por default
 
-Contá las operaciones del `<portType>` en el WSDL del legacy:
-
-```bash
-WSDL=$(find legacy -name "*.wsdl" -not -path "*/node_modules/*" | head -1)
-OPS=$(awk '/<wsdl:portType/,/<\/wsdl:portType>/' "$WSDL" | grep -c "<wsdl:operation")
-```
-
-Según el conteo:
-- **1 op** → `gold-ref/tnd-msa-sp-wsclientes0024` (REST gold)
-- **2+ ops** → `gold-ref/tnd-msa-sp-wsclientes0015` (SOAP gold)
-
-```bash
-mkdir -p gold-ref
-GOLD=$([ "$OPS" -eq 1 ] && echo "tnd-msa-sp-wsclientes0024" || echo "tnd-msa-sp-wsclientes0015")
-git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/${GOLD} gold-ref/${GOLD}
-```
+No clones `gold-ref/` ni catálogos globales salvo que el usuario lo pida explícitamente. La referencia base para patrones de migración ya vive en los prompts y checklists canónicos del CLI.
 
 ### Paso 6 — Detectar tipo de fuente (IIB / WAS / ORQ)
 
@@ -158,6 +144,6 @@ Si ves algo raro (UMPs faltantes, WSDL no estandar, etc.), avisame antes.
 ## Reglas importantes
 
 1. **No fabricar datos.** Si un UMP no se pudo clonar (auth, no existe), marcalo explícitamente y seguí.
-2. **Respetar `.gitignore`.** Las carpetas `legacy/`, `umps/`, `tx/`, `gold-ref/` ya están en `.gitignore` (agregadas por `capamedia init`). Nunca las agregues al commit.
-3. **Si el PAT falla**, pará y pedile al usuario que corra `git clone` interactivo una vez para cachear el token via GCM. Ver la guía en `CLAUDE.md`.
+2. **Respetar `.gitignore`.** Las carpetas `legacy/`, `umps/` y `tx/` ya están en `.gitignore` (agregadas por `capamedia init`). Nunca las agregues al commit.
+3. **Si el PAT falla**, pará y pedile al usuario que exporte `CAPAMEDIA_AZDO_PAT` o que haga un `git clone` interactivo una vez para cachear el token via GCM.
 4. **Escribí un archivo `COMPLEXITY_<servicio>.md`** con el reporte anterior para que `/fabric` y `/migrate` lo lean después.

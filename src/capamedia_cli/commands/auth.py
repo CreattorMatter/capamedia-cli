@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
 
@@ -13,13 +14,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from capamedia_cli.commands import fabrics
+from capamedia_cli.commands import fabrics, mcp
 from capamedia_cli.core.auth import (
     AZURE_PAT_ENV_VARS,
-    OPENAI_API_KEY_ENV_VARS,
+    CODEX_API_KEY_ENV_VARS,
     resolve_artifact_token,
     resolve_azure_devops_pat,
-    resolve_openai_api_key,
+    resolve_codex_api_key,
 )
 
 console = Console()
@@ -34,10 +35,8 @@ def _write_env_file(path: Path, payload: dict[str, str]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{key}={value}" for key, value in payload.items() if value]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    try:
+    with suppress(OSError):
         path.chmod(0o600)
-    except OSError:
-        pass
     return path
 
 
@@ -92,7 +91,11 @@ def bootstrap(
     ] = None,
     openai_api_key: Annotated[
         str | None,
-        typer.Option("--openai-api-key", help="OpenAI API key para autenticar Codex CLI"),
+        typer.Option(
+            "--codex-api-key",
+            "--openai-api-key",
+            help="Codex/OpenAI API key para autenticar `codex exec`",
+        ),
     ] = None,
     env_file: Annotated[
         Path | None,
@@ -116,12 +119,12 @@ def bootstrap(
     """Prepara una maquina para correr batch pipeline sin prompts de credenciales."""
     resolved_artifact = resolve_artifact_token(artifact_token)
     resolved_azure = resolve_azure_devops_pat(azure_pat)
-    resolved_openai = resolve_openai_api_key(openai_api_key)
+    resolved_codex = resolve_codex_api_key(openai_api_key)
 
-    if not any((resolved_artifact, resolved_azure, resolved_openai, env_file)):
+    if not any((resolved_artifact, resolved_azure, resolved_codex, env_file)):
         console.print(
             "[red]Error:[/red] no recibi credenciales. "
-            f"Usa opciones directas o las env vars {', '.join(AZURE_PAT_ENV_VARS + OPENAI_API_KEY_ENV_VARS + ('CAPAMEDIA_ARTIFACT_TOKEN',))}."
+            f"Usa opciones directas o las env vars {', '.join(AZURE_PAT_ENV_VARS + CODEX_API_KEY_ENV_VARS + ('CAPAMEDIA_ARTIFACT_TOKEN',))}."
         )
         raise typer.Exit(1)
 
@@ -148,9 +151,22 @@ def bootstrap(
             results.append(("Fabrics", "fail", f"setup fallo (exit {exc.exit_code})"))
             raise
 
-    if resolved_openai:
+    try:
+        mcp.setup_mcp(
+            scope=scope,
+            config=None,
+            root=None,
+            force=force,
+            required=False,
+        )
+        results.append(("Codex MCP", "ok", f"server `capamedia` registrado en scope={scope}"))
+    except typer.Exit as exc:
+        results.append(("Codex MCP", "fail", f"setup fallo (exit {exc.exit_code})"))
+        raise
+
+    if resolved_codex:
         try:
-            detail = _codex_login_with_api_key(resolved_openai)
+            detail = _codex_login_with_api_key(resolved_codex)
             results.append(("Codex auth", "ok", detail))
         except RuntimeError as exc:
             results.append(("Codex auth", "fail", str(exc)))
@@ -170,7 +186,8 @@ def bootstrap(
         payload = {
             "CAPAMEDIA_ARTIFACT_TOKEN": resolved_artifact or "",
             "CAPAMEDIA_AZDO_PAT": resolved_azure or "",
-            "OPENAI_API_KEY": resolved_openai or "",
+            "CODEX_API_KEY": resolved_codex or "",
+            "OPENAI_API_KEY": resolved_codex or "",
         }
         written = _write_env_file(env_file, payload)
         results.append(("Env file", "ok", str(written)))

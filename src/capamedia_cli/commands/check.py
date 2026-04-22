@@ -8,11 +8,11 @@ Ejecuta todos los BLOQUES de `core/checklist_rules.py` sin AI y genera:
 
 from __future__ import annotations
 
-import yaml
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
