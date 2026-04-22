@@ -44,6 +44,7 @@ from capamedia_cli.commands import (
     review,
     status,
     uninstall,
+    update as update_cmd,
     upgrade,
     validate,
     version as version_cmd,
@@ -84,6 +85,7 @@ def main(
 
 app.command("install")(install.install_toolchain)
 app.command("uninstall")(uninstall.uninstall_command)
+app.command("update")(update_cmd.update_command)
 app.command("version")(version_cmd.version_command)
 app.command("status")(status.status_command)
 app.command("check-install")(check_install.check_install)

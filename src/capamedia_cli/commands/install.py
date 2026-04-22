@@ -189,21 +189,184 @@ def _detect_os() -> str:
     return "linux"
 
 
+# URLs de descarga manual para cuando ningun package manager responde.
+# El user puede bajar el instalador directo desde la pagina oficial.
+MANUAL_DOWNLOAD_URLS: dict[str, str] = {
+    "Git": "https://git-scm.com/download/win",
+    "Java 21 (Eclipse Temurin)": "https://adoptium.net/temurin/releases/?version=21",
+    "Gradle": "https://gradle.org/releases/",
+    "Node.js LTS (requerido para MCP Fabrics via npx)": "https://nodejs.org/en/download",
+    "Python 3.12": "https://www.python.org/downloads/",
+    "uv (Python package manager)": "https://astral.sh/uv/install.ps1",
+    "VS Code": "https://code.visualstudio.com/download",
+    "Docker Desktop": "https://www.docker.com/products/docker-desktop/",
+}
+
+
+def _winget_available() -> bool:
+    return shutil.which("winget") is not None
+
+
+def _scoop_available() -> bool:
+    return shutil.which("scoop") is not None
+
+
+def _choco_available() -> bool:
+    return shutil.which("choco") is not None
+
+
 def _get_installer_command(package: Package, os_name: str) -> list[str] | None:
+    """Devuelve el comando de install apropiado segun OS + package manager
+    disponible. Prioridad en Windows: winget > scoop > choco."""
     if os_name == "windows" and package.windows_install_command:
         return package.windows_install_command
     if os_name == "macos" and package.macos_install_command:
         return package.macos_install_command
     if os_name == "linux" and package.linux_install_command:
         return package.linux_install_command
-    if os_name == "windows" and package.winget_id:
-        return ["winget", "install", "--id", package.winget_id, "--accept-source-agreements", "--accept-package-agreements", "-e"]
+
+    if os_name == "windows":
+        if package.winget_id and _winget_available():
+            return [
+                "winget",
+                "install",
+                "--id",
+                package.winget_id,
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+                "-e",
+            ]
+        # Fallback a scoop si winget no esta
+        if package.winget_id and _scoop_available():
+            # scoop usa nombres propios, no winget IDs. Heuristica por id comun.
+            scoop_name = {
+                "Gradle.Gradle": "gradle",
+                "Microsoft.VisualStudioCode": "vscode",
+                "Git.Git": "git",
+                "OpenJS.NodeJS.LTS": "nodejs-lts",
+                "Docker.DockerDesktop": "docker",
+                "EclipseAdoptium.Temurin.21.JDK": "temurin21-jdk",
+                "astral-sh.uv": "uv",
+                "Python.Python.3.12": "python",
+            }.get(package.winget_id)
+            if scoop_name:
+                return ["scoop", "install", scoop_name]
+        # Fallback a choco si ni winget ni scoop
+        if package.winget_id and _choco_available():
+            choco_name = {
+                "Gradle.Gradle": "gradle",
+                "Microsoft.VisualStudioCode": "vscode",
+                "Git.Git": "git",
+                "OpenJS.NodeJS.LTS": "nodejs-lts",
+                "Docker.DockerDesktop": "docker-desktop",
+                "EclipseAdoptium.Temurin.21.JDK": "temurin21",
+            }.get(package.winget_id)
+            if choco_name:
+                return ["choco", "install", "-y", choco_name]
+        return None
     if os_name == "macos" and package.brew_id:
         parts = package.brew_id.split()
         return ["brew", "install", *parts]
     if os_name == "linux" and package.apt_id:
         return ["sudo", "apt-get", "install", "-y", package.apt_id]
     return None
+
+
+def _ensure_winget_on_windows() -> bool:
+    """En Windows: si winget no esta, intenta instalarlo automatico
+    descargando el `App Installer` (.msixbundle) desde https://aka.ms/getwinget
+    y registrandolo con `Add-AppxPackage`. Si falla, retorna False y el
+    caller cae al fallback (scoop / choco / URLs manuales).
+
+    Solo intenta en Windows. En macOS/Linux no aplica (no existe winget).
+    """
+    if platform.system().lower() != "windows":
+        return False
+    if _winget_available():
+        return True
+
+    console.print(
+        "[yellow]winget no encontrado. Intentando instalarlo "
+        "automaticamente (App Installer)...[/yellow]"
+    )
+
+    ps_script = (
+        "$ProgressPreference = 'silentlyContinue'; "
+        "$tmp = Join-Path $env:TEMP 'winget-appinstaller.msixbundle'; "
+        "Invoke-WebRequest -Uri https://aka.ms/getwinget -OutFile $tmp; "
+        "Add-AppxPackage -Path $tmp"
+    )
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        console.print(f"  [red]Error invocando PowerShell: {exc}[/red]")
+        _print_manual_winget_install()
+        return False
+
+    if result.returncode == 0 and _winget_available():
+        console.print("  [green]OK[/green] winget instalado correctamente.")
+        return True
+
+    err = (result.stderr or "").strip()[:300]
+    console.print(
+        "  [red]No se pudo instalar winget automatico[/red]"
+        + (f" ({err})" if err else "")
+    )
+    _print_manual_winget_install()
+    return False
+
+
+def _print_manual_winget_install() -> None:
+    console.print(
+        "\n[yellow]Instalar winget manual:[/yellow]\n"
+        "  Opcion A - Microsoft Store:\n"
+        "    1. Abri Microsoft Store\n"
+        "    2. Busca 'App Installer' (publisher: Microsoft Corporation)\n"
+        "    3. Install / Update\n"
+        "  Opcion B - PowerShell (copiar/pegar):\n"
+        "    $ProgressPreference='silentlyContinue'\n"
+        "    Invoke-WebRequest -Uri https://aka.ms/getwinget -OutFile $env:TEMP\\wg.msixbundle\n"
+        "    Add-AppxPackage $env:TEMP\\wg.msixbundle\n"
+        "  Opcion C - scoop (alternativa):\n"
+        "    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned\n"
+        "    irm get.scoop.sh | iex\n"
+    )
+
+
+def _warn_if_no_package_manager(os_name: str) -> None:
+    """Imprime warning arriba de la tabla si no hay package manager disponible.
+
+    En Windows, antes del warning intenta auto-instalar winget. Si el intento
+    es exitoso, el warning no se imprime (el flujo sigue normal).
+    """
+    if os_name != "windows":
+        return
+
+    # Intento auto-install de winget si falta
+    if not _winget_available():
+        _ensure_winget_on_windows()
+
+    # Re-evaluar tras el intento
+    if _winget_available() or _scoop_available() or _choco_available():
+        return
+    console.print(
+        "[yellow]ATENCION:[/yellow] no hay `winget`, `scoop` ni `choco` "
+        "disponibles. Los paquetes faltantes van a requerir descarga "
+        "MANUAL. La tabla va a mostrar la URL de cada uno.\n"
+    )
 
 
 def _install_sonarlint_extension() -> bool:
@@ -244,11 +407,15 @@ def install_toolchain(
         )
     )
 
+    _warn_if_no_package_manager(os_name)
+
     # Scan what's installed
     table = Table(title="Estado actual del toolchain", show_lines=False)
     table.add_column("Componente", style="cyan")
     table.add_column("Estado", style="bold")
     table.add_column("Accion", style="yellow")
+
+    manual_downloads: list[tuple[str, str]] = []
 
     to_install: list[Package] = []
     for pkg in PACKAGES:
@@ -265,7 +432,14 @@ def install_toolchain(
             table.add_row(pkg.name, "[red]falta[/red]", f"instalar via {cmd[0]}")
             to_install.append(pkg)
         else:
-            table.add_row(pkg.name, "[red]falta[/red]", f"manual ({pkg.note})")
+            url = MANUAL_DOWNLOAD_URLS.get(pkg.name, "")
+            if url:
+                table.add_row(
+                    pkg.name, "[red]falta[/red]", f"MANUAL: {url}"
+                )
+                manual_downloads.append((pkg.name, url))
+            else:
+                table.add_row(pkg.name, "[red]falta[/red]", f"manual ({pkg.note})")
 
     console.print(table)
 
@@ -316,7 +490,27 @@ def install_toolchain(
         console.print(f"\n[red]Fallaron {len(failures)} instalaciones:[/red]")
         for f in failures:
             console.print(f"  [red]- {f}[/red]")
-        console.print("Reintenta manualmente o consulta los docs del paquete.")
+
+        # Dar URLs de descarga manual para los que fallaron
+        failed_names = {
+            f.split(" (")[0] for f in failures
+        }  # quitar " (error)" del final
+        manual_retry: list[tuple[str, str]] = [
+            (pkg.name, MANUAL_DOWNLOAD_URLS[pkg.name])
+            for pkg in PACKAGES
+            if pkg.name in failed_names and pkg.name in MANUAL_DOWNLOAD_URLS
+        ]
+        if manual_retry:
+            console.print(
+                "\n[bold yellow]Descarga manual (pegar URL en el browser):[/bold yellow]"
+            )
+            for name, url in manual_retry:
+                console.print(f"  [cyan]{name}[/cyan]: {url}")
+            console.print(
+                "\n[dim]Tip: si todos los fallos son 'WinError 2: archivo no "
+                "encontrado', te falta el package manager (winget/scoop/choco). "
+                "Instala uno o descarga manual con las URLs de arriba.[/dim]"
+            )
     else:
         console.print("\n[bold green]Toolchain instalado correctamente.[/bold green]")
 
@@ -354,8 +548,10 @@ def _print_manual_steps() -> None:
                 "[bold]Pasos manuales (no automatizables):[/bold]\n\n"
                 "1. [cyan]Auth bootstrap[/cyan] (recomendado para correr batch unattended)\n"
                 "   -> corre: [bold]capamedia auth bootstrap --scope global[/bold]\n"
-                "      y pasa `--artifact-token`, `--openai-api-key` o usa env vars segun necesites\n"
-                "      Azure DevOps puede quedar por env (`CAPAMEDIA_AZDO_PAT`) o por GCM interactivo\n\n"
+                "      y pasa `--artifact-token` y `--azure-pat` (los 2 PATs de Azure DevOps)\n"
+                "      No se necesita OpenAI API key: el engine headless consume la\n"
+                "      suscripcion del usuario (Claude Max o ChatGPT Plus/Pro).\n"
+                "      Hacer `claude login` o `codex login` UNA vez antes del bootstrap.\n\n"
                 "2. [cyan]SonarCloud binding[/cyan]\n"
                 "   -> abri VS Code, ve al sidebar de SonarQube\n"
                 "   -> 'Add SonarQube Cloud Connection' - login con Azure DevOps\n"

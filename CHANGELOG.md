@@ -4,6 +4,57 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.16.0] - 2026-04-22
+
+### Added - Comando `update` + auto-install de winget + URLs manuales
+
+**`capamedia update`** nuevo comando para actualizar el CLI:
+
+- Detecta la fuente de instalacion:
+  - `uv tool` -> `uv tool upgrade capamedia-cli`
+  - `pip install -e .` desde source git -> `git pull` + `pip install -e . --force-reinstall`
+  - `pip install capamedia-cli` registry -> `pip install --upgrade capamedia-cli`
+- Flag `--dry-run` para ver los comandos sin ejecutar.
+- Al terminar, pide al user abrir shell nueva para ver la version
+  actualizada (el interprete ya cargo la vieja en esta sesion).
+
+### Changed - `install`: auto-install de winget + URLs manuales de fallback
+
+**Problema real reportado**: user corrio `capamedia install` y fallaron
+Gradle + VS Code con `[WinError 2] El sistema no puede encontrar el
+archivo especificado`. Causa: `winget` no estaba en PATH.
+
+**Fix 1** - `_ensure_winget_on_windows()`: al inicio de `install_toolchain`
+en Windows, si `winget` no esta, intenta instalarlo descargando el
+`App Installer` msixbundle desde `https://aka.ms/getwinget` y
+registrandolo con `Add-AppxPackage`. Si falla, imprime instrucciones
+manuales (3 opciones: Microsoft Store / PowerShell / scoop).
+
+**Fix 2** - `_get_installer_command()` con fallback cascada en Windows:
+`winget > scoop > choco`. Mapea IDs entre gestores (ej `Gradle.Gradle`
+winget = `gradle` scoop = `gradle` choco).
+
+**Fix 3** - URLs de descarga manual en la tabla. Nuevo dict
+`MANUAL_DOWNLOAD_URLS` con la pagina oficial de cada paquete. Si ningun
+package manager matchea, la columna `Accion` muestra `MANUAL: <url>`
+en vez de un generico.
+
+**Fix 4** - si alguna instalacion falla con `WinError 2` (o similar),
+debajo del reporte de fallas se imprimen las URLs de retry manual para
+copiar-pegar en el browser.
+
+**Fix 5** - `_print_manual_steps()` limpiado:
+- Saco mencion a `--openai-api-key` (NO usamos tokens API pagos)
+- Clarifica que con Claude Max o ChatGPT Plus/Pro alcanza
+- Explicita que `claude login` / `codex login` se hacen antes del bootstrap
+
+### Testing
+
+- **344/344 tests PASS**.
+- Ruff limpio.
+
+---
+
 ## [0.15.2] - 2026-04-22
 
 ### Changed - `capamedia install` reconoce Claude Code CLI como alternativa a Codex
