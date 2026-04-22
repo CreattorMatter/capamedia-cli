@@ -103,16 +103,26 @@ def _run_official_validator(project_path: Path) -> tuple[int, int, str]:
             check=False,
             capture_output=True,
             text=True,
+            # CRITICO Windows + Python 3.14: sin encoding explicito,
+            # subprocess decodifica stdout con cp1252 y explota con
+            # UnicodeDecodeError al leer los emojis (✓/✗) del validador.
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         console.print(f"[red]fallo invocando validador oficial:[/red] {exc}")
         return (0, 0, "")
+    except UnicodeDecodeError as exc:
+        # Salvavidas extra por si el env no toma utf-8 en algun Windows raro.
+        console.print(f"[red]validador oficial: problema de encoding:[/red] {exc}")
+        return (0, 0, "")
 
     # El script imprime "Resultado: N/M checks pasados" al final, pero con
     # codigos ANSI de color que rompen el match directo. Los limpiamos.
     ansi_re = re.compile(r"\x1b\[[0-9;]*m")
-    clean_stdout = ansi_re.sub("", result.stdout)
+    raw_stdout = result.stdout or ""
+    clean_stdout = ansi_re.sub("", raw_stdout)
     m = re.search(r"Resultado:\s*(\d+)\s*/\s*(\d+)\s*checks", clean_stdout)
     if m:
         passed = int(m.group(1))

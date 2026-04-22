@@ -4,6 +4,42 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.18.1] - 2026-04-22
+
+### Fixed - `capamedia review` Fase 4 crasheaba con `UnicodeDecodeError` en Windows
+
+**Bug reportado por Julian**: corriendo `capamedia review` en `wstecnicos0008`,
+la Fase 4 (validador oficial del banco) explotaba con:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x90 in position 13:
+character maps to <undefined>
+TypeError: expected string or bytes-like object, got 'NoneType'
+```
+
+**Causa**: `_run_official_validator` invocaba `subprocess.run(..., text=True)`
+sin pasar `encoding` explicito. En Windows + Python 3.14, el default cae a
+`cp1252` y no puede decodificar los emojis UTF-8 (✓/✗) del validador oficial.
+El subprocess devolvia `stdout=None` y el `ansi_re.sub()` crasheaba.
+
+**Fix**:
+- `subprocess.run(..., encoding="utf-8", errors="replace")` explicito.
+- Guard `raw_stdout = result.stdout or ""` antes del regex.
+- Try/except adicional para `UnicodeDecodeError` como salvavidas.
+
+**Tests de regresion** en `test_review.py`:
+- `test_run_official_survives_none_stdout`: stdout=None no crashea.
+- `test_run_official_survives_unicode_decode_error`: UnicodeDecodeError
+  retorna (0, 0, "").
+- `test_run_official_passes_utf8_encoding`: verifica que la llamada incluye
+  `encoding="utf-8"` y `errors="replace"`.
+
+**Estado pre-fix del review de wstecnicos0008**:
+- Fase 1: 0 fixes, NEEDS_HUMAN
+- Fase 2: regla 8 aplicada (lib-bnc-api-client normalizado de alpha a 1.1.0)
+- Fase 3: 20 PASS, 2 MEDIUM, 0 HIGH/LOW → READY_WITH_FOLLOW_UP
+- Fase 4: crash ← fix aqui
+
 ## [0.18.0] - 2026-04-22
 
 ### Added - Catalogo embebido de `generalservices.properties` + `catalogoaplicaciones.properties`

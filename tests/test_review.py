@@ -140,6 +140,68 @@ def test_run_official_returns_zero_on_timeout(tmp_path: Path) -> None:
     _ = report  # ruff guard
 
 
+def test_run_official_survives_none_stdout(tmp_path: Path) -> None:
+    """Regresion v0.18.1: si subprocess devuelve stdout=None (Windows cp1252),
+    _run_official_validator no debe crashear con TypeError."""
+
+    class _CompletedProcNoneStdout:
+        stdout = None
+        stderr = ""
+        returncode = 1
+
+    with patch(
+        "capamedia_cli.commands.review.subprocess.run",
+        return_value=_CompletedProcNoneStdout(),
+    ):
+        passed, total, _ = _run_official_validator(tmp_path)
+
+    # Sin stdout no podemos parsear el resultado, pero no debemos crashear
+    assert passed == 0
+    assert total == 0
+
+
+def test_run_official_survives_unicode_decode_error(tmp_path: Path) -> None:
+    """Regresion v0.18.1: si subprocess levanta UnicodeDecodeError (Windows
+    cp1252 con emojis UTF-8), el validador debe devolver 0/0 en vez de crashear."""
+
+    with patch(
+        "capamedia_cli.commands.review.subprocess.run",
+        side_effect=UnicodeDecodeError("charmap", b"\x90", 0, 1, "test"),
+    ):
+        passed, total, report = _run_official_validator(tmp_path)
+
+    assert passed == 0
+    assert total == 0
+    assert report == ""
+
+
+def test_run_official_passes_utf8_encoding(tmp_path: Path) -> None:
+    """Regresion v0.18.1: _run_official_validator DEBE pasar encoding='utf-8'
+    al subprocess para evitar el bug de cp1252 en Windows."""
+
+    class _CompletedProc:
+        stdout = "Resultado: 5/9 checks pasados\n"
+        stderr = ""
+        returncode = 1
+
+    with patch(
+        "capamedia_cli.commands.review.subprocess.run",
+        return_value=_CompletedProc(),
+    ) as mock_run:
+        _run_official_validator(tmp_path)
+
+    # Verificar que la llamada incluyo encoding explicito
+    assert mock_run.called
+    call_kwargs = mock_run.call_args.kwargs
+    assert call_kwargs.get("encoding") == "utf-8", (
+        "subprocess.run DEBE recibir encoding='utf-8' para evitar el bug de "
+        "cp1252 en Windows con Python 3.14"
+    )
+    assert call_kwargs.get("errors") == "replace", (
+        "subprocess.run DEBE recibir errors='replace' como salvavidas extra"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Comando review - end-to-end con mocks
 # ---------------------------------------------------------------------------
