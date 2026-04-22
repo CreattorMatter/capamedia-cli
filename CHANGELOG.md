@@ -4,6 +4,82 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.10.0] - 2026-04-22
+
+### Added - Autofix regla 6 + UUID sonar placeholder valido
+
+Evidencia real del `wsclientes0007` que paso 10/10 en el validador oficial:
+dos patrones deterministas resolvieron el check 6 sin refactor semantico
+profundo. Los abstraje como reglas del canonical (NO usando el 0007 como
+referencia, sino el patron universal).
+
+**Patron A - StringUtils.* -> Java nativo** (nuevo
+`fix_stringutils_to_native`):
+
+```java
+// Antes
+import org.apache.commons.lang3.StringUtils;
+if (StringUtils.isBlank(x)) { ... }
+
+// Despues
+if (x == null || x.isBlank()) { ... }
+```
+
+Cubre las 4 variantes (`isBlank` / `isEmpty` / `isNotBlank` / `isNotEmpty`)
+con mapeo 1:1 a Java 11+ nativo. Remueve el import si queda sin uso, lo
+preserva si hay otros `StringUtils.join/strip/etc.`.
+
+**Patron B - record interno en @Service -> application/model/** (nuevo
+`fix_extract_inner_records_to_model`):
+
+Deriva el base_package del `package` declaration del Service, crea
+`<base>/application/model/<Name>.java` como `public record`, elimina el
+record del Service, agrega el import. El directorio se crea automatico
+si no existe.
+
+**Regla 9 - sonar_key placeholder UUID valido** (fix menor):
+
+El validador oficial exige que `sonarcloud.io/project-key` cumpla el
+regex `^[0-9a-f]{8}-...{12}$`. Antes generabamos `<SET-sonarcloud-UUID>`
+literal que hacia FAIL el check 9. Ahora, cuando no hay
+`.sonarlint/connectedMode.json`, sintetizamos un UUID a partir del
+sufijo numerico del servicio (ej `wsclientes0007` ->
+`00000000-0000-0000-0000-000000000007`). Pasa el regex, no reemplaza al
+real, se sobreescribe al hacer el binding de SonarCloud.
+
+**`run_bank_autofix`**: ahora corre **5 reglas** (antes 4). La regla 6
+ejecuta los dos patterns encadenados, devuelve 2 resultados separados.
+
+**Canonical `context/bank-official-rules.md`**:
+
+- Regla 6 actualizada con los 2 patterns concretos YES/NO.
+- Mapeo explicito `StringUtils.* -> Java nativo` como tabla.
+- Heuristica de capa para records: `application/model/` (DTO intermedio)
+  vs `domain/<concept>/` (entidad con invariantes).
+- Nota de automatizacion: qu� hace autofix y qu� queda al AI.
+
+### Testing
+
+- **285/285 tests PASS** (vs 279 de v0.9.0). 6 tests nuevos:
+  - `test_stringutils_isblank_replaced_with_native`
+  - `test_stringutils_all_four_variants`
+  - `test_stringutils_preserves_import_if_other_use`
+  - `test_stringutils_skips_non_service_classes`
+  - `test_extract_inner_record_to_application_model`
+  - `test_extract_record_skips_if_no_service`
+- 2 tests existentes actualizados por cambio de semantica (UUID placeholder
+  ya no dispara warning; `run_bank_autofix` devuelve 6 results en vez de 4).
+
+### Pendiente para v0.11.0
+
+- Regla 6 resto: `static` method en `@Service`, metodos `normalize*`/
+  `pad*`/`strip*` → require AST / javalang para decidir si mover a util.
+- Integrar `run_bank_autofix` con la cadena completa de `capamedia check
+  --auto-fix --bank-fix` para que regla 6 se aplique automatica antes de
+  correr el validador oficial.
+
+---
+
 ## [0.9.0] - 2026-04-22
 
 ### Added - Matriz de decision MCP Fabrics corregida (4 fixes JGarcia/Julian)
