@@ -43,7 +43,13 @@ console = Console()
 
 @dataclass(frozen=True)
 class Package:
-    """A package that can be auto-installed via a package manager."""
+    """A package that can be auto-installed via a package manager.
+
+    `alternative_checks`: lista de (nombre_legible, check_command) que tambien
+    satisfacen el requisito. Util para componentes con alternativas como
+    Claude Code CLI vs Codex CLI — si alguno de los dos esta, la dependencia
+    esta cumplida y no hay que instalar el otro.
+    """
 
     name: str
     check_command: list[str]
@@ -55,14 +61,15 @@ class Package:
     linux_install_command: list[str] | None = None
     optional: bool = False
     note: str = ""
+    alternative_checks: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
-    def is_installed(self) -> bool:
-        exe = self.check_command[0]
+    def _binary_responds(self, cmd: list[str] | tuple[str, ...]) -> bool:
+        exe = cmd[0]
         if shutil.which(exe) is None:
             return False
         try:
             subprocess.run(
-                self.check_command,
+                list(cmd),
                 capture_output=True,
                 check=False,
                 timeout=10,
@@ -70,6 +77,23 @@ class Package:
             return True
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
+
+    def detected_alternative(self) -> str | None:
+        """Retorna el nombre legible de la alternativa detectada, o None."""
+        if self._binary_responds(self.check_command):
+            return None  # primario OK, sin alternativa
+        for alt_name, alt_cmd in self.alternative_checks:
+            if self._binary_responds(alt_cmd):
+                return alt_name
+        return None
+
+    def is_installed(self) -> bool:
+        """True si el primario o cualquier alternativa responde."""
+        if self._binary_responds(self.check_command):
+            return True
+        return any(
+            self._binary_responds(alt_cmd) for _, alt_cmd in self.alternative_checks
+        )
 
 
 PACKAGES: list[Package] = [
@@ -102,12 +126,23 @@ PACKAGES: list[Package] = [
         apt_id="nodejs",
     ),
     Package(
-        name="Codex CLI",
+        name="AI engine CLI (Claude Code o Codex)",
+        # Primario: Codex (npm install automatico). Pero si el usuario ya
+        # tiene Claude Code CLI, la dependencia esta cumplida y NO se
+        # instala Codex — consume la suscripcion que ya tiene (Claude Max
+        # o ChatGPT Plus/Pro; nunca tokens API pagos).
         check_command=["codex", "--version"],
+        alternative_checks=(
+            ("Claude Code CLI", ("claude", "--version")),
+        ),
         windows_install_command=["npm", "install", "-g", "@openai/codex"],
         macos_install_command=["npm", "install", "-g", "@openai/codex"],
         linux_install_command=["npm", "install", "-g", "@openai/codex"],
-        note="Despues autentica con `capamedia auth bootstrap` o `codex login`",
+        note=(
+            "Si ya tenes Claude Code (`claude --version` responde), NO se "
+            "instala Codex. Con uno alcanza. Despues hacer `claude login` "
+            "o `codex login` con tu suscripcion."
+        ),
     ),
     Package(
         name="Python 3.12",
@@ -221,7 +256,9 @@ def install_toolchain(
             table.add_row(pkg.name, "[dim]saltado[/dim]", "--skip-optional")
             continue
         if pkg.is_installed():
-            table.add_row(pkg.name, "[green]OK[/green]", "-")
+            alt = pkg.detected_alternative()
+            action = f"[dim]{alt} detectado[/dim]" if alt else "-"
+            table.add_row(pkg.name, "[green]OK[/green]", action)
             continue
         cmd = _get_installer_command(pkg, os_name)
         if cmd:

@@ -4,6 +4,43 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.15.2] - 2026-04-22
+
+### Changed - `capamedia install` reconoce Claude Code CLI como alternativa a Codex
+
+Antes, el toolchain pedia Codex CLI obligatorio (`npm install -g @openai/
+codex`) incluso cuando el usuario ya tenia Claude Code CLI funcionando.
+Ahora son **alternativas intercambiables**: con **uno** alcanza.
+
+**Cambios:**
+
+- `Package` dataclass recibe nuevo campo
+  `alternative_checks: tuple[tuple[str, tuple[str, ...]], ...]`. Cada
+  elemento = (nombre_legible, check_command).
+- Nuevo metodo `Package.detected_alternative()` que devuelve el nombre
+  legible de la alternativa detectada (o `None` si el primario esta
+  presente).
+- Package "Codex CLI" renombrado a "AI engine CLI (Claude Code o Codex)":
+  - Primario: `codex --version` (auto-install via `npm install -g
+    @openai/codex`)
+  - Alternativa: `claude --version` (Claude Code CLI, no se auto-instala
+    porque requiere flujo de auth manual)
+- Tabla de estado muestra `"Claude Code CLI detectado"` en la columna
+  `Accion` cuando la alternativa esta presente.
+- Note del package explicita que con **uno** alcanza y ambos consumen
+  suscripcion del usuario (Claude Max o ChatGPT Plus/Pro), NO tokens API.
+
+### Testing
+
+- **344/344 tests PASS** (+5 en `test_install_ai_engine.py`):
+  - Package configurado con claude como alternativa
+  - OK cuando solo claude presente -> `detected_alternative() == "Claude Code CLI"`
+  - OK cuando solo codex presente -> primario gana, `detected_alternative() == None`
+  - Fail cuando ninguno presente
+  - Primario gana sobre alternativa si ambos estan
+
+---
+
 ## [0.15.1] - 2026-04-22
 
 ### Fixed - Doc: comando de instalacion con `uv` + warning de PATH en Windows
