@@ -42,6 +42,7 @@ from capamedia_cli.commands import (
     init,
     install,
     upgrade,
+    validate,
 )
 
 console = Console()
@@ -86,6 +87,7 @@ app.command("check")(check.check_project)
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")
+app.add_typer(validate.app, name="validate-hexagonal", help="Validador oficial del banco (9 checks formales)")
 app.command("doctor")(doctor.doctor)
 app.command("upgrade")(upgrade.upgrade_project)
 

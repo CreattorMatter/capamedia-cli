@@ -4,6 +4,95 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.6.0] - 2026-04-22
+
+### Added - `validate-hexagonal` oficial del banco + WAS config extractor
+
+**`capamedia validate-hexagonal` — gate de PR sincronizado con el banco:**
+
+- Vendor-pinned del script oficial `validate_hexagonal.py` en
+  `data/vendor/`. Es el MISMO script que corren los reviewers en el PR;
+  si nosotros pasamos localmente, el gate automatico pasa.
+- 9 validaciones formales:
+  1. Capas `application`/`domain`/`infrastructure` + sin siblings
+  2. WSDL: 1 op -> REST+WebFlux | 2+ -> SOAP+MVC
+  3. `@BpTraceable` en controllers (excluye tests)
+  4. `@BpLogger` en services
+  5. Sin navegacion cruzada entre capas
+  6. Service business logic puro (scoring heuristico, threshold 3)
+  7. `application.yml` sin `${VAR:default}` (excluye `optimus.web.*`)
+  8. Gradle: `com.pichincha.bnc:lib-bnc-api-client:1.1.0` obligatoria
+  9. `catalog-info.yaml` con metadata, links, annotations, spec del banco
+- Subcomandos:
+  - `capamedia validate-hexagonal run <path>` — corrida completa + reporte md
+  - `capamedia validate-hexagonal summary <path>` — tabla resumida rich
+  - `capamedia validate-hexagonal sync --from <path>` — actualiza pin
+- Forza `PYTHONIOENCODING=utf-8` para que el output unicode no rompa Windows.
+
+**Baseline real** (corrida sobre `wsclientes0007`): **5/10 checks pasan**.
+Gaps reales: check 4 (`@BpLogger` faltante), check 6 (`isBlank` util en
+service), check 7 (6 variables con `${VAR:default}`), check 8
+(lib-bnc-api-client no declarada), check 9 (`catalog-info.yaml` con
+placeholders). Sin este gate, el PR se hubiera rechazado.
+
+**Delta vs nuestro checklist previo:**
+
+| Check oficial | Nuestro equivalente | Gap |
+|---|---|---|
+| 1 Capas | 1.1 capas hexagonales | igual, nosotros no valida siblings |
+| 2 WSDL framework | 0.2c framework vs ops | similar, ellos detectan mas paths |
+| 3 @BpTraceable | 2.1 @BpTraceable | IGUAL |
+| 4 @BpLogger | — | **FALTABA** |
+| 5 Sin navegacion | 1.5 app no importa infra + 1.2 | partial equivalent |
+| 6 Service business logic | — | **FALTABA** (el refactor SRP que Julian pidio) |
+| 7 yml sin defaults | 7.2 secrets env vars | distinto (ellos mas estricto) |
+| 8 Gradle lib | — | **FALTABA** |
+| 9 catalog-info.yaml | — | **FALTABA** |
+
+Nuestros checks propios (blocks 0, 5, 13, 14, 15) siguen aportando valor
+por encima del oficial (cross-check legacy vs migrado, BancsClientHelper
+exception wrapping, JPA+WebFlux, SonarLint binding, estructura de error).
+
+**`core/was_extractor.py` — config WAS critica (IBM WebSphere):**
+
+Los WAS del banco tienen **5 valores que la AI DEBE preservar exactos** o
+rompe clientes. Extractor determinista sobre:
+- `ibm-web-bnd.xml` → `virtual-host` (VHClientes / VHTecnicos / default_host)
+- `ibm-web-ext.xml` → `context-root` (WSClientes0010) + `reload-interval`
+- `web.xml` → `url-patterns` (`/soap/WSClientes0010Request`, `/*`) +
+  `servlet-classes` + `security-constraints` (deny TRACE/PUT/OPTIONS/DELETE/GET)
+
+**Hallazgos del batch-24** (11 WAS escaneados):
+- 3 virtual-hosts distintos: `VHClientes` (3 svc), `VHTecnicos` (1), `default_host` (7)
+- 11/11 WAS usan URL pattern `/soap/<SvcName>Request`
+- 10/11 WAS tienen `security-constraint` deny `TRACE/PUT/OPTIONS/DELETE/GET`
+- 0 WAS del batch tienen JPA (todos son SOAP wrappers a BANCS/UMPs)
+
+**Regla dura nueva:** si la AI cambia uno de estos 5 valores al migrar, se
+rompe el contrato con clientes en produccion. El extractor inyecta los
+valores al FABRICS_PROMPT para que la AI los preserve.
+
+### Testing
+
+- **249/249 tests PASS** (vs 239 de v0.5.0). Nuevos:
+  - `test_was_extractor.py` (10): happy path, target/ dir ignore,
+    virtual-host warnings, empty, partial, multiple url-patterns, render md + appendix.
+  - Smoke test `validate-hexagonal summary` sobre `wsclientes0007`
+    reproduce exactamente el resultado del script oficial.
+
+### Pendiente para v0.7.0
+
+- Integrar `was_extractor` al `clone` (step 8) para que genere
+  `WAS_CONFIG_<svc>.md` automatico.
+- Inyectar `render_was_config_prompt_appendix` al FABRICS_PROMPT y a
+  `_build_batch_migrate_prompt`.
+- Extender autofix para resolver checks 4, 7, 8 del oficial (todos
+  deterministas).
+- Extender `canonical audit` para verificar que las reglas nuevas del
+  script oficial esten en el canonical con MUST/NEVER.
+
+---
+
 ## [0.5.0] - 2026-04-22
 
 ### Added - Sprint 2 del plan "cero trabajo humano"
