@@ -800,6 +800,187 @@ def run_block_16(ctx: CheckContext) -> list[CheckResult]:
 # -- Main orchestrator -----------------------------------------------------
 
 
+# -- Block 17: Log transaccional (solo ORQ) --------------------------------
+#
+# Librería `com.pichincha.common:lib-event-logs-<mvc|webflux>:1.0.0` que
+# publica request/response al topico Kafka de auditoria.
+# Fuente: BPTPSRE-Librería Log Transaccional-220426-202920.pdf
+# Canonical: context/log-transaccional-orq.md
+#
+# Solo se activa si el proyecto parece ORQ (carpeta del proyecto contiene
+# prefix orq en el name, o catalog-info.yaml lo indica).
+
+
+def _looks_like_orq(ctx: CheckContext) -> bool:
+    """Heuristica: el proyecto es ORQ si el nombre termina en orq<NNNN> o
+    similar. Ej: `tnd-msa-sp-orqclientes0027`."""
+    name = ctx.migrated_path.name.lower()
+    return "orq" in name
+
+
+def run_block_17(ctx: CheckContext) -> list[CheckResult]:
+    """Block 17: Log transaccional para ORQs (solo activo si ORQ).
+
+    Checks:
+      17.1 - dependencia lib-event-logs-<framework> en build.gradle
+      17.2 - bloques spring.kafka + logging.event en application.yml
+      17.3 - logging.level.org.apache.kafka: OFF presente
+      17.4 - al menos 1 @EventAudit en adapters
+    """
+    if not _looks_like_orq(ctx):
+        # Skip block entero: el proyecto no es ORQ, las reglas no aplican.
+        return []
+
+    results: list[CheckResult] = []
+    root = ctx.migrated_path
+
+    # 17.1 dependencia lib-event-logs-*
+    gradle_text = ""
+    for gf in root.rglob("build.gradle"):
+        if "test" in gf.parts:
+            continue
+        try:
+            gradle_text += gf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+    has_webflux_logs = "lib-event-logs-webflux" in gradle_text
+    has_mvc_logs = "lib-event-logs-mvc" in gradle_text
+    if has_webflux_logs or has_mvc_logs:
+        variant = "webflux" if has_webflux_logs else "mvc"
+        results.append(
+            CheckResult(
+                "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
+                "pass",
+                detail=f"lib-event-logs-{variant}:1.0.0 presente",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
+                "fail", severity="high",
+                detail=(
+                    "ORQ sin `com.pichincha.common:lib-event-logs-webflux:1.0.0` "
+                    "(o -mvc) en build.gradle"
+                ),
+                suggested_fix=(
+                    "Agregar implementation 'com.pichincha.common:"
+                    "lib-event-logs-webflux:1.0.0' al bloque dependencies"
+                ),
+            )
+        )
+
+    # 17.2 / 17.3 bloques spring.kafka + logging.event en yml
+    yml_texts: list[str] = []
+    for y in root.rglob("application.yml"):
+        if any(p.lower() in {"test", "tests"} for p in y.parts[:-1]):
+            continue
+        try:
+            yml_texts.append(y.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+    full_yml = "\n".join(yml_texts)
+    has_spring_kafka = "spring:" in full_yml and "kafka:" in full_yml
+    has_logging_event = "logging:" in full_yml and "event:" in full_yml
+    has_kafka_off = re.search(
+        r"logging:\s*(?:[^\n]*\n\s+)*level:\s*(?:[^\n]*\n\s+)*org:\s*"
+        r"(?:[^\n]*\n\s+)*apache:\s*(?:[^\n]*\n\s+)*kafka:\s*OFF",
+        full_yml,
+    ) is not None or ("apache:" in full_yml and "kafka: OFF" in full_yml)
+
+    if has_spring_kafka and has_logging_event:
+        results.append(
+            CheckResult(
+                "17.2", "Block 17", "spring.kafka + logging.event en yml",
+                "pass", detail="bloques presentes",
+            )
+        )
+    else:
+        missing = []
+        if not has_spring_kafka:
+            missing.append("spring.kafka")
+        if not has_logging_event:
+            missing.append("logging.event")
+        results.append(
+            CheckResult(
+                "17.2", "Block 17", "spring.kafka + logging.event en yml",
+                "fail", severity="high",
+                detail=f"faltan bloques: {', '.join(missing)}",
+                suggested_fix=(
+                    "Copiar los bloques del canonical "
+                    "`context/log-transaccional-orq.md` a application.yml"
+                ),
+            )
+        )
+
+    if has_kafka_off:
+        results.append(
+            CheckResult(
+                "17.3", "Block 17", "logging.level.org.apache.kafka: OFF",
+                "pass", detail="Kafka logs apagados en el pod",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "17.3", "Block 17", "logging.level.org.apache.kafka: OFF",
+                "fail", severity="medium",
+                detail="el pod se va a llenar de logs Kafka",
+                suggested_fix=(
+                    "Agregar en application.yml: logging.level.org.apache.kafka: OFF"
+                ),
+            )
+        )
+
+    # 17.4 @EventAudit en al menos 1 adapter
+    event_audit_hits = 0
+    adapter_files = 0
+    for java in root.rglob("*.java"):
+        if "test" in [p.lower() for p in java.parts]:
+            continue
+        if "adapter" not in [p.lower() for p in java.parts]:
+            continue
+        adapter_files += 1
+        try:
+            text = java.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "@EventAudit" in text:
+            event_audit_hits += 1
+
+    if event_audit_hits > 0:
+        results.append(
+            CheckResult(
+                "17.4", "Block 17", "@EventAudit en adapters",
+                "pass",
+                detail=f"{event_audit_hits}/{adapter_files} adapter(s) anotados",
+            )
+        )
+    elif adapter_files == 0:
+        results.append(
+            CheckResult(
+                "17.4", "Block 17", "@EventAudit en adapters",
+                "pass",
+                detail="sin adapters en el proyecto (skip)",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "17.4", "Block 17", "@EventAudit en adapters",
+                "fail", severity="high",
+                detail=f"0/{adapter_files} adapter(s) con @EventAudit",
+                suggested_fix=(
+                    'Agregar @EventAudit(service="<SvcName>", '
+                    'method="<OpName>", type=AuditType.T) al metodo que invoca '
+                    "downstream en cada adapter"
+                ),
+            )
+        )
+
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
@@ -810,6 +991,7 @@ ALL_BLOCKS = [
     ("Block 14", run_block_14),
     ("Block 15", run_block_15),
     ("Block 16", run_block_16),
+    ("Block 17", run_block_17),
 ]
 
 

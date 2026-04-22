@@ -1,6 +1,7 @@
 ---
 name: migrador
-description: Ejecuta la migracion completa de un servicio legacy a Java Spring Boot hexagonal OLA1 con loop de autocorreccion
+description: Ejecuta la migracion completa de un servicio legacy a Java Spring Boot
+  hexagonal OLA1 con loop de autocorreccion
 tools: Read Glob Grep Bash Edit Write Agent
 ---
 

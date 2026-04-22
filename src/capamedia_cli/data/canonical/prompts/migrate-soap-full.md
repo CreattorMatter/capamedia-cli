@@ -2308,6 +2308,15 @@ Si el servicio consume backends adicionales (DataPower, WSO2, WAS, etc.), agrega
 
 **MUST follow the gold standard wsclientes0015 structure EXACTLY.**
 
+**MANDATORY RULE — All legacy config variables in application.yml:**
+Every configuration variable identified in the ANALYSIS (Section 15 "Service Configuration") — from the service itself AND from its UMP dependencies — MUST have a corresponding entry in `application.yml`. This includes variables from `.properties` files, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`, and `CatalogoAplicaciones.properties`.
+
+- **Functional values** (max records, resource names, component names, business timeouts, lengths, prefixes, flags): commit as literals or with inline default `${CCC_VAR:value}` when the value is known from the legacy code or config files.
+- **Secrets and environment-dependent values** (DB URLs, passwords, tokens, credentials): use `${CCC_*}` WITHOUT defaults. Each `${CCC_*}` MUST have a corresponding entry in ALL 3 helm files (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`).
+- **NEVER fabricate values.** Only use values extracted from the legacy code, `.properties` files, CSV files, or XML config files. If the value is not available, use `${CCC_*}` and add a YAML comment: `# valor no disponible — obtener de <fuente>`.
+- **NEVER leave a variable undocumented.** If the ANALYSIS lists a property key, it MUST appear in `application.yml`.
+- **Only declare in Helm the `${CCC_*}` variables that are actually referenced in `application.yml`.** No orphan variables.
+
 **Required structure (in this order):**
 1. `spring.application.name`
 2. `app.normalization.*` (or service-specific config) -- only if needed; if legacy uses `GestionarRecursoConfigurable`, resolve the values from the local CSV `ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`

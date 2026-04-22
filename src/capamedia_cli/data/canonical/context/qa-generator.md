@@ -1,6 +1,7 @@
 ---
 name: qa-generator
-description: Genera artefactos QA completos (casos de uso, Karate features, k6 scripts) para un servicio migrado
+description: Genera artefactos QA completos (casos de uso, Karate features, k6 scripts)
+  para un servicio migrado
 tools: Read Glob Grep Bash Write
 ---
 

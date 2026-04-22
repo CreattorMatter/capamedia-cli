@@ -2431,9 +2431,18 @@ public class CatalogExceptionConstants {
 
 #### 4.13 application.yml
 
+**MANDATORY RULE — All legacy config variables in application.yml:**
+Every configuration variable identified in the ANALYSIS (Section 15 "Service Configuration") — from the service itself AND from its UMP dependencies — MUST have a corresponding entry in `application.yml`. This includes variables from `.properties` files, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`, and `CatalogoAplicaciones.properties`.
+
+- **Functional values** (max records, resource names, component names, business timeouts, lengths, prefixes, flags): commit as literals or with inline default `${CCC_VAR:value}` when the value is known from the legacy code or config files.
+- **Secrets and environment-dependent values** (DB URLs, passwords, tokens, credentials): use `${CCC_*}` WITHOUT defaults. Each `${CCC_*}` MUST have a corresponding entry in ALL 3 helm files (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`).
+- **NEVER fabricate values.** Only use values extracted from the legacy code, `.properties` files, CSV files, or XML config files. If the value is not available, use `${CCC_*}` and add a YAML comment: `# valor no disponible — obtener de <fuente>`.
+- **NEVER leave a variable undocumented.** If the ANALYSIS lists a property key, it MUST appear in `application.yml`.
+- **Only declare in Helm the `${CCC_*}` variables that are actually referenced in `application.yml`.** No orphan variables.
+
 If the ANALYSIS reported `GestionarRecursoConfigurable`, create the corresponding service-specific config block in `application.yml` and resolve it from the local CSV `ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`.
 
-Rules:
+Additional rules for configurables:
 - Non-secret functional values (lengths, prefixes, booleans, cache durations, business timeouts) may be committed as literals.
 - Secrets or environment-dependent values must stay as `${CCC_*}` and be declared in `helm/*.yml`.
 - NEVER leave a configurable as `TBD` if the field exists in the local CSV.

@@ -308,6 +308,8 @@ Scan the project for evidence of database usage:
 
 ### Step E.3: IIB configuration patterns (only if source type is IIB)
 
+**MANDATORY RULE — Exhaustive config extraction:** Every configuration variable read by the service or ANY of its UMP dependencies MUST be documented with its **real value** when the source file is available (CSV, XML, `.properties`). If the source file is NOT available, document the key with `NO EVIDENCE — obtener de <fuente>`. NEVER fabricate values. NEVER leave a variable undocumented. This table is the SOLE input for generating `application.yml` and `helm/*.yml` in Phase 2 — if a variable is missing here, it will be missing in the migrated service.
+
 Banco Pichincha's IIB uses two explicit helpers for config lookup. Scan the ESQL for both and list them separately:
 
 1. **`GestionarRecursoXML`** — loads XML config files from Azure DevOps repos (naming: `sqb-cfg-<file>-<folder>`, e.g. `sqb-cfg-codigosBackend-config`, `sqb-cfg-errores-errors`).
@@ -333,6 +335,8 @@ Banco Pichincha's IIB uses two explicit helpers for config lookup. Scan the ESQL
 **Expected output:** Three tables — XML configs used, Configurables used, and the et_bancs/et_soap matrix.
 
 ### Step E.4: WAS configuration patterns (only if source type is WAS)
+
+**MANDATORY RULE — Exhaustive config extraction:** Every configuration variable read by the service or ANY of its UMP dependencies (`Propiedad.get()`, `Constantes.java`, `CatalogoAplicaciones.properties`, `generalServices.properties`, per-service `.properties`) MUST be documented with its **real value** when the source file is available. Scan ALL UMP repos provided — not just the main service. If a `.properties` file is found in the legacy tree or UMP repos, extract the actual key=value pairs. If the file is NOT available, document each key with `NO EVIDENCE — obtener de <fuente>`. NEVER fabricate values. This table is the SOLE input for `application.yml` and `helm/*.yml` in Phase 2.
 
 WAS uses `.properties` files under a fixed path. Scan for all three types:
 

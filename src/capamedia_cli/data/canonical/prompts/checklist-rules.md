@@ -950,6 +950,43 @@ grep "@ConfigurationPropertiesScan" <PATH>/src/main/java/com/pichincha/sp/Applic
 
 0 matches → **HIGH** (los beans `@ConfigurationProperties` no se registran sin esto).
 
+### Check 7.7 — Todas las variables legacy en application.yml [MANDATORIO]
+
+**Regla:** TODA variable de configuración identificada en el ANALYSIS (Section 15) — tanto del servicio como de sus UMPs/dependencias (`.properties`, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `CatalogoAplicaciones.properties`) — DEBE tener su entrada en `application.yml`.
+
+**Procedimiento:**
+1. Leer la Section 15 del `ANALISIS_<ServiceName>.md`
+2. Para cada variable listada, verificar que existe en `application.yml` (como literal, como `${CCC_*}`, o como comentario `# valor no disponible`)
+3. Para cada `${CCC_*}` en `application.yml`, verificar que tiene entrada en los 3 helms
+
+```bash
+# Listar todas las ${CCC_*} del application.yml
+grep -oP '\$\{CCC_\w+' <PATH>/src/main/resources/application.yml | sort -u
+
+# Para cada una, verificar presencia en los 3 helms
+for var in $(grep -oP 'CCC_\w+' <PATH>/src/main/resources/application.yml | sort -u); do
+  for env in dev test prod; do
+    grep -q "$var" <PATH>/helm/$env.yml || echo "MISSING in $env.yml: $var"
+  done
+done
+```
+
+**Veredictos:**
+- Variable del ANALYSIS ausente en `application.yml` → **HIGH**
+- `${CCC_*}` en `application.yml` sin entrada en algún helm → **HIGH**
+- Variable en helm que no se usa en `application.yml` (huérfana) → **MEDIUM**
+- Valor inventado (no extraído del código legacy ni de archivos config) → **HIGH**
+
+### Check 7.8 — Sin valores inventados en application.yml
+
+```bash
+# Buscar valores sospechosos que podrían ser inventados
+# (números redondos genéricos que no vienen del legacy)
+grep -nE ":\s+(100|1000|5000|10000|30000|60000)\s*$" <PATH>/src/main/resources/application.yml
+```
+
+Cualquier valor numérico debe ser trazable al legacy (Section 15 del ANALYSIS) o ser un default documentado del framework. Si el ANALYSIS dice `<pendiente_validar>` para una variable y el `application.yml` tiene un valor concreto → **HIGH** (valor inventado). Si el ANALYSIS tiene el valor real y el `application.yml` lo refleja → **PASS**.
+
 ---
 
 ## BLOQUE 8 — Versiones y dependencias

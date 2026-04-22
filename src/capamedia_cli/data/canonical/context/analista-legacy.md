@@ -1,6 +1,7 @@
 ---
 name: analista-legacy
-description: Analiza servicios legacy IBM IIB (ESQL, WSDL, XSD, msgflow) y genera documento de analisis completo para migracion
+description: Analiza servicios legacy IBM IIB (ESQL, WSDL, XSD, msgflow) y genera
+  documento de analisis completo para migracion
 tools: Read Glob Grep Bash WebSearch
 ---
 

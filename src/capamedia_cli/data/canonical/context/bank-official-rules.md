@@ -233,6 +233,43 @@ public final class IdentificationNormalizer {
 
 ---
 
+## Regla 6.5 — Header estandar en `application.yml`
+
+**MUST**: todo `application.yml` del microservicio incluye el bloque
+`spring.header.*` con valores literales (NO env vars). Son metadata del
+proyecto leidas por los interceptors de Optimus:
+
+```yaml
+spring:
+  application:
+    name: tnd-msa-sp-<service>        # literal, matchea metadata.name del catalog
+  header:
+    channel: digital                  # literal, siempre "digital"
+    medium: web                       # literal, siempre "web"
+```
+
+**NEVER**: eliminar estos campos. El auto-fix de Regla 7 (`${VAR:default}` →
+`${VAR}`) solo aplica a variables de entorno — NO debe tocar `channel: digital`
+ni `medium: web` que son literales validos. Nuestro `fix_yml_remove_defaults`
+tiene guard explicito para este caso (usa el patron `${VAR:default}`, no
+matchea valores literales).
+
+**Bloque completo de referencia** (extraido del gold tnd-msa-sp-wsclientes0024):
+
+```yaml
+spring:
+  application:
+    name: tnd-msa-sp-wsclientes0024
+  header:
+    channel: digital
+    medium: web
+
+TPL_LOG_INFO: INFO
+TPL_LOG_DEBUG: DEBUG
+```
+
+---
+
 ## Regla 7 - `application.yml` sin valores por defecto
 
 **MUST**: toda variable de entorno va como `${VAR_NAME}` sin default. La configuracion real vive en ConfigMap OpenShift + Azure DevOps Variable Groups, no en el yml.

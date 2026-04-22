@@ -71,6 +71,7 @@ infrastructure/
 ```
 
 ## Reglas criticas (NUNCA violar)
+- **Variables de configuracion (MANDATORIO):** TODA variable leida por el servicio legacy o sus UMPs/dependencias (`.properties`, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`) DEBE tener su entrada en `application.yml`. Valores funcionales van como literal o con default inline. Secrets van como `${CCC_*}` con entrada en los 3 helms. NUNCA inventar valores — solo del codigo legacy o archivos config disponibles. Si el archivo no esta disponible, documentar la clave en comentario YAML: `# valor no disponible — obtener de <fuente>`. Solo poner en Helm las `${CCC_*}` que se usen en `application.yml`.
 - Ports son INTERFACES, nunca abstract classes
 - domain/ no importa Spring, SOAP, JPA, WebFlux
 - application/ no importa infrastructure/

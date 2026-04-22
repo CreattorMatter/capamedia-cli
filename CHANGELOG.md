@@ -4,6 +4,87 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.0] - 2026-04-22
+
+### Added - 4 updates del feedback real (Julian + JGarcia a91bda8)
+
+**1. Sync canonical con `a91bda8 feat: Config in yml y helm`** de
+jgarcia@pichincha.com. 13 archivos actualizados del canonical via
+`capamedia canonical sync`. Cambios clave: scan obligatorio de
+`.properties` en UMPs + documentacion como sole-input para
+`application.yml` y helm.
+
+**2. Regla 6.5 - `spring.header.*` obligatorio en `application.yml`**:
+
+Documentada en `context/bank-official-rules.md`. Los literales
+`channel: digital` y `medium: web` (metadata de Optimus) DEBEN estar
+en todo servicio migrado. Advertencia explicita: el autofix de
+Regla 7 (`${VAR:default}` → `${VAR}`) usa regex que NO matchea
+literales, por lo que nunca elimina estos valores.
+
+Ejemplo de referencia en el canonical (basado en el gold 0024):
+
+```yaml
+spring:
+  application:
+    name: tnd-msa-sp-<svc>
+  header:
+    channel: digital
+    medium: web
+TPL_LOG_INFO: INFO
+TPL_LOG_DEBUG: DEBUG
+```
+
+**3. Canonical `context/was-ump-inline.md`** nuevo (4 reglas):
+
+Caso real: algunos WAS tienen UMPs dentro del propio repo (no como
+`sqb-msa-ump*` externos). La logica de esas UMPs se **plasma INLINE**
+al migrar, no como adapter remoto.
+
+- WAS-UMP-1: detectar inline vs externa (pattern `ump-*` / `*-ump` /
+  clases Java prefijo `UMP*` dentro del mismo legacy)
+- WAS-UMP-2: donde plasmar la logica (util → `infrastructure/util/`;
+  orquestacion → service; BANCS wrapper → adapter con `BancsClient`)
+- WAS-UMP-3: tests propios obligatorios por cada UMP migrada
+- WAS-UMP-4: `MIGRATION_REPORT.md` con seccion `## UMPs inline migradas`
+  como tabla path legacy → destino migrado
+
+**4. Canonical `context/log-transaccional-orq.md`** nuevo (4 reglas LT):
+
+Fuente: `BPTPSRE-Librería Log Transaccional-220426-202920.pdf`. Libreria
+`com.pichincha.common:lib-event-logs-*:1.0.0` que publica
+request/response a Kafka de auditoria. OBLIGATORIO en orquestadores.
+
+- LT-1: dependencia `lib-event-logs-webflux:1.0.0` (WebFlux) o
+  `lib-event-logs-mvc:1.0.0` (MVC)
+- LT-2: bloques `spring.kafka.*` + `logging.event.*` en `application.yml`
+  con env vars (KAFKA_SERVER, KAFKA_TOPIC_AUDITOR, THREAD_* etc.)
+- LT-3: anotacion `@EventAudit(service, method, type=AuditType.T)` en
+  cada adapter outbound
+- LT-4: templates XML en `xml.template.templates` via env var
+  `XML_TRANSACCION_<NNNN>` (shared en Helm)
+
+Incluye ejemplos WebFlux y MVC/SOAP con `@EventAudit` en el adapter.
+
+**Nuevo `Block 17` en `core/checklist_rules.py`**:
+
+Solo activa en ORQs (heuristica: `"orq"` en el nombre del proyecto).
+Skip total si no-ORQ.
+
+- `17.1` - dependencia `lib-event-logs-<variante>` (HIGH)
+- `17.2` - bloques `spring.kafka` + `logging.event` en yml (HIGH)
+- `17.3` - `logging.level.org.apache.kafka: OFF` (MEDIUM)
+- `17.4` - `@EventAudit` en al menos 1 adapter (HIGH); skip si el
+  proyecto no tiene adapters (caso borde)
+
+### Testing
+
+- **356/356 tests PASS** (+12 en `test_block_17_log_transaccional.py`).
+  Escenarios: skip en no-ORQ, activa en ORQ, cada check 17.1-17.4 en
+  pass y fail con fixtures minimales.
+
+---
+
 ## [0.16.1] - 2026-04-22
 
 ### Fixed - `install`: direct-download fallback para Gradle y VS Code

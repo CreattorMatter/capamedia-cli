@@ -1,6 +1,7 @@
 ---
 name: validador-hex
-description: Valida que un proyecto Java cumple con la arquitectura hexagonal OLA1 y las 26 reglas no negociables del banco
+description: Valida que un proyecto Java cumple con la arquitectura hexagonal OLA1
+  y las 26 reglas no negociables del banco
 tools: Read Glob Grep Bash
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: pre-migracion
-description: Detecta tipo de legacy (IIB / WAS / ORQ) y genera ANALISIS_*.md con cuantificacion y score de confianza
+description: Detecta tipo de legacy (IIB / WAS / ORQ) y genera ANALISIS_*.md con cuantificacion
+  y score de confianza
 allowed-tools: Read Glob Grep Bash Agent
 ---
 
