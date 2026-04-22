@@ -4,6 +4,77 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.4] - 2026-04-22
+
+### Added - Log transaccional: documentacion ampliada con flujo end-to-end
+
+**Input del user**: 2 PDFs oficiales que documentan el log transaccional con
+mucho mas detalle que lo que teniamos:
+
+1. `BPTPSRE-Estructura Log Transaccional-220426-215404.pdf` — flujo completo
+   ORQ → CE_EVENTOS → WSTecnicos0038 → CE_TRANSACCIONAL, estructura JSON final,
+   mapeo headerIn XML → JSON, formato del `<error>` del evento.
+2. `BPTPSRE-Libreria Log Transaccional-220426-202920.pdf` — dependencias por
+   variante (mvc/webflux), tabla completa de atributos kafka/logging con
+   defaults, `@EventAudit` con `AuditType.T`, plantillas XML en helm/ConfigMap,
+   WebFlux=WebClient vs MVC=RestClient.
+
+**Cambios en** `canonical/context/log-transaccional-orq.md`:
+
+- Diagrama ASCII del **flujo de auditoria end-to-end** (ORQ publica XML a
+  `CE_EVENTOS` → `WSTecnicos0038` aplica plantillas → JSON final en
+  `CE_TRANSACCIONAL`). Aclara que `WSTecnicos0038` **NO** es parte de nuestro
+  scope — es infra compartida del banco.
+- **Caracteristicas oficiales** de la libreria: Spring Boot 3.5.12 (agnostica),
+  Java 21, disponible en variante `mvc` y `webflux`.
+- **Regla LT-2 ampliada**: tabla completa de defaults documentados en el PDF
+  (`PLAIN`, `SASL_SSL`, `45000ms session`, `2000ms request`, `EXTERNAL` mode).
+- **Regla LT-3 ampliada**: cita explicita del PDF sobre WebClient (WebFlux) vs
+  RestClient (MVC/SOAP, NO RestTemplate en Boot 3.x).
+- **Regla LT-4 ampliada**: desglose de elementos del template XML (`<TX>`,
+  `<RX>`, `<coleccion>`, `<campo>`) con explicacion de cada atributo
+  (`cargaFuente`, `nombrePadre`, `nombreHijo`, `fuentePadre`, `nomenclatura`).
+- **NUEVA Regla LT-5** — Estructura del mensaje final en `CE_TRANSACCIONAL`:
+  JSON completo con mapeo campo-por-campo desde headerIn/bodyIn/bodyOut al
+  JSON que consume Elastic. Informativo pero critico para entender que el
+  `headerIn` del request entrante debe tener *todos* los campos que el JSON
+  final espera (geolocalizacion, dispositivo, idCliente, tipoIdCliente — no
+  son opcionales aunque puedan venir vacios).
+- **NUEVA Regla LT-6** — Formato del `<error>` en el evento XML intermedio:
+  4 campos obligatorios (`codigo`, `mensaje`, `tipo`, `backend`) con tablas
+  de mapeo cruzando `reference_codigos_backend.md` y `reference_error_types.md`
+  de MEMORY (INFO/ERROR/FATAL; 00638=IIB, 00045=BANCS, 00000=inventado).
+- **NUEVA Regla LT-7** — Mapeo obligatorio headerIn XML → evento: lista
+  explicita de los 18 campos del headerIn + 7 del sub-bloque `<bancs>` que
+  deben viajar **tal cual** al evento (sin trim, sin upper-case, sin
+  transformaciones).
+
+**Cambios en** `core/checklist_rules.py`:
+
+- Comentario del Block 17 ahora cita **ambos PDFs** como fuentes oficiales.
+- Menciona las 7 reglas canonicas (LT-1..LT-7) en lugar de 4.
+- Clarifica la secuencia `CE_EVENTOS → WSTecnicos0038 → CE_TRANSACCIONAL`
+  (antes solo decia "topico kafka de auditoria" sin detallar el intermediario).
+
+### Contexto operativo
+
+- Los ORQs que estamos migrando (0027, 0028, 0037, 0059, 0062) usan todos
+  esta libreria. Las reglas LT-5 y LT-6 ahora permiten validar que el
+  `HeaderIn` DTO que viaja por el ORQ trae todos los campos requeridos.
+- El gap conocido de `feedback_bancs_header_out_no_echo.md` (HeaderOut no
+  replica `<bancs>`) se cruza con LT-7: el evento **SI** debe llevar `<bancs>`
+  del request entrante, aunque la response NO lo tenga.
+
+### Testing
+
+- Sin cambios en codigo de production (solo docs canonicas y comentarios).
+- 377/377 tests PASS (sin regresiones).
+
+### Sources
+
+- `prompts/documentacion/BPTPSRE-Estructura Log Transaccional-220426-215404.pdf`
+- `prompts/documentacion/BPTPSRE-Libreria Log Transaccional-220426-202920.pdf`
+
 ## [0.17.3] - 2026-04-22
 
 ### Fixed - `init` detecta workspace automatico (evita subcarpeta anidada)

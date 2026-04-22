@@ -803,9 +803,14 @@ def run_block_16(ctx: CheckContext) -> list[CheckResult]:
 # -- Block 17: Log transaccional (solo ORQ) --------------------------------
 #
 # Librería `com.pichincha.common:lib-event-logs-<mvc|webflux>:1.0.0` que
-# publica request/response al topico Kafka de auditoria.
-# Fuente: BPTPSRE-Librería Log Transaccional-220426-202920.pdf
-# Canonical: context/log-transaccional-orq.md
+# publica request/response al topico Kafka de auditoria (CE_EVENTOS).
+# Luego WSTecnicos0038 aplica plantillas XML y publica el JSON final en
+# CE_TRANSACCIONAL que consume Elastic/Observabilidad.
+#
+# Fuentes oficiales:
+#   - BPTPSRE-Estructura Log Transaccional-220426-215404.pdf (flujo, mapeo)
+#   - BPTPSRE-Libreria Log Transaccional-220426-202920.pdf (lib, config)
+# Canonical: context/log-transaccional-orq.md (7 reglas LT-1..LT-7)
 #
 # Solo se activa si el proyecto parece ORQ (carpeta del proyecto contiene
 # prefix orq en el name, o catalog-info.yaml lo indica).
