@@ -2,10 +2,10 @@
 name: log-transaccional-orq
 kind: context
 priority: 2
-summary: Log transaccional (lib-event-logs) — OBLIGATORIO en orquestadores, OPCIONAL en BUS/WAS con downstream calls
+summary: Log transaccional (lib-event-logs) — EXCLUSIVO de orquestadores (ORQ). WAS/BUS no lo usan.
 ---
 
-# Log transaccional (lib-event-logs) — reglas para orquestadores
+# Log transaccional (lib-event-logs) — EXCLUSIVO de orquestadores
 
 **Fuentes**:
 - `prompts/documentacion/BPTPSRE-Estructura Log Transaccional-220426-215404.pdf` (estructura, flujo, mapeo)
@@ -14,13 +14,34 @@ summary: Log transaccional (lib-event-logs) — OBLIGATORIO en orquestadores, OP
 **Característica oficial de la librería** (PDF 2, sección "Características"):
 - Agnóstica a **Spring Boot 3.5.12** (no la hereda — convive con cualquier versión compatible).
 - Compilada en **Java 21**.
-- Agnóstica también a MVC vs WebFlux: hay dos variantes de artefacto.
+- Existen dos variantes de artefacto (`-webflux` y `-mvc`), pero en el marco
+  de esta migración **solo aplica la variante `-webflux`** porque por regla del
+  banco los ORQs van siempre en WebFlux.
 
-**Aplica OBLIGATORIO a orquestadores (ORQ)** — cita literal del PDF 1: _"Los
-eventos se generan **únicamente en los orquestadores**"_. En BUS/WAS terminales
-aplica solo si el servicio tiene downstream calls auditables hacia otros
-microservicios WS; si es un servicio atómico que termina en BANCS vía Core
-Adapter, NO aplica (BANCS ya audita en su capa).
+## Ámbito de aplicación — SOLO ORQ
+
+**Cita literal del PDF 1** (sección "Eventos"):
+> _"Los eventos se generan **únicamente en los orquestadores**."_
+
+**Implicación dura**:
+- ✅ **ORQ**: OBLIGATORIO. Todas las reglas LT-1..LT-7 de este canonical aplican.
+- ❌ **WAS** (microservicios REST/MVC terminales): **NO** lleva `lib-event-logs`,
+  **NO** lleva `@EventAudit`, **NO** lleva `spring.kafka` ni `logging.event` en
+  el yml. Nada de esto. Si en revisión aparece en un WAS, es un error de copy-
+  paste de un ORQ y debe removerse.
+- ❌ **BUS** (servicios SOAP IIB migrados a Java): **NO** lleva log
+  transaccional. El BUS audita vía IIB legacy / Core Adapter / sus propios
+  mecanismos de trace. No usa esta librería.
+- ❌ **UMPs** (stores/jpa embebidos en WAS): tampoco aplica — son componentes
+  internos del WAS, no microservicios con operaciones auditables.
+
+**Reglas operativas**:
+- El Block 17 del `capamedia check` está gated por `_looks_like_orq(ctx)`. Si
+  el proyecto no es ORQ (nombre de la carpeta / catalog-info), el bloque se
+  omite por completo — no emite ni PASS ni FAIL.
+- En un ORQ al que le falten estos componentes, el Block 17 emite FAIL severity
+  `high`. En un WAS que accidentalmente los tenga, debe haber otra regla
+  (futura) que los marque como "remove — WAS no usa log transaccional".
 
 ---
 
@@ -62,27 +83,32 @@ final ni conocer `WSTecnicos0038`. Solo necesita:
 
 ---
 
-## Regla LT-1 — Dependencia `lib-event-logs-*`
+## Regla LT-1 — Dependencia `lib-event-logs-webflux`
 
-**MUST**: `build.gradle` declara la variante que coincide con el framework:
+**MUST**: el `build.gradle` del ORQ declara la variante **webflux** (en este
+programa de migración no hay ORQs MVC — todos van WebFlux por regla del banco):
 
-- **WebFlux** (ORQs por regla del banco + BUS con `invocaBancs=true`):
-  ```gradle
-  implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
-  ```
-- **MVC** (WAS, BUS sin BANCS):
-  ```gradle
-  implementation 'com.pichincha.common:lib-event-logs-mvc:1.0.0'
-  ```
+```gradle
+implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
+```
 
 **Prerrequisitos del proyecto** (PDF 2, sección "Prerequisitos"):
 - Spring Boot 3.5.12 o superior compatible (la lib es agnóstica pero se probó
   contra esa versión).
 - Java 21.
 
-**NEVER**: declarar la variante equivocada (`webflux` en un WAS MVC o `mvc` en
-un ORQ WebFlux). Rompe en runtime al cargar el autoconfig de la librería porque
-busca `WebClient`/`RestClient` según variante.
+**Nota sobre la variante MVC**: el PDF 2 documenta también
+`lib-event-logs-mvc:1.0.0`. No la usamos porque:
+- Los ORQs son siempre WebFlux (regla del banco).
+- Los WAS MVC **NO** llevan log transaccional (cita PDF 1: "los eventos se
+  generan únicamente en los orquestadores").
+- Por lo tanto `lib-event-logs-mvc` no debería aparecer en ningún proyecto de
+  esta migración. Si aparece, es error de copy-paste y debe removerse.
+
+**NEVER**:
+- Agregar la dependencia en un WAS — NO aplica (es solo ORQ).
+- Declarar la variante `mvc` — en nuestro marco no tiene uso legítimo.
+- Usar una versión distinta de `1.0.0` sin actualizar este canonical primero.
 
 ## Regla LT-2 — Bloque `spring.kafka` + `logging.event` en `application.yml`
 
@@ -161,19 +187,19 @@ xml:
 - Omitir el bloque `xml.template.templates` si el ORQ invoca downstream (sin
   templates, el mensaje final queda sin `lotElastico`).
 
-## Regla LT-3 — Anotación `@EventAudit` en adapters
+## Regla LT-3 — Anotación `@EventAudit` en adapters (solo ORQ)
 
-**MUST**: cada adapter outbound (`@Component implements XxxPort`) lleva
-`@EventAudit` en el método que invoca el downstream. La librería intercepta
-el request/response y publica el evento.
+**MUST**: en un ORQ, cada adapter outbound (`@Component implements XxxPort`)
+lleva `@EventAudit` en el método que invoca el downstream (WebClient). La
+librería intercepta el request/response y publica el evento a `CE_EVENTOS`.
 
-**Framework → tipo de cliente HTTP** (PDF 2, secciones "WebFlux" y "MVC"):
-- **WebFlux**: usa `WebClient`.
-- **MVC/SOAP**: usa `RestClient` (no `RestTemplate` — está deprecado en Boot
-  3.x).
+**Cliente HTTP en ORQ**: siempre `WebClient` (WebFlux). `RestTemplate` está
+deprecado en Spring Boot 3.x. El PDF 2 muestra también un ejemplo `RestClient`
+para la variante MVC, pero **NO aplica a nuestros ORQs** — se omite del
+canonical para evitar confusión.
 
 ```java
-// WebFlux (ORQ)
+// ORQ — adapter outbound con @EventAudit (unico caso valido en este programa)
 @Component
 @RequiredArgsConstructor
 public class WSClientes0001Adapter implements Clientes0001Port {
@@ -196,31 +222,13 @@ public class WSClientes0001Adapter implements Clientes0001Port {
                 .flatMap(this::validateResponse);
     }
 }
-
-// MVC/SOAP (WAS)
-@Component
-@RequiredArgsConstructor
-public class WSClientes0001RestAdapter implements Clientes0001Port {
-    protected final RestClientFactory restClientFactory;
-    protected RestClient restClient;
-    @Value("${api.clientes0001.uri}")
-    private String baseUrl;
-    private static final String ERROR_CODE_OK = "0";
-
-    @Override
-    @EventAudit(
-        service = "WSClientes0001",
-        method = "ConsultarCuentasActivas01",
-        type = AuditType.T
-    )
-    public ConsultarCuentasActivas01ResponseDto consultarCuentasActivas01(
-            ConsultarCuentasActivas01RequestDto req) {
-        log.info("Invocando WSClientes0001 - ConsultarCuentasActivas01");
-        ConsultarCuentasActivas01ResponseDto response = post(req, ConsultarCuentasActivas01ResponseDto.class);
-        return validateResponse(response);
-    }
-}
 ```
+
+**WAS: NO lleva `@EventAudit`** — si aparece en un adapter de un proyecto
+`wstecnicos/wsclientes`, es error de copy-paste y debe removerse. Los WAS no
+tienen adapters outbound a otros WS en el sentido que audita esta librería;
+sus "downstream" son BANCS (vía Core Adapter) o UMPs (embebidos), ninguno
+auditado por `lib-event-logs`.
 
 **Parámetros obligatorios de `@EventAudit`** (PDF 2, tabla "Detalle de
 componentes"):
@@ -235,7 +243,7 @@ componentes"):
 - Poner `@EventAudit` en services (`@Service`): va **solo en adapters
   outbound** (`@Component` que implementa un `Port`).
 - Mezclar múltiples `@EventAudit` en un mismo método (uno por método público).
-- Usar `RestTemplate` en MVC — tiene que ser `RestClient` (Boot 3.2+).
+- Aparecer en un WAS — solo ORQ. Si aparece, removerlo.
 
 ## Regla LT-4 — Templates XML de transformación
 

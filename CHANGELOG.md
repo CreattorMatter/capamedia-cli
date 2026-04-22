@@ -4,6 +4,80 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.5] - 2026-04-22
+
+### Fixed - Log transaccional es EXCLUSIVO de ORQ (no WAS ni BUS)
+
+**Feedback del user**: el v0.17.4 ablandaba la politica al decir "OBLIGATORIO
+en ORQ, OPCIONAL en BUS/WAS con downstream calls" y hasta incluia un ejemplo
+con `// MVC/SOAP (WAS)`. Eso contradice directamente el PDF 1 que dice:
+
+  > _"Los eventos se generan unicamente en los orquestadores."_
+
+**Correcciones al canonical** `context/log-transaccional-orq.md`:
+
+- Summary y titulo ahora dicen **EXCLUSIVO de orquestadores**.
+- Nueva seccion "Ambito de aplicacion" lista explicitamente:
+  - ✅ ORQ: OBLIGATORIO.
+  - ❌ WAS: NO lleva nada de esto. Si aparece, es copy-paste error.
+  - ❌ BUS: NO usa lib-event-logs. Tiene su propio tracing.
+  - ❌ UMPs: NO aplican (son componentes internos de WAS).
+- LT-1 (dependencia): solo `lib-event-logs-webflux:1.0.0`. La variante `-mvc`
+  documentada en el PDF 2 no se usa porque ORQs son siempre WebFlux y WAS no
+  lleva log transaccional.
+- LT-3 (`@EventAudit`): eliminado el ejemplo MVC/SOAP. Se aclara: si aparece
+  en un WAS, es error de copy-paste y debe removerse.
+
+### Added - Block 18: detector inverso (contra-regla del Block 17)
+
+Nuevo bloque del checklist que **solo corre en proyectos NO-ORQ** (WAS, BUS,
+UMP). Marca como FAIL con severity `high` cualquier resto de log transaccional:
+
+- **18.1** - `lib-event-logs-*` en `build.gradle` (prohibido).
+- **18.2** - `logging.event` / `spring.kafka` auditor / `xml.template` en el
+  `application.yml` (prohibido).
+- **18.3** - `@EventAudit` en cualquier `.java` (prohibido).
+
+Cada fail incluye `suggested_fix` con la instruccion de remover el artefacto.
+
+El Block 17 (que valida que ORQ SI tenga log transaccional) y el Block 18 son
+mutuamente excluyentes:
+
+```
+         ORQ?
+          │
+    ┌─────┴─────┐
+    SI          NO
+    │           │
+    Block 17    Block 18
+    (valida     (valida
+     presencia)  ausencia)
+```
+
+### Added - `_looks_like_orq()` mejorado
+
+La heuristica ORQ ahora tambien lee `catalog-info.yaml` si existe (algunos
+equipos no meten `orq` en el nombre del repo pero si en title/tags). Si `orq`
+aparece en el catalog, el proyecto se trata como ORQ.
+
+### Testing
+
+- **12 tests nuevos** en `tests/test_block_18_lt_only_orq.py`:
+  - Block 18 se salta en ORQ (responsabilidad del 17).
+  - Block 18 se activa en WAS.
+  - 3 tests por cada check (18.1/18.2/18.3) — positivos y negativos.
+  - Test de integracion: WAS con copy-paste completo de un ORQ → 3 fails.
+- **389/389 tests PASS** total.
+
+### Rationale
+
+Esta politica evita dos errores posibles:
+1. **Falso negativo en ORQ**: el 17 falla si el ORQ no tiene la libreria.
+2. **Falso positivo en WAS**: el 18 falla si el WAS copia-pega de un ORQ.
+
+Antes del v0.17.5, el 17 solo validaba "presencia en ORQ" pero nada validaba
+"ausencia en WAS" — por eso un WAS con copy-paste pasaba silencioso.
+
 ## [0.17.4] - 2026-04-22
 
 ### Added - Log transaccional: documentacion ampliada con flujo end-to-end

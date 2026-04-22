@@ -800,40 +800,65 @@ def run_block_16(ctx: CheckContext) -> list[CheckResult]:
 # -- Main orchestrator -----------------------------------------------------
 
 
-# -- Block 17: Log transaccional (solo ORQ) --------------------------------
+# -- Block 17: Log transaccional (EXCLUSIVO ORQ) ---------------------------
 #
-# Librería `com.pichincha.common:lib-event-logs-<mvc|webflux>:1.0.0` que
-# publica request/response al topico Kafka de auditoria (CE_EVENTOS).
-# Luego WSTecnicos0038 aplica plantillas XML y publica el JSON final en
-# CE_TRANSACCIONAL que consume Elastic/Observabilidad.
+# Librería `com.pichincha.common:lib-event-logs-webflux:1.0.0` que publica
+# request/response al topico Kafka de auditoria (CE_EVENTOS). Luego
+# WSTecnicos0038 (servicio tecnico compartido del banco, NO es nuestro)
+# aplica plantillas XML y publica el JSON final en CE_TRANSACCIONAL que
+# consume Elastic/Observabilidad.
+#
+# AMBITO ESTRICTO: aplica UNICAMENTE a orquestadores (ORQ).
+# Cita literal del PDF 1 (Estructura Log Transaccional):
+#   "Los eventos se generan unicamente en los orquestadores."
+#
+# No aplica a:
+#   - WAS  (microservicios REST/MVC terminales): NO llevan @EventAudit ni
+#          lib-event-logs. Si aparecen, son error de copy-paste.
+#   - BUS  (SOAP IIB migrados a Java): usan su propio tracing, no esta lib.
+#   - UMPs (stores embebidos en WAS): componentes internos, no aplican.
 #
 # Fuentes oficiales:
 #   - BPTPSRE-Estructura Log Transaccional-220426-215404.pdf (flujo, mapeo)
 #   - BPTPSRE-Libreria Log Transaccional-220426-202920.pdf (lib, config)
 # Canonical: context/log-transaccional-orq.md (7 reglas LT-1..LT-7)
-#
-# Solo se activa si el proyecto parece ORQ (carpeta del proyecto contiene
-# prefix orq en el name, o catalog-info.yaml lo indica).
 
 
 def _looks_like_orq(ctx: CheckContext) -> bool:
-    """Heuristica: el proyecto es ORQ si el nombre termina en orq<NNNN> o
-    similar. Ej: `tnd-msa-sp-orqclientes0027`."""
+    """Heuristica: el proyecto es ORQ si el nombre contiene 'orq'.
+    Ej: `tnd-msa-sp-orqclientes0027`. Tambien respeta metadata del
+    catalog-info.yaml si existe."""
     name = ctx.migrated_path.name.lower()
-    return "orq" in name
+    if "orq" in name:
+        return True
+    # Fallback: leer catalog-info.yaml (algunos equipos no meten 'orq' en el
+    # nombre del repo pero si en el title/tags).
+    catalog = ctx.migrated_path / "catalog-info.yaml"
+    if catalog.exists():
+        try:
+            txt = catalog.read_text(encoding="utf-8", errors="ignore").lower()
+            if "orq" in txt:
+                return True
+        except OSError:
+            pass
+    return False
 
 
 def run_block_17(ctx: CheckContext) -> list[CheckResult]:
-    """Block 17: Log transaccional para ORQs (solo activo si ORQ).
+    """Block 17: Log transaccional — EXCLUSIVO ORQ.
 
-    Checks:
-      17.1 - dependencia lib-event-logs-<framework> en build.gradle
+    Si el proyecto no es ORQ (WAS/BUS/UMP), el bloque se omite por completo
+    — NO emite ni PASS ni FAIL. Las reglas LT-1..LT-7 solo aplican a ORQ.
+
+    Checks cuando es ORQ:
+      17.1 - dependencia lib-event-logs-webflux en build.gradle
       17.2 - bloques spring.kafka + logging.event en application.yml
       17.3 - logging.level.org.apache.kafka: OFF presente
       17.4 - al menos 1 @EventAudit en adapters
     """
     if not _looks_like_orq(ctx):
         # Skip block entero: el proyecto no es ORQ, las reglas no aplican.
+        # (Cita PDF 1: "los eventos se generan unicamente en los orquestadores")
         return []
 
     results: list[CheckResult] = []
@@ -986,6 +1011,166 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+# -- Block 18: Detector inverso — log transaccional fuera de ORQ ------------
+#
+# Contra-regla del Block 17: si un WAS/BUS/UMP tiene restos de log
+# transaccional (lib-event-logs en build.gradle, @EventAudit en codigo,
+# bloques logging.event/spring.kafka en application.yml), es un error de
+# copy-paste desde un ORQ y debe removerse.
+#
+# Cita PDF 1 (Estructura Log Transaccional):
+#   "Los eventos se generan unicamente en los orquestadores."
+#
+# Solo corre cuando el proyecto NO es ORQ. En ORQ el Block 17 valida lo
+# contrario (que si esten).
+
+
+def run_block_18(ctx: CheckContext) -> list[CheckResult]:
+    """Block 18: detecta log transaccional indebido en WAS/BUS/UMP.
+
+    Checks (solo corren si NO es ORQ):
+      18.1 - NO debe haber dependencia lib-event-logs-* en build.gradle
+      18.2 - NO debe haber bloque logging.event en application.yml
+      18.3 - NO debe haber @EventAudit en ningun .java del proyecto
+    """
+    if _looks_like_orq(ctx):
+        # En ORQ esto es responsabilidad del Block 17, no aplicar aqui.
+        return []
+
+    results: list[CheckResult] = []
+    root = ctx.migrated_path
+
+    # 18.1 — lib-event-logs-* en build.gradle
+    gradle_hits: list[str] = []
+    for gf in root.rglob("build.gradle"):
+        if "test" in gf.parts:
+            continue
+        try:
+            txt = gf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "lib-event-logs" in txt:
+            gradle_hits.append(str(gf.relative_to(root)))
+
+    if gradle_hits:
+        results.append(
+            CheckResult(
+                "18.1", "Block 18", "lib-event-logs en WAS/BUS (prohibido)",
+                "fail", severity="high",
+                detail=(
+                    f"Dependencia lib-event-logs-* encontrada en: "
+                    f"{', '.join(gradle_hits)}. Log transaccional es "
+                    "EXCLUSIVO de orquestadores (cita PDF Estructura Log "
+                    "Transaccional: 'los eventos se generan unicamente en "
+                    "los orquestadores')."
+                ),
+                suggested_fix=(
+                    "Remover linea `implementation "
+                    "'com.pichincha.common:lib-event-logs-*'` del "
+                    "build.gradle"
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "18.1", "Block 18", "lib-event-logs en WAS/BUS (prohibido)",
+                "pass",
+                detail="sin dependencia lib-event-logs (correcto para no-ORQ)",
+            )
+        )
+
+    # 18.2 — logging.event / spring.kafka auditor en application.yml
+    # Markers unicos de la config de lib-event-logs (cualquiera con 1 hit
+    # es suficiente senal de que alguien copio-pego de un ORQ).
+    lt_markers = [
+        "KAFKA_TOPIC_AUDITOR",     # env var exclusiva del lib
+        "mode: 'EXTERNAL'",        # literal del yml de la libreria
+        'mode: "EXTERNAL"',
+        "lib-event-logs",
+        "logging:\n  event:",      # bloque logging.event anidado (YAML indent 2)
+        "event:\n    mode:",       # variante con indent distinto
+        "xml:\n  template:\n    templates:",  # bloque plantillas XML
+    ]
+    yml_hits: list[str] = []
+    for yml in list(root.rglob("application*.yml")) + list(
+        root.rglob("application*.yaml")
+    ):
+        if "test" in yml.parts:
+            continue
+        try:
+            txt = yml.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if any(m in txt for m in lt_markers):
+            yml_hits.append(str(yml.relative_to(root)))
+
+    if yml_hits:
+        results.append(
+            CheckResult(
+                "18.2", "Block 18", "logging.event en yml WAS/BUS (prohibido)",
+                "fail", severity="high",
+                detail=(
+                    f"Bloque logging.event/spring.kafka de auditoria "
+                    f"encontrado en: {', '.join(yml_hits)}. Aplica solo a "
+                    "ORQs."
+                ),
+                suggested_fix=(
+                    "Remover los bloques `spring.kafka`, `logging.event` "
+                    "y `xml.template.templates` del application.yml"
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "18.2", "Block 18", "logging.event en yml WAS/BUS (prohibido)",
+                "pass",
+                detail="yml sin bloques de log transaccional (correcto)",
+            )
+        )
+
+    # 18.3 — @EventAudit en codigo Java
+    audit_hits: list[str] = []
+    for jf in root.rglob("*.java"):
+        if "test" in jf.parts or "build" in jf.parts:
+            continue
+        try:
+            txt = jf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "@EventAudit" in txt:
+            audit_hits.append(str(jf.relative_to(root)))
+
+    if audit_hits:
+        results.append(
+            CheckResult(
+                "18.3", "Block 18", "@EventAudit en WAS/BUS (prohibido)",
+                "fail", severity="high",
+                detail=(
+                    f"Anotacion @EventAudit encontrada en: "
+                    f"{', '.join(audit_hits[:5])}"
+                    f"{'...' if len(audit_hits) > 5 else ''}"
+                ),
+                suggested_fix=(
+                    "Remover @EventAudit y su import "
+                    "`com.pichincha.common.lib.event.logs.*` de los "
+                    "adapters del WAS/BUS"
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "18.3", "Block 18", "@EventAudit en WAS/BUS (prohibido)",
+                "pass",
+                detail="sin @EventAudit en .java (correcto)",
+            )
+        )
+
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
@@ -997,6 +1182,7 @@ ALL_BLOCKS = [
     ("Block 15", run_block_15),
     ("Block 16", run_block_16),
     ("Block 17", run_block_17),
+    ("Block 18", run_block_18),
 ]
 
 
