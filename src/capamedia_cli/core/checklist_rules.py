@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # -- Result dataclass -------------------------------------------------------
@@ -133,7 +132,7 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=dialogo))
     else:
         if ops_migrated == 1 and actual_fw == "soap" and ctx.has_database:
-            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=f"1 op + BD => SOAP MVC (excepcion JPA)"))
+            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail="1 op + BD => SOAP MVC (excepcion JPA)"))
         else:
             dialogo = f"Son {ops_ref} op(s) => deberia ir {expected_fw.upper()}. Se migro como {actual_fw.upper()} => MAL-CLASIFICADO"
             results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "fail", severity="high", detail=dialogo, suggested_fix="Reclasificar el proyecto al framework correcto"))
@@ -244,7 +243,6 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
     # Regla actualizada (v0.3.2): el numero de output ports debe coincidir con la
     # cantidad de dominios distintos de UMPs invocados por el servicio. Cada UMP
     # de un mismo dominio se consolida en 1 solo port/adapter del dominio.
-    from capamedia_cli.core.domain_mapping import domains_for_umps
 
     # Listar todos los *OutputPort en application/**/port/output/
     actual_ports: list[str] = []
@@ -727,6 +725,6 @@ def run_all_blocks(ctx: CheckContext) -> list[CheckResult]:
     for name, fn in ALL_BLOCKS:
         try:
             all_results.extend(fn(ctx))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             all_results.append(CheckResult(f"{name}-error", name, f"{name} orchestration", "fail", severity="medium", detail=f"error ejecutando bloque: {e}"))
     return all_results

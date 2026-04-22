@@ -18,17 +18,16 @@ Usa --ai <csv> para saltar el prompt (ej: --ai claude,cursor).
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 import yaml
 from rich.console import Console
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Confirm
 
 from capamedia_cli import __version__
-from capamedia_cli.adapters import ADAPTERS, ALL_HARNESSES, get_adapter, resolve_harnesses
+from capamedia_cli.adapters import ALL_HARNESSES, get_adapter, resolve_harnesses
 from capamedia_cli.core.canonical import DATA_ROOT, load_canonical_assets
 
 console = Console()
@@ -212,11 +211,11 @@ def scaffold_project(
 
 def init_project(
     service_name: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(help="Nombre del servicio a migrar (ej: wsclientes0008) o '.' para CWD"),
     ] = None,
     ai: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--ai",
             help=f"Harness(es): {', '.join(ALL_HARNESSES)}, all, none. CSV permitido. Si se omite, pregunta interactivamente.",
@@ -231,7 +230,7 @@ def init_project(
         typer.Option("--force", help="No preguntar si el directorio no esta vacio"),
     ] = False,
     artifact_token: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--artifact-token",
             help="Token de Azure Artifacts para el MCP Fabrics. Si se omite, usa el placeholder ${CAPAMEDIA_ARTIFACT_TOKEN}",
@@ -303,12 +302,12 @@ def init_project(
     console.print()
     console.print("[bold]Proximos pasos:[/bold]")
     console.print(f"  1. [cyan]cd {target_dir}[/cyan]")
-    console.print(f"  2. Abri el IDE preferido ([cyan]code .[/cyan], [cyan]claude[/cyan], [cyan]cursor .[/cyan])")
-    console.print(f"  3. En el chat del IDE, ejecuta los slash commands:")
+    console.print("  2. Abri el IDE preferido ([cyan]code .[/cyan], [cyan]claude[/cyan], [cyan]cursor .[/cyan])")
+    console.print("  3. En el chat del IDE, ejecuta los slash commands:")
     console.print(f"     [cyan]/clone {service_name}[/cyan]  - trae legacy + UMPs + TX")
-    console.print(f"     [cyan]/fabric[/cyan]               - genera arquetipo con el MCP")
-    console.print(f"     [cyan]/migrate[/cyan]              - migra la logica al destino")
-    console.print(f"     [cyan]/check[/cyan]                - ejecuta checklist post-migracion")
+    console.print("     [cyan]/fabric[/cyan]               - genera arquetipo con el MCP")
+    console.print("     [cyan]/migrate[/cyan]              - migra la logica al destino")
+    console.print("     [cyan]/check[/cyan]                - ejecuta checklist post-migracion")
     console.print()
     if (artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}") == "${CAPAMEDIA_ARTIFACT_TOKEN}":
         console.print(

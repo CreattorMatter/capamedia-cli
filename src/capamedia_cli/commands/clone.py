@@ -30,8 +30,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from capamedia_cli.core.auth import build_azure_git_env, resolve_azure_devops_pat
+from capamedia_cli.core.azure_search import AzureCodeSearch, AzureSearchError
+from capamedia_cli.core.dossier import (
+    build_dossier,
+    render_dossier_prompt_appendix,
+    write_dossier,
+)
 from capamedia_cli.core.legacy_analyzer import analyze_legacy
-from capamedia_cli.core.auth import build_azure_git_env
 
 console = Console()
 
@@ -274,6 +280,65 @@ def _write_complexity_report(
     return dest
 
 
+def _run_deep_scan(
+    *,
+    service_name: str,
+    workspace: Path,
+    wsdl_namespace: str | None,
+    tx_codes: list[str],
+    umps: list[str],
+) -> Path | None:
+    """Deep-scan Azure DevOps Code Search. Escribe DOSSIER_<svc>.md."""
+    pat = resolve_azure_devops_pat()
+    if not pat:
+        console.print(
+            "  [yellow]SKIP[/yellow] CAPAMEDIA_AZDO_PAT no configurado. "
+            "Correr `capamedia auth bootstrap` para habilitar deep-scan."
+        )
+        return None
+
+    try:
+        client = AzureCodeSearch(pat=pat, org="bancopichincha")
+    except AzureSearchError as exc:
+        console.print(f"  [red]FAIL[/red] {exc}")
+        return None
+
+    console.print(
+        f"  [dim]Queries: servicio '{service_name}'"
+        + (f" + ns '{wsdl_namespace}'" if wsdl_namespace else "")
+        + f" + {len(tx_codes)} TX + {len(umps)} UMP[/dim]"
+    )
+
+    try:
+        dossier = build_dossier(
+            service=service_name,
+            client=client,
+            wsdl_namespace=wsdl_namespace,
+            tx_codes=tx_codes,
+            umps=umps,
+        )
+    except AzureSearchError as exc:
+        console.print(f"  [red]FAIL[/red] deep-scan incompleto: {exc}")
+        return None
+
+    dossier_path = write_dossier(workspace, dossier)
+    console.print(
+        f"  [green]OK[/green] {dossier.total_hits} hits · "
+        f"{len(dossier.ce_vars)} CE_* · {len(dossier.ccc_vars)} CCC_* · "
+        f"escrito en [cyan]{dossier_path.name}[/cyan]"
+    )
+
+    # Persistir el appendix para que FABRICS_PROMPT / batch migrate lo inyecten
+    cache_dir = workspace / ".capamedia"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "dossier-appendix.md").write_text(
+        render_dossier_prompt_appendix(dossier),
+        encoding="utf-8",
+    )
+
+    return dossier_path
+
+
 def clone_service(
     service_name: Annotated[
         str,
@@ -294,6 +359,14 @@ def clone_service(
     skip_tx: Annotated[
         bool,
         typer.Option("--skip-tx", help="No clonar los repos de TX individuales (sqb-cfg-<TX>-TX)"),
+    ] = False,
+    deep_scan: Annotated[
+        bool,
+        typer.Option(
+            "--deep-scan",
+            help="Recolecta evidencia de Azure DevOps Code Search (cross-refs, ConfigMaps, "
+            "variables CE_*/CCC_*) y genera DOSSIER_<svc>.md para inyectar al FABRICS_PROMPT.",
+        ),
     ] = False,
 ) -> None:
     """Clona el legacy + UMPs + TX repos y analiza complejidad del servicio."""
@@ -318,10 +391,10 @@ def clone_service(
             f"\n[bold]1. Legacy detectado LOCALMENTE[/bold] (no requiere clone): {legacy_dest}"
         )
     else:
-        console.print(f"\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
+        console.print("\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
         legacy_dest, project_key, repo_name = _resolve_azure_repo(service_name, ws, shallow)
         if legacy_dest is None:
-            console.print(f"[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
+            console.print("[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
             console.print(
                 "[yellow]Tip:[/yellow] verifica que el servicio exista o agrega un nuevo "
                 "patron a AZURE_FALLBACK_PATTERNS en clone.py."
@@ -387,6 +460,17 @@ def clone_service(
     # --- Step 6: Report ---
     report = _write_complexity_report(analysis, service_name, ws, tx_results, legacy_root=legacy_dest)
     console.print(f"\n[bold]6. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
+
+    # --- Step 7: Deep-scan Azure DevOps (opcional, --deep-scan) ---
+    if deep_scan:
+        console.print("\n[bold]7. Deep-scan Azure DevOps Code Search[/bold]")
+        _run_deep_scan(
+            service_name=service_name,
+            workspace=ws,
+            wsdl_namespace=(analysis.wsdl.target_namespace if analysis.wsdl else None),
+            tx_codes=sorted(all_tx_codes),
+            umps=[u.name for u in analysis.umps],
+        )
 
     # --- Final summary table ---
     console.print()

@@ -11,7 +11,6 @@ from capamedia_cli.core.legacy_analyzer import (
     score_complexity,
 )
 
-
 SAMPLE_WSDL = """<?xml version="1.0" encoding="UTF-8"?>
 <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
                   targetNamespace="http://pichincha.com/ws/test">

@@ -20,7 +20,11 @@ from rich.console import Console
 from rich.table import Table
 
 from capamedia_cli.commands.fabrics import inspect_fabrics_workspace
-from capamedia_cli.core.auth import AZURE_PAT_ENV_VARS, OPENAI_API_KEY_ENV_VARS, resolve_azure_devops_pat
+from capamedia_cli.core.auth import (
+    AZURE_PAT_ENV_VARS,
+    OPENAI_API_KEY_ENV_VARS,
+    resolve_azure_devops_pat,
+)
 
 console = Console()
 

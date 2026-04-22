@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from capamedia_cli.adapters import ADAPTERS, ALL_HARNESSES, get_adapter, resolve_harnesses
+from capamedia_cli.adapters import ALL_HARNESSES, get_adapter, resolve_harnesses
 from capamedia_cli.core.canonical import load_canonical_assets
 
 

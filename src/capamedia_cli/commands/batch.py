@@ -52,6 +52,12 @@ from capamedia_cli.core.engine import (
     select_engine,
 )
 from capamedia_cli.core.scheduler import BatchScheduler
+from capamedia_cli.core.self_correction import (
+    build_correction_appendix,
+    extract_failure_context,
+    load_failure_context,
+    stash_failure_context,
+)
 
 console = Console()
 
@@ -529,9 +535,27 @@ def _build_batch_migrate_prompt(
     migrated_project: Path,
     prompt_body: str,
 ) -> str:
+    from capamedia_cli.core.catalog_injector import (
+        contains_catalog_block,
+        detect_relevant_tx,
+        format_for_prompt,
+        load_catalogs,
+    )
+
     legacy_root = _find_legacy_root(workspace, service)
     legacy_hint = str(legacy_root) if legacy_root else "(no encontrado)"
-    return textwrap.dedent(
+
+    # Inyeccion de catalogos oficiales: evitar que la AI alucine TX-BANCS,
+    # codigos de backend o reglas de error. Si el prompt_body ya trae el
+    # bloque (viene del FABRICS_PROMPT_<svc>.md), no duplicamos.
+    if contains_catalog_block(prompt_body):
+        catalog_block = ""
+    else:
+        tx_codes = detect_relevant_tx(workspace, service)
+        snapshot = load_catalogs(workspace)
+        catalog_block = format_for_prompt(snapshot, relevant_tx=tx_codes)
+
+    base = textwrap.dedent(
         f"""
         Servicio objetivo: {service}
         Workspace root: {workspace}
@@ -556,6 +580,10 @@ def _build_batch_migrate_prompt(
         ---
         """
     ).strip()
+
+    if catalog_block:
+        return base + "\n\n" + catalog_block.rstrip()
+    return base
 
 
 def _strip_code_fence(raw: str) -> str:
@@ -709,6 +737,12 @@ def _process_migrate_service(
 
     prompt_body = _load_migrate_prompt(workspace, prompt_file)
     prompt = _build_batch_migrate_prompt(service, workspace, migrated_project, prompt_body)
+
+    # Self-correction: si es un retry y hay un FailureContext cacheado en el
+    # state del servicio, inyectamos un appendix con el error especifico.
+    failure_ctx = load_failure_context(state)
+    if failure_ctx is not None:
+        prompt = build_correction_appendix(failure_ctx, prompt)
 
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = workspace / ".capamedia" / "batch-migrate"
@@ -1046,9 +1080,43 @@ def _run_service_with_retries(
     runner,
     *,
     retries: int,
+    workspace_resolver=None,
+    project_resolver=None,
+    run_kind: str = "migrate",
 ) -> BatchRow:
+    """Ejecuta runner(service, attempt) hasta que devuelva OK o se agoten retries.
+
+    Si se pasa `workspace_resolver(service) -> Path`, entre un attempt fallido y
+    el siguiente se extrae un FailureContext y se guarda en el state del servicio
+    para que el runner lo pueda leer y armar un prompt de self-correction.
+
+    `project_resolver(service) -> Path | None` es opcional y se usa para leer el
+    CHECKLIST_*.md del proyecto migrado. Si no se provee, solo se extraen build
+    errors + tails.
+    """
     last_row: BatchRow | None = None
     for attempt in range(retries + 1):
+        if attempt > 0 and workspace_resolver is not None:
+            try:
+                workspace = workspace_resolver(service)
+            except Exception:
+                workspace = None
+            if workspace is not None and workspace.exists():
+                migrated_project = None
+                if project_resolver is not None:
+                    try:
+                        migrated_project = project_resolver(service, workspace)
+                    except Exception:
+                        migrated_project = None
+                try:
+                    state = load_state(workspace, run_kind, service, reset=False)
+                    ctx = extract_failure_context(workspace, migrated_project, state)
+                    stash_failure_context(state, ctx)
+                    save_state(workspace, run_kind, state)
+                except Exception:
+                    # No queremos romper el retry loop si el parseo falla:
+                    # fallback al comportamiento previo (prompt a secas).
+                    pass
         row = runner(service, attempt)
         if row.status == "ok":
             return row
@@ -1878,6 +1946,9 @@ def batch_migrate(
                         scheduler=scheduler,
                     ),
                     retries=retries,
+                    workspace_resolver=lambda svc: ws / svc,
+                    project_resolver=lambda svc, wsp: _find_project_from_fabrics_metadata(wsp) or _find_migrated_project(wsp, svc),
+                    run_kind="migrate",
                 )
                 for service in services
             ]

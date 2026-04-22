@@ -9,7 +9,6 @@ from capamedia_cli.core.caveats import (
     caveats_summary,
     caveats_to_markdown_table,
     detect_external_endpoints,
-    detect_non_bancs_caveats,
     detect_orq_dependencies,
     detect_ump_caveats,
 )

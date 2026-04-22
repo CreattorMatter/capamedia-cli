@@ -12,7 +12,6 @@ import datetime as dt
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -159,6 +158,53 @@ def _write_fabrics_metadata(workspace: Path, payload: dict) -> Path:
     payload = dict(payload)
     payload["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_fabrics_prompt(
+    workspace: Path,
+    service_name: str,
+    *,
+    project_name: str,
+    project_path: str,
+    namespace: str,
+    tecnologia: str,
+    project_type: str,
+    analysis: object,
+) -> Path:
+    """Escribe `FABRICS_PROMPT_<svc>.md` con catalogos oficiales inyectados.
+
+    Lee `tx-adapter-catalog.json`, `codigosBackend.xml` y las reglas del PDF
+    BPTPSRE, detecta las TX relevantes del servicio (via `analysis.umps` +
+    `tx/` clonados + COMPLEXITY.md) y arma el bloque Markdown.
+    """
+    from capamedia_cli.core.catalog_injector import (
+        detect_relevant_tx,
+        format_for_prompt,
+        load_catalogs,
+    )
+
+    umps = list(getattr(analysis, "umps", []) or [])
+    tx_codes = detect_relevant_tx(workspace, service_name, analysis_umps=umps)
+    snapshot = load_catalogs(workspace)
+    catalog_block = format_for_prompt(snapshot, relevant_tx=tx_codes)
+
+    header = (
+        f"# FABRICS prompt: {service_name}\n\n"
+        f"Generado por `capamedia fabrics generate` el "
+        f"{dt.datetime.now(dt.UTC).isoformat()}.\n\n"
+        f"## Parametros del scaffold\n\n"
+        f"- projectName: `{project_name}`\n"
+        f"- projectPath: `{project_path}`\n"
+        f"- namespace: `{namespace}`\n"
+        f"- tecnologia: `{tecnologia}`\n"
+        f"- projectType: `{project_type}`\n"
+        f"- TX detectadas: "
+        f"{', '.join(tx_codes) if tx_codes else '(ninguna)'}\n\n"
+    )
+    body = header + (catalog_block or "")
+    path = workspace / f"FABRICS_PROMPT_{service_name}.md"
+    path.write_text(body.rstrip() + "\n", encoding="utf-8")
     return path
 
 
@@ -857,6 +903,23 @@ def generate(
                 "mcp_server_version": str(server_info.get("version", "")),
             },
         )
+
+        # Inyectar catalogos oficiales al FABRICS_PROMPT_<svc>.md para que la
+        # AI no alucine TX-BANCS, codigos backend ni reglas de error.
+        try:
+            prompt_path = _write_fabrics_prompt(
+                ws,
+                service_name,
+                project_name=project_name,
+                project_path=str(proj_dir),
+                namespace=namespace,
+                tecnologia=tecnologia,
+                project_type=project_type,
+                analysis=analysis,
+            )
+            console.print(f"  [green]OK[/green] prompt inyectado con catalogos: {prompt_path}")
+        except (OSError, ValueError) as e:  # pragma: no cover - defensivo
+            console.print(f"  [yellow]WARN[/yellow] no pude escribir FABRICS_PROMPT: {e}")
 
 
 @app.command("preflight")

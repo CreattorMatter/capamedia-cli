@@ -7,8 +7,8 @@ from pathlib import Path
 from capamedia_cli.core.checklist_rules import (
     CheckContext,
     run_block_1,
-    run_block_14,
     run_block_7,
+    run_block_14,
 )
 
 

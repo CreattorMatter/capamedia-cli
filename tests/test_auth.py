@@ -31,7 +31,7 @@ def test_auth_bootstrap_writes_env_file_and_runs_integrations(tmp_path: Path, mo
 
     monkeypatch.setattr(
         "capamedia_cli.commands.auth.fabrics.setup",
-        lambda scope, token, force, refresh_npmrc: calls.append((f"fabrics:{scope}", token)),  # noqa: ARG005
+        lambda scope, token, force, refresh_npmrc: calls.append((f"fabrics:{scope}", token)),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.auth._codex_login_with_api_key",

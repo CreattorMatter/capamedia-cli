@@ -89,7 +89,7 @@ class MCPClient:
             for raw in iter(self._proc.stderr.readline, b""):
                 try:
                     line = raw.decode("utf-8", errors="replace").rstrip()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     line = str(raw)
                 if line:
                     self._stderr_buffer.append(line)

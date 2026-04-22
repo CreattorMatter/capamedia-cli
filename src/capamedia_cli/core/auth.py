@@ -42,7 +42,7 @@ def build_azure_git_env(value: str | None = None) -> dict[str, str]:
     if not pat:
         return {}
 
-    basic = base64.b64encode(f"capamedia:{pat}".encode("utf-8")).decode("ascii")
+    basic = base64.b64encode(f"capamedia:{pat}".encode()).decode("ascii")
     return {
         "GCM_INTERACTIVE": "Never",
         "GIT_TERMINAL_PROMPT": "0",

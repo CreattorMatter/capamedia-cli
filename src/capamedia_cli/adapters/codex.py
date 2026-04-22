@@ -10,7 +10,6 @@ from capamedia_cli.adapters.base import HarnessAdapter, model_hint_comment
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
 
-
 MODEL_MAP = {
     "opus": "gpt-5.3-codex",
     "sonnet": "gpt-5.1-codex",

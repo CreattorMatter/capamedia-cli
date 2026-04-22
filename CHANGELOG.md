@@ -4,6 +4,109 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.5.0] - 2026-04-22
+
+### Added - Sprint 2 del plan "cero trabajo humano"
+
+Cinco features grandes orientadas a **cero alucinaciones** + **sync automatico
+del canonical** + **self-correction con error especifico**.
+
+**Punto 2a — `capamedia canonical sync` (nuevo comando):**
+
+- Subcomandos `canonical sync`, `canonical diff`, `canonical audit`.
+- Sync lee prompts vivos de Julian (`C:/Dev/.../CapaMedia/prompts/`) y los
+  compara contra el canonical del CLI (`data/canonical/`). Diff unificado por
+  archivo, tabla rich, confirm, apply.
+- Mapping explicito por convencion de nombres (`01-analisis-servicio.md`,
+  `02-REST-migrar-servicio.md`, etc.) + fallback por nombre en `prompts/` y
+  `context/`. Status: `UPDATED | NEW | ORPHAN | SKIPPED | IDENTICAL`.
+- Preserva frontmatter del canonical cuando el source no lo tiene.
+- Orphans NUNCA se borran (solo reportan).
+- Log `.capamedia/canonical-sync/<timestamp>.log` con cada diff aplicado.
+- Flags: `--dry-run`, `--yes`/`-y`, `--include "**/*.md"`.
+
+**Punto 2b — `capamedia clone --deep-scan`:**
+
+- Nuevo modulo `core/azure_search.py`: wrapper minimo del Azure DevOps Code
+  Search API (`POST /_apis/search/codesearchresults`). Auth Basic base64.
+  Detecta errores HTTP, red, timeout, JSON invalido.
+- Nuevo modulo `core/dossier.py`: ejecuta queries por servicio (nombre,
+  WSDL namespace, TX codes, UMPs), recolecta hits, extrae variables
+  `CE_*`/`CCC_*` automaticamente del contenido de los matches.
+- `DOSSIER_<svc>.md` en el workspace con tabla por seccion + resumen.
+- `.capamedia/dossier-appendix.md` para inyectar al FABRICS_PROMPT y al
+  prompt de batch migrate — la AI ve los valores reales y no los inventa.
+- **Regla dura**: si la AI detecta referencia a ConfigMap/variable que NO
+  esta en el dossier, debe reportar `NEEDS_HUMAN_CONFIG` (no inventar).
+- Usa PAT de `CAPAMEDIA_AZDO_PAT` / `AZURE_DEVOPS_EXT_PAT` ya configurado.
+
+**Punto 7a — `capamedia canonical audit`:**
+
+- Audita cada archivo operativo del canonical (`prompts/migrate-*`,
+  `context/*`, `agents/*`).
+- Para cada seccion que parece regla (Rule/Regla/bullets `- **`), verifica:
+  1. Tiene imperativo (`MUST`/`NEVER`/`SIEMPRE`/`NUNCA`/`PROHIBIDO`)?
+  2. Tiene ejemplo negativo (`// NO`/`// BAD`/`// WRONG`)?
+- Tabla rich con gaps por archivo + flag `--verbose` para titulos sin
+  imperativo/ejemplo. Reduce alucinaciones: lo que no tiene MUST/NEVER
+  explicito es un vector de ambiguedad para la AI.
+- **Baseline actual**: 7 reglas sin imperativo, 23 sin ejemplo NO.
+
+**Punto 7b — inyeccion de catalogos en FABRICS_PROMPT:**
+
+- Nuevo modulo `core/catalog_injector.py`: carga `tx-adapter-catalog.json`,
+  `sqb-cfg-codigosBackend-config`, `Transacciones catalogadas Dominio.xlsx`.
+- `CatalogSnapshot` con mapeos TX-IIB -> TX-BANCS reales, codigos backend
+  (iib=00638, bancs_app=00045), reglas de estructura de error del PDF BPTPSRE.
+- `format_for_prompt(snapshot, relevant_tx=...)` renderiza bloque markdown
+  para inyectar. `commands/fabrics.py::generate()` y `commands/batch.py::
+  _build_batch_migrate_prompt()` lo consumen automatico.
+- Si servicio usa TX no catalogada: bullet `NEEDS_HUMAN_CATALOG_MAPPING`.
+- Evita duplicacion si el FABRICS_PROMPT previo ya inyecto el bloque.
+
+**Punto 7e — self-correction con error especifico:**
+
+- Nuevo modulo `core/self_correction.py`: `extract_failure_context()` lee
+  logs del engine previo + CHECKLIST.md + state.json, arma `FailureContext`
+  con `build_errors`, `checklist_violations`, `stdout_tail`, `stderr_tail`.
+- `build_correction_appendix(ctx, base_prompt)` adjunta al prompt del
+  retry un bloque "INTENTO N (correccion automatica)" con:
+  1. Categoria del fallo (`build | checklist | timeout | rate_limit`).
+  2. Cada violation con `check_id`, `evidence`, `hint` del registry autofix.
+  3. Tail del stdout/stderr (~50 lineas).
+  4. Instrucciones: "corregi ESPECIFICAMENTE estos fallos, no re-migrar".
+- `_run_service_with_retries` inyecta el context en iteraciones > 0.
+
+### Testing
+
+- **239/239 tests PASS** (vs 164 baseline v0.4.0). Nuevos:
+  - `test_canonical_sync.py` (13): IDENTICAL, UPDATED, NEW, ORPHAN, fm preserv,
+    dry-run, unmapped skip, context mapping.
+  - `test_azure_search.py` (10): auth header, endpoint, HTTP error, network,
+    JSON parse, SearchHit extraction.
+  - `test_dossier.py` (9): build happy path, CE/CCC extract, error graceful,
+    cap TX/UMP, render md, render appendix, write file.
+  - `test_canonical_audit.py` (6): split sections, imperative detection,
+    gaps, non-rule skip, bullet rules.
+  - `test_catalog_injector.py`: load con todas las fuentes, graceful fallback,
+    filter por relevant_tx, integracion con prompts.
+  - `test_self_correction.py`: extract context, correction appendix, retry
+    loop integration.
+- `ruff check` limpio en todos los archivos nuevos (engine, scheduler,
+  azure_search, dossier, canonical.py, los del sprint 1).
+
+### Pendiente para v0.6.0 y mas alla
+
+- Regla explicita en canonical: "Service > 200 LOC o > 4 responsabilidades
+  debe extraer utils a `util/<Concern>NormalizationUtil.java`" (SRP como
+  MUST/NEVER con ejemplo negativo). Hoy el patron sale por estilo del
+  prompt, no por regla explicita.
+- Auto-fix de refactor SRP (semantico, no regex). Proximo sprint: integrar
+  LSP/JavaParser para detectar Service gordo y proponer extraccion.
+- Metricas historicas agregadas (tokens por servicio, tasa de convergencia).
+
+---
+
 ## [0.4.0] - 2026-04-22
 
 ### Added - Engine abstraction + rate limit defensivo + autofix + dashboard
