@@ -27,6 +27,15 @@ install -> check-install -> auth bootstrap -> init -> fabrics setup
 
 ## Instalacion
 
+> 📘 **Guia completa Windows + macOS con troubleshooting:** [`docs/INSTALL.md`](docs/INSTALL.md)
+>
+> Cubre paso-a-paso: winget/Homebrew, Python 3.12, uv, Git, GCM, Java 21, Gradle,
+> Node 20, VS Code + SonarLint, Claude Code/Codex, Azure Artifacts, y los
+> errores tipicos que ya fixeamos (UnicodeDecodeError, PATH de Python 3.14,
+> init con subcarpeta anidada, UMPs en tpl-integration-services-was, etc).
+
+Quick install:
+
 ```bash
 # Recomendado — isolated con uv (agrega capamedia al PATH automatico)
 uv tool install capamedia-cli --from .
