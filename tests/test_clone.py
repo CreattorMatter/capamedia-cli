@@ -5,7 +5,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from capamedia_cli.commands.clone import _git_clone
+import yaml
+
+from capamedia_cli.commands.clone import _git_clone, _write_properties_report
+from capamedia_cli.core.legacy_analyzer import LegacyAnalysis, PropertiesReference
 
 
 def test_git_clone_uses_env_auth_when_pat_is_present(tmp_path: Path, monkeypatch) -> None:
@@ -30,3 +33,62 @@ def test_git_clone_uses_env_auth_when_pat_is_present(tmp_path: Path, monkeypatch
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GCM_INTERACTIVE"] == "Never"
     assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+
+# ---------------------------------------------------------------------------
+# v0.19.0: properties-report.yaml persistence
+# ---------------------------------------------------------------------------
+
+
+def test_write_properties_report_persists_pending_and_shared(tmp_path: Path) -> None:
+    """_write_properties_report genera .capamedia/properties-report.yaml con
+    la separacion correcta entre shared catalog y pendientes del banco."""
+    analysis = LegacyAnalysis(
+        source_kind="was",
+        wsdl=None,
+        properties_refs=[
+            PropertiesReference(
+                file_name="generalServices.properties",
+                status="SHARED_CATALOG",
+                source_hint="bank-shared-catalog",
+                keys_used=["OMNI_COD_SERVICIO_OK", "OMNI_COD_FATAL"],
+            ),
+            PropertiesReference(
+                file_name="umptecnicos0023.properties",
+                status="PENDING_FROM_BANK",
+                source_hint="ump:umptecnicos0023",
+                keys_used=["URL_XML", "RECURSO", "COMPONENTE"],
+                referenced_from=["ump-umptecnicos0023-was/src/.../Constantes.java"],
+                physical_path_hint="/apps/proy/OMNICANALIDAD_SERVICIOS/conf/umptecnicos0023.properties",
+            ),
+        ],
+    )
+
+    out = _write_properties_report(analysis, tmp_path)
+    assert out is not None
+    assert out.exists()
+    data = yaml.safe_load(out.read_text(encoding="utf-8"))
+
+    # Shared catalog debe estar en seccion separada
+    assert "generalServices.properties" in data["shared_catalog_keys_used"]
+    assert "OMNI_COD_SERVICIO_OK" in data["shared_catalog_keys_used"]["generalServices.properties"]
+
+    # Pendientes en service_specific_properties
+    pending = data["service_specific_properties"]
+    assert len(pending) == 1
+    assert pending[0]["file"] == "umptecnicos0023.properties"
+    assert pending[0]["status"] == "PENDING_FROM_BANK"
+    assert "URL_XML" in pending[0]["keys_used"]
+    assert "Pedir al owner" in pending[0]["action"]
+
+
+def test_write_properties_report_returns_none_when_no_refs(tmp_path: Path) -> None:
+    """Si no hay properties_refs, no genera archivo."""
+    analysis = LegacyAnalysis(
+        source_kind="was",
+        wsdl=None,
+        properties_refs=[],
+    )
+    out = _write_properties_report(analysis, tmp_path)
+    assert out is None
+    assert not (tmp_path / ".capamedia" / "properties-report.yaml").exists()

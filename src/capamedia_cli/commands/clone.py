@@ -37,6 +37,8 @@ from capamedia_cli.core.dossier import (
     render_dossier_prompt_appendix,
     write_dossier,
 )
+import yaml
+
 from capamedia_cli.core.legacy_analyzer import analyze_legacy
 
 console = Console()
@@ -542,6 +544,10 @@ def clone_service(
             umps=[u.name for u in analysis.umps],
         )
 
+    # --- Step 8: Properties references report (v0.19.0) ---
+    _write_properties_report(analysis, ws)
+    _show_properties_table(analysis)
+
     # --- Final summary table ---
     console.print()
     table = Table(title=f"Resumen: {service_name}", title_style="bold green")
@@ -556,8 +562,125 @@ def clone_service(
     table.add_row("TX repos clonados", f"{sum(1 for t in tx_results if t.status == 'cloned')}/{len(tx_results)}")
     table.add_row("BD presente", "SI" if analysis.has_database else "NO")
     table.add_row("Complejidad", analysis.complexity.upper())
+    pending_props = sum(
+        1 for p in analysis.properties_refs if p.status == "PENDING_FROM_BANK"
+    )
+    table.add_row(
+        ".properties pendientes del banco",
+        f"[bold red]{pending_props}[/bold red]" if pending_props else "[green]0[/green]",
+    )
     console.print(table)
+
+    if pending_props > 0:
+        console.print(
+            f"\n[bold yellow]ATENCION:[/bold yellow] hay [bold red]{pending_props}[/bold red] "
+            ".properties especificos del servicio/UMP que NO estan en el repo. "
+            "Antes de [cyan]/migrate[/cyan], pedir estos archivos al owner del "
+            "servicio para evitar placeholders en application.yml.\n"
+            f"  Detalle: [cyan].capamedia/properties-report.yaml[/cyan]"
+        )
 
     console.print("\n[bold]Siguiente paso:[/bold]")
     console.print("  Abri el workspace en tu IDE (Claude Code, Cursor, Windsurf)")
     console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabrics generate[/cyan] en shell")
+
+
+# ---------------------------------------------------------------------------
+# Properties references report (v0.19.0)
+# ---------------------------------------------------------------------------
+
+
+_STATUS_ICONS = {
+    "SHARED_CATALOG": "✓",
+    "SAMPLE_IN_REPO": "✓",
+    "PENDING_FROM_BANK": "✗",
+}
+
+
+_STATUS_DESCRIPTIONS = {
+    "SHARED_CATALOG": "[green]resuelto por catalogo embebido (v0.18.0)[/green]",
+    "SAMPLE_IN_REPO": "[cyan]sample encontrado en repo[/cyan]",
+    "PENDING_FROM_BANK": "[bold red]PENDIENTE - pedir al owner del servicio[/bold red]",
+}
+
+
+def _show_properties_table(analysis) -> None:
+    """Muestra tabla con los .properties referenciados y su estado."""
+    if not analysis.properties_refs:
+        return
+
+    console.print("\n[bold]7. Properties referenciados por el legacy[/bold]")
+    table = Table(title=".properties detectados", title_style="bold cyan")
+    table.add_column("Archivo", style="cyan", no_wrap=True)
+    table.add_column("Estado")
+    table.add_column("Origen", style="dim")
+    table.add_column("# Keys", justify="right")
+
+    for p in analysis.properties_refs:
+        icon = _STATUS_ICONS.get(p.status, "?")
+        desc = _STATUS_DESCRIPTIONS.get(p.status, p.status)
+        table.add_row(
+            f"{icon} {p.file_name}",
+            desc,
+            p.source_hint or "-",
+            str(len(p.keys_used)),
+        )
+    console.print(table)
+
+
+def _write_properties_report(analysis, ws: Path) -> Path | None:
+    """Persiste el reporte de properties en .capamedia/properties-report.yaml."""
+    if not analysis.properties_refs:
+        return None
+
+    capamedia_dir = ws / ".capamedia"
+    capamedia_dir.mkdir(exist_ok=True)
+    out = capamedia_dir / "properties-report.yaml"
+
+    data = {
+        "generated_by": "capamedia clone",
+        "shared_catalog_embedded": [
+            "generalservices.properties",
+            "catalogoaplicaciones.properties",
+        ],
+        "service_specific_properties": [
+            {
+                "file": p.file_name,
+                "status": p.status,
+                "source": p.source_hint,
+                "physical_path_hint": p.physical_path_hint,
+                "referenced_from": p.referenced_from[:10],
+                "keys_used": p.keys_used,
+                "sample_values": p.sample_values if p.status == "SAMPLE_IN_REPO" else {},
+                "action": _action_for_status(p.status),
+            }
+            for p in analysis.properties_refs
+            if p.status != "SHARED_CATALOG"
+        ],
+        "shared_catalog_keys_used": {
+            p.file_name: p.keys_used
+            for p in analysis.properties_refs
+            if p.status == "SHARED_CATALOG"
+        },
+    }
+
+    with out.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True, width=100)
+
+    return out
+
+
+def _action_for_status(status: str) -> str:
+    if status == "PENDING_FROM_BANK":
+        return (
+            "Pedir al owner del servicio antes de /migrate. "
+            "Sin este archivo, las keys quedan como ${CCC_*} placeholder en application.yml."
+        )
+    if status == "SAMPLE_IN_REPO":
+        return (
+            "Usar los sample_values como defaults en application.yml. "
+            "El owner puede confirmar si cambian por ambiente (dev/test/prod)."
+        )
+    if status == "SHARED_CATALOG":
+        return "No action - valores literales embebidos en bank-shared-properties.md"
+    return ""

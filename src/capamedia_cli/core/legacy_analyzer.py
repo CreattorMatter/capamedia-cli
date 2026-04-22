@@ -49,6 +49,25 @@ class UmpInfo:
 
 
 @dataclass
+class PropertiesReference:
+    """Archivo `.properties` referenciado por el legacy.
+
+    Se diferencian 3 status:
+    - "SHARED_CATALOG": esta en bank-shared-properties.md (embebido en CLI, no hay blocker)
+    - "SAMPLE_IN_REPO": existe un `.properties` en el repo con valores reales
+    - "PENDING_FROM_BANK": hay que pedirselo al owner del servicio antes de /migrate
+    """
+
+    file_name: str  # "umptecnicos0023.properties"
+    status: str  # "SHARED_CATALOG" | "SAMPLE_IN_REPO" | "PENDING_FROM_BANK"
+    source_hint: str = ""  # "ump:umptecnicos0023" | "service" | "unknown"
+    referenced_from: list[str] = field(default_factory=list)  # paths relativos
+    keys_used: list[str] = field(default_factory=list)
+    sample_values: dict[str, str] = field(default_factory=dict)
+    physical_path_hint: str = ""  # "/apps/proy/.../umptecnicos0023.properties"
+
+
+@dataclass
 class LegacyAnalysis:
     """Resultado completo del analisis de una carpeta legacy."""
 
@@ -62,6 +81,7 @@ class LegacyAnalysis:
     warnings: list[str] = field(default_factory=list)
     has_bancs: bool = False
     bancs_evidence: list[str] = field(default_factory=list)
+    properties_refs: list[PropertiesReference] = field(default_factory=list)
 
 
 # -- WSDL parsing (portType-only, skip binding) -----------------------------
@@ -421,6 +441,253 @@ def count_was_endpoints(legacy_root: Path) -> tuple[int, str]:
     return (0, "no se pudo determinar")
 
 
+# -- Properties references detection (WAS/UMP especifico) ------------------
+
+# Patterns para WAS legacy usando la clase Propiedad del banco.
+# Propiedad.get("KEY")              -> busca en el .properties ESPECIFICO del servicio/UMP
+# Propiedad.getGenerico("KEY")      -> generalservices.properties (catalogo compartido)
+# Propiedad.getCatalogo("KEY")      -> catalogoaplicaciones.properties (catalogo compartido)
+RE_PROPIEDAD_GET = re.compile(
+    r"Propiedad\s*\.\s*get\s*\(\s*\"([^\"]+)\"\s*\)"
+)
+RE_PROPIEDAD_GET_GENERICO = re.compile(
+    r"Propiedad\s*\.\s*getGenerico\s*\(\s*\"([^\"]+)\"\s*\)"
+)
+RE_PROPIEDAD_GET_CATALOGO = re.compile(
+    r"Propiedad\s*\.\s*getCatalogo\s*\(\s*\"([^\"]+)\"\s*\)"
+)
+# Literal paths a archivos .properties en /apps/proy/.../conf/NOMBRE.properties
+RE_PROPERTIES_PATH_LITERAL = re.compile(
+    r'"(/apps/proy/[^"]+?/([A-Za-z_][A-Za-z0-9_]*)\.properties)"'
+)
+# ResourceBundle.getBundle("nombre") - raro en WAS banco pero completa el catalogo
+RE_RESOURCE_BUNDLE = re.compile(
+    r'ResourceBundle\s*\.\s*getBundle\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"'
+)
+
+# Archivos que son catalogo compartido (embebidos en v0.18.0).
+# Comparacion case-insensitive porque los nombres varian
+# (generalServices vs generalservices, CatalogoAplicaciones vs catalogoaplicaciones).
+_SHARED_CATALOG_FILES = {
+    "generalservices.properties",
+    "catalogoaplicaciones.properties",
+}
+
+
+def _is_shared_catalog(file_name: str) -> bool:
+    return file_name.lower() in _SHARED_CATALOG_FILES
+
+
+def _read_sample_properties(path: Path) -> dict[str, str]:
+    """Parsea un archivo .properties y devuelve el dict de claves->valores."""
+    values: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return values
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("!"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+        elif ":" in line:
+            key, _, value = line.partition(":")
+        else:
+            continue
+        values[key.strip()] = value.strip()
+    return values
+
+
+def detect_properties_references(
+    roots: list[Path],
+) -> list[PropertiesReference]:
+    """Escanea roots (legacy + umps) en busca de archivos .properties referenciados.
+
+    Devuelve una lista unificada donde cada `PropertiesReference` dice:
+      - que archivo `.properties` se usa
+      - desde que paths del codigo se referencia
+      - que claves se usan (desde Propiedad.get/getGenerico/getCatalogo)
+      - si hay sample en el repo (extrae valores) o si hay que pedirlo al banco
+
+    Excluye explicitamente los `.properties` del catalogo compartido
+    (generalservices + catalogoaplicaciones) ya embebidos en v0.18.0.
+    """
+    # Mapa: file_name_lower -> PropertiesReference acumulando referencias
+    refs: dict[str, PropertiesReference] = {}
+
+    # Paso 1: scan codigo para patterns Propiedad.* y literal paths
+    # Por cada root (legacy + cada ump), escanear .java, .xml, .properties
+    for root in roots:
+        if not root.exists():
+            continue
+
+        root_name_lower = root.name.lower()
+        # Heuristica para source_hint: si el root empieza con "ump-" o contiene
+        # un nombre tipo umpXXX, lo marcamos como source del UMP correspondiente
+        source_hint = ""
+        ump_match = re.search(r"(ump[a-z]+\d{4})", root_name_lower)
+        if ump_match:
+            source_hint = f"ump:{ump_match.group(1)}"
+        else:
+            source_hint = "service"
+
+        for pattern in ("**/*.java", "**/*.xml"):
+            for f in root.rglob(pattern):
+                if ".git" in f.parts or "build" in f.parts or "target" in f.parts:
+                    continue
+                try:
+                    text = f.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+
+                # Path literal define el nombre del archivo
+                for m in RE_PROPERTIES_PATH_LITERAL.finditer(text):
+                    physical = m.group(1)
+                    name = f"{m.group(2)}.properties"
+                    name_key = name.lower()
+                    if _is_shared_catalog(name):
+                        if name_key not in refs:
+                            refs[name_key] = PropertiesReference(
+                                file_name=name,
+                                status="SHARED_CATALOG",
+                                source_hint=source_hint,
+                                physical_path_hint=physical,
+                            )
+                        continue
+                    entry = refs.get(name_key) or PropertiesReference(
+                        file_name=name,
+                        status="PENDING_FROM_BANK",
+                        source_hint=source_hint,
+                        physical_path_hint=physical,
+                    )
+                    entry.physical_path_hint = entry.physical_path_hint or physical
+                    try:
+                        entry.referenced_from.append(
+                            str(f.relative_to(root.parent))
+                        )
+                    except ValueError:
+                        entry.referenced_from.append(str(f))
+                    refs[name_key] = entry
+
+        # Propiedad.get("KEY") -> las keys van al archivo especifico del UMP
+        # (si hay 1 ump por root) o del servicio. Asociamos por nombre de root.
+        # Inferimos el nombre del archivo a partir del ump_match o source_hint.
+        specific_file_name = ""
+        if ump_match:
+            specific_file_name = f"{ump_match.group(1)}.properties"
+
+        for f in root.rglob("*.java"):
+            if ".git" in f.parts or "build" in f.parts or "target" in f.parts:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            # KEYS del archivo especifico
+            get_keys = RE_PROPIEDAD_GET.findall(text)
+            if get_keys and specific_file_name:
+                name_key = specific_file_name.lower()
+                entry = refs.get(name_key) or PropertiesReference(
+                    file_name=specific_file_name,
+                    status="PENDING_FROM_BANK",
+                    source_hint=source_hint,
+                )
+                for k in get_keys:
+                    if k not in entry.keys_used:
+                        entry.keys_used.append(k)
+                try:
+                    rel = str(f.relative_to(root.parent))
+                except ValueError:
+                    rel = str(f)
+                if rel not in entry.referenced_from:
+                    entry.referenced_from.append(rel)
+                refs[name_key] = entry
+
+            # getGenerico -> catalogo compartido (generalservices)
+            gen_keys = RE_PROPIEDAD_GET_GENERICO.findall(text)
+            if gen_keys:
+                name_key = "generalservices.properties"
+                entry = refs.get(name_key) or PropertiesReference(
+                    file_name="generalServices.properties",
+                    status="SHARED_CATALOG",
+                    source_hint="bank-shared-catalog",
+                )
+                for k in gen_keys:
+                    if k not in entry.keys_used:
+                        entry.keys_used.append(k)
+                refs[name_key] = entry
+
+            # getCatalogo -> catalogo compartido (catalogoaplicaciones)
+            cat_keys = RE_PROPIEDAD_GET_CATALOGO.findall(text)
+            if cat_keys:
+                name_key = "catalogoaplicaciones.properties"
+                entry = refs.get(name_key) or PropertiesReference(
+                    file_name="CatalogoAplicaciones.properties",
+                    status="SHARED_CATALOG",
+                    source_hint="bank-shared-catalog",
+                )
+                for k in cat_keys:
+                    if k not in entry.keys_used:
+                        entry.keys_used.append(k)
+                refs[name_key] = entry
+
+            # ResourceBundle.getBundle("nombre") - menos comun pero posible
+            for rb_name in RE_RESOURCE_BUNDLE.findall(text):
+                name = f"{rb_name}.properties"
+                name_key = name.lower()
+                if _is_shared_catalog(name):
+                    continue
+                entry = refs.get(name_key) or PropertiesReference(
+                    file_name=name,
+                    status="PENDING_FROM_BANK",
+                    source_hint=source_hint,
+                )
+                try:
+                    rel = str(f.relative_to(root.parent))
+                except ValueError:
+                    rel = str(f)
+                if rel not in entry.referenced_from:
+                    entry.referenced_from.append(rel)
+                refs[name_key] = entry
+
+    # Paso 2: si hay un .properties en el repo con el mismo nombre, marcar
+    # SAMPLE_IN_REPO y extraer valores reales.
+    for root in roots:
+        if not root.exists():
+            continue
+        for f in root.rglob("*.properties"):
+            if (".git" in f.parts or "build" in f.parts or "target" in f.parts
+                    or "node_modules" in f.parts):
+                continue
+            name_key = f.name.lower()
+            if name_key not in refs:
+                continue  # no lo referencia el codigo, skip
+            entry = refs[name_key]
+            if entry.status == "SHARED_CATALOG":
+                continue
+            values = _read_sample_properties(f)
+            if values:
+                entry.status = "SAMPLE_IN_REPO"
+                entry.sample_values = values
+                # keys_used ya viene del scan, pero completamos si estaba vacio
+                for k in values.keys():
+                    if k not in entry.keys_used:
+                        entry.keys_used.append(k)
+
+    # Orden estable: SHARED primero, luego SAMPLE, luego PENDING; alfa dentro
+    status_order = {
+        "SHARED_CATALOG": 0,
+        "SAMPLE_IN_REPO": 1,
+        "PENDING_FROM_BANK": 2,
+    }
+    return sorted(
+        refs.values(),
+        key=lambda r: (status_order.get(r.status, 9), r.file_name.lower()),
+    )
+
+
 # -- Full analysis orchestration --------------------------------------------
 
 
@@ -493,6 +760,16 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
     op_count = wsdl_info.operation_count if wsdl_info else 0
     complexity = score_complexity(op_count, len(umps), has_db)
 
+    # Properties references: scan legacy + cada UMP repo clonado.
+    # Solo aplica a WAS (y potencialmente IIB con UMPs Java), no a ORQ.
+    properties_refs: list[PropertiesReference] = []
+    if source_kind in ("was", "iib"):
+        roots_to_scan: list[Path] = [legacy_root]
+        for ump in umps:
+            if ump.repo_path and ump.repo_path.exists():
+                roots_to_scan.append(ump.repo_path)
+        properties_refs = detect_properties_references(roots_to_scan)
+
     return LegacyAnalysis(
         source_kind=source_kind,
         wsdl=wsdl_info,
@@ -504,4 +781,5 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
         warnings=warnings,
         has_bancs=has_bancs,
         bancs_evidence=bancs_evidence,
+        properties_refs=properties_refs,
     )

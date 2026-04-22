@@ -4,6 +4,71 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.19.0] - 2026-04-22
+
+### Added - `clone` detecta `.properties` especificos y los reporta como blockers de handoff
+
+**Feedback del user (Julian)**: antes de arrancar `/migrate` en un WAS nuevo,
+necesita saber QUE archivos `.properties` especificos del servicio tiene que
+pedirle al banco — sino llegan a `/migrate` con placeholders que el agente
+marca como blockers falsos. Esto complementa el catalogo embebido v0.18.0
+(generalservices + catalogoaplicaciones) con la **otra cara** del problema:
+los properties que SI cambian por servicio.
+
+**Implementacion**:
+
+- **Nuevo detector** `detect_properties_references` en `core/legacy_analyzer.py`
+  escanea codigo Java (y potencialmente ESQL/XML) buscando 4 patterns WAS reales:
+  - `Propiedad.get("KEY")` → `.properties` especifico del UMP/servicio
+  - `Propiedad.getGenerico("KEY")` → generalservices (catalogo compartido, skip)
+  - `Propiedad.getCatalogo("KEY")` → catalogoaplicaciones (catalogo compartido, skip)
+  - `ResourceBundle.getBundle("nombre")` → cualquier .properties custom
+  - Paths literales `"/apps/proy/.../conf/<archivo>.properties"` para
+    identificar el nombre fisico
+
+- **Nueva dataclass** `PropertiesReference` con status:
+  - `SHARED_CATALOG`: ya embebido en v0.18.0, no hay que hacer nada.
+  - `SAMPLE_IN_REPO`: hay un sample en el repo con valores, usar como defaults.
+  - `PENDING_FROM_BANK`: **BLOCKER** - pedirselo al owner del servicio
+    antes de `/migrate`.
+
+- **Integracion en `clone`**:
+  - Tabla nueva (paso 7) con los `.properties` detectados y su estado.
+  - Si hay `PENDING_FROM_BANK` > 0, warning en rojo con accion clara.
+  - Contador en la tabla de resumen final.
+  - Persistencia en `.capamedia/properties-report.yaml` para que
+    `/migrate` y otros comandos lo consuman.
+
+- **Canonical updated**: `bank-shared-properties.md` ahora documenta el
+  flujo del reporte automatico y la regla que el agente migrador debe
+  seguir al leerlo (no marcar shared como blocker, marcar pendientes en
+  MIGRATION_REPORT como "inputs del owner", usar samples si hay).
+
+### Tests agregados (13 nuevos)
+
+- `test_properties_detector.py` (11): detecta get/getGenerico/getCatalogo,
+  paths literales, ResourceBundle, excluye shared catalog, extrae samples,
+  orden estable del output.
+- `test_clone.py` (2): persiste el yaml con separacion pending/shared.
+
+### Ejemplo real (wstecnicos0008)
+
+Con este detector, el clone hubiera avisado **desde el dia 1**:
+
+```
+.properties detectados:
+  ✓ generalServices.properties     [resuelto por catalogo embebido]  bank-shared  (5 keys)
+  ✓ CatalogoAplicaciones.properties [resuelto por catalogo embebido]  bank-shared  (1 key)
+  ✗ umptecnicos0023.properties     [PENDIENTE - pedir al owner]       ump:umptec23 (6 keys)
+
+ATENCION: hay 1 .properties especifico del servicio/UMP que NO esta en el repo.
+Antes de /migrate, pedir estos archivos al owner del servicio.
+```
+
+En vez de que el MIGRATION_REPORT final diga "blocker: CCC_TX_ATTRIBUTES_XML_PATH"
+como si fuera descubrimiento sorpresa, el usuario ya sabia desde `clone` que
+necesitaba URL_XML, RECURSO, COMPONENTE, COMPONENTE2, UNIDAD_PERSISTENCIA, RECURSO2.
+
 ## [0.18.1] - 2026-04-22
 
 ### Fixed - `capamedia review` Fase 4 crasheaba con `UnicodeDecodeError` en Windows

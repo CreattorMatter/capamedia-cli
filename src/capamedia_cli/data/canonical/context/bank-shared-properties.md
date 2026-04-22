@@ -205,3 +205,26 @@ agente debe:
 4. En `MIGRATION_REPORT.md`, diferenciar claramente:
    - **"Valores resueltos desde catalogo del banco"** (NO son blockers)
    - **"Inputs pendientes del owner del servicio"** (SI son blockers de handoff)
+
+## Reporte automatico de `clone` (v0.19.0)
+
+Cuando `capamedia clone <svc>` termina, escribe automaticamente
+`.capamedia/properties-report.yaml` con:
+
+- `shared_catalog_keys_used`: que claves del catalogo embebido usa el servicio
+  (solo informativo, NO son blockers)
+- `service_specific_properties`: lista de `.properties` que NO estan en el
+  catalogo. Cada item tiene:
+  - `file`: nombre del archivo (ej `umptecnicos0023.properties`)
+  - `status`: `PENDING_FROM_BANK` | `SAMPLE_IN_REPO`
+  - `keys_used`: claves que el codigo referencia
+  - `sample_values`: solo si `status == SAMPLE_IN_REPO`
+  - `action`: que hacer (pedirlo al owner, usar samples, etc)
+
+**El agente migrador DEBE leer este archivo al arrancar `/migrate`** y:
+- Si hay `PENDING_FROM_BANK` → listarlos en `MIGRATION_REPORT.md` como
+  "Inputs pendientes del owner" (seccion clara). Los valores en
+  `application.yml` quedan como `${CCC_*}` hasta que el owner los pase.
+- Si hay `SAMPLE_IN_REPO` → usar los `sample_values` como defaults en
+  `application.yml` y anotar en el reporte "confirmar si cambian por ambiente".
+- Si TODO es `SHARED_CATALOG` → proyecto limpio, no hay blockers de properties.
