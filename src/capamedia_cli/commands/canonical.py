@@ -410,9 +410,24 @@ AUDIT_FILES = (
     "context/hexagonal.md",
     "context/code-style.md",
     "context/security.md",
+    "context/bank-official-rules.md",  # las 9 reglas del banco - deben tener todas MUST/NEVER
     "agents/migrador.md",
     "agents/validador-hex.md",
 )
+
+# Reglas oficiales del banco (validate_hexagonal.py) que DEBEN existir en el
+# canonical con MUST/NEVER + ejemplo NO. El audit falla si alguna falta.
+OFFICIAL_BANK_RULES = {
+    "1": "Capas application/domain/infrastructure",
+    "2": "WSDL framework (1 op REST+WebFlux, 2+ SOAP+MVC)",
+    "3": "@BpTraceable controllers",
+    "4": "@BpLogger services",
+    "5": "Sin navegacion cruzada entre capas",
+    "6": "Services sin metodos utilitarios",
+    "7": "application.yml sin ${VAR:default}",
+    "8": "Gradle lib-bnc-api-client obligatoria",
+    "9": "catalog-info.yaml completo",
+}
 
 # Palabras que marcan reglas operativas (si una seccion tiene estas palabras
 # DEBE tener tambien MUST/NEVER/OBLIGATORIO/PROHIBIDO con claridad).
@@ -554,6 +569,37 @@ def canonical_audit(
                 console.print("  [yellow]Sin ejemplo NO:[/yellow]")
                 for t in e.missing_neg_example:
                     console.print(f"    - {t}")
+    # Chequeo adicional: las 9 reglas del banco deben estar presentes
+    bank_file = root / "context" / "bank-official-rules.md"
+    missing_bank_rules: list[str] = []
+    if bank_file.exists():
+        bank_text = bank_file.read_text(encoding="utf-8")
+        for rule_id, rule_name in OFFICIAL_BANK_RULES.items():
+            # Heuristica: busca "Regla N" o "Rule N" en el archivo
+            pattern = f"Regla {rule_id}"
+            if pattern not in bank_text and f"Rule {rule_id}" not in bank_text:
+                missing_bank_rules.append(f"{rule_id} ({rule_name})")
+    else:
+        missing_bank_rules = [
+            f"{rid} ({name})" for rid, name in OFFICIAL_BANK_RULES.items()
+        ]
+
+    if missing_bank_rules:
+        console.print(
+            "\n[red]Faltan reglas oficiales del banco en el canonical:[/red]"
+        )
+        for r in missing_bank_rules:
+            console.print(f"  - {r}")
+        console.print(
+            "[dim]Agregar cada regla faltante a "
+            "`context/bank-official-rules.md` con MUST/NEVER + ejemplo.[/dim]"
+        )
+    else:
+        console.print(
+            "\n[green]OK[/green] las 9 reglas oficiales del banco estan en "
+            "`context/bank-official-rules.md`."
+        )
+
     if total_gap_imp > 0 or total_gap_neg > 0:
         console.print(
             "\n[yellow]Sugerencia:[/yellow] agregar MUST/NEVER y un ejemplo "

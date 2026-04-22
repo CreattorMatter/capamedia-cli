@@ -1,7 +1,8 @@
 ---
 name: checklist-rules
 title: Reglas completas del checklist BPTPSRE (15 bloques)
-description: Checklist oficial pass/fail con severidad HIGH/MEDIUM/LOW. Incluye BLOQUE 0 con dialogo cruzado legacy vs migrado.
+description: Checklist oficial pass/fail con severidad HIGH/MEDIUM/LOW. Incluye BLOQUE
+  0 con dialogo cruzado legacy vs migrado.
 type: prompt
 scope: project
 stage: post-migration
@@ -12,11 +13,11 @@ preferred_model:
   anthropic: claude-opus-4-7
 fallback_model: opus
 allowed_tools:
-  - Read
-  - Glob
-  - Grep
-  - Bash
-  - Write
+- Read
+- Glob
+- Grep
+- Bash
+- Write
 ---
 
 # 03 — Checklist Post-Migración (AI-ejecutable)
@@ -29,7 +30,7 @@ Sos un auditor de código que revisa un microservicio Java Spring Boot ya migrad
 
 ## CUÁNDO SE USA
 
-Después de correr el prompt de migración (`02-migrar-servicio.md`) y antes de abrir PR. También sirve para auditar servicios que ya están en `develop` antes de pasar a `release`.
+Después de correr el prompt de migración (`migracion/REST/02-REST-migrar-servicio.md` o `migracion/SOAP/02-SOAP-migrar-servicio.md` según el proyecto) y antes de abrir PR. También sirve para auditar servicios que ya están en `develop` antes de pasar a `release`.
 
 ## INPUT
 
@@ -44,8 +45,9 @@ Si no se pasa el segundo argumento, el BLOQUE 0 degrada a "solo cuenta en el WSD
 
 Cada bloque referencia su origen para que el lector sepa de dónde viene:
 
-- **[PDF-OFICIAL]** — `prompts/documentacion/BPTPSRE-CheckList Desarrollo-140426-212740.pdf` (documento oficial del área)
-- **[FB-JG]** — Feedback de Jean Pierre García (Slack, múltiples fechas)
+- **[PDF-OFICIAL]** — PDFs del área BPTPSRE bajo `prompts/documentacion/` (documentos oficiales)
+- **[FB-JG]** — Feedback del tech lead del equipo BPTPSRE (canal Slack interno)
+- **[FB-JA]** — Feedback de desarrolladores del equipo BPTPSRE (canal Slack interno)
 - **[COMMIT-XXXXX]** — Commit específico del repo de referencia
 - **[MCP]** — Confluence del MCP fabrics (versiones de librerías)
 
@@ -66,20 +68,26 @@ grep -rl "@RestController" <PATH>/src/main/java
 ```
 
 **Decisión:**
-- Hay `@Endpoint` → **SOAP** (gold standard: `tnd-msa-sp-wsclientes0015`)
-- Hay `@RestController` y no `@Endpoint` → **REST** (gold standard: `tnd-msa-sp-wsclientes0024`, FROZEN 2026-04-14)
+- Hay `@Endpoint` → **SOAP** (gold standard: `tnd-msa-sp-wsclientes0015`, pero SOLO válido para WAS 2+ ops)
+- Hay `@RestController` y no `@Endpoint` → **REST** (gold standard: `tnd-msa-sp-wsclientes0024`)
 - Ambos o ninguno → **FAIL HIGH** (proyecto malformado)
 
-### Check 0.2 — Conteo de operaciones: legacy ↔ migrado ↔ framework
+> **ADVERTENCIA sobre wsclientes0015:** Fue originalmente un servicio BUS (IIB) migrado como SOAP. Bajo la matriz MCP actual, BUS+invocaBancs SIEMPRE va REST+WebFlux. El 0015 es gold standard SOLO para WAS con 2+ operaciones. Si el proyecto auditado es BUS y tiene patrones SOAP del 0015 (@Endpoint, WebServiceConfig, NamespacePrefixInterceptor, BancsClientHelper, .block()), es **mal-clasificado**.
 
-**Principio del banco:** la matriz oficial es estricta por `<portType>` del WSDL legacy:
+### Check 0.2 — Clasificacion MCP: source type + parametro clave ↔ framework
 
-| Operaciones WSDL | Framework correcto | Prompt usado |
-|---|---|---|
-| **1** | Spring WebFlux + `@RestController` (Netty reactive, sin `.block()`) | REST |
-| **2 o más** | Spring MVC + `@Endpoint` (Spring WS dispatching sobre MVC + Undertow) | SOAP |
+**Principio del banco:** la matriz oficial es MCP-driven, basada en el tipo de origen legacy y el parametro MCP clave:
 
-Aplica igual para IIB, WAS y ORQ. BD presente es ortogonal (suma HikariCP+JPA o R2DBC según el caso, NO cambia la decisión REST/SOAP).
+| Origen Legacy | Condicion | Parametro MCP clave | Framework correcto | Prompt |
+|---|---|---|---|---|
+| **BUS (IIB)** | invocaBancs=true | `invocaBancs: true` (override) | REST + WebFlux + `@RestController` | REST |
+| **WAS** | 1 op WSDL | params estandar | REST + Spring MVC + `@RestController` | REST |
+| **WAS** | 2+ ops WSDL | params estandar | SOAP + Spring MVC + `@Endpoint` | SOAP |
+| **ORQ** | siempre | `deploymentType: orquestador` | REST + WebFlux + `@RestController` | REST |
+
+- **BUS + invocaBancs:** el MCP ignora `projectType` y `webFramework` — siempre REST+WebFlux (1 o N ops)
+- **WAS:** el conteo de operaciones decide REST MVC (1 op) vs SOAP MVC (2+ ops). BD presente es ortogonal
+- **ORQ:** siempre WebFlux via `deploymentType: orquestador`
 
 #### Paso 1 — Contar operaciones en el WSDL **migrado**
 
@@ -114,29 +122,67 @@ fi
 - `OPS_LEGACY != OPS_MIGRATED` → **HIGH** "¡Che! El WSDL del proyecto tiene N operaciones pero el legacy tenía M. Revisá si se perdió o duplicó alguna operación al copiar."
 - `<LEGACY_PATH>` no provisto → **MEDIUM** "No se pudo cruzar con el legacy; tomando el conteo del proyecto como fuente única."
 
-#### Paso 4 — Veredicto conversacional (diálogo explícito)
+#### Paso 4 — Detectar tipo de origen legacy
+
+```bash
+# Determinar si es BUS (IIB), WAS, o ORQ
+# BUS: tiene *.esql
+# WAS: tiene *.java + web.xml, no tiene *.esql
+# ORQ: tiene *.esql + patron IniciarOrquestacionSOAP o nombre ORQ*
+if [ -n "<LEGACY_PATH>" ]; then
+  HAS_ESQL=$(find <LEGACY_PATH> -name "*.esql" 2>/dev/null | head -1)
+  HAS_JAVA=$(find <LEGACY_PATH> -name "*.java" -path "*/src/*" 2>/dev/null | head -1)
+  HAS_WEBXML=$(find <LEGACY_PATH> -name "web.xml" 2>/dev/null | head -1)
+
+  if [ -n "$HAS_ESQL" ]; then
+    SOURCE_TYPE="BUS"  # podria ser ORQ, verificar nombre
+  elif [ -n "$HAS_JAVA" ] && [ -n "$HAS_WEBXML" ]; then
+    SOURCE_TYPE="WAS"
+  else
+    SOURCE_TYPE="UNKNOWN"
+  fi
+else
+  # Sin legacy path, inferir del migration-context.json
+  SOURCE_TYPE=$(grep -o '"tecnologia_origen":\s*"[^"]*"' <MIGRATED_PATH>/migration-context.json 2>/dev/null \
+    | sed 's/.*: *"\([^"]*\)"/\1/' | tr '[:lower:]' '[:upper:]')
+fi
+echo "Tipo de origen: $SOURCE_TYPE"
+```
+
+#### Paso 5 — Veredicto conversacional (diálogo explícito)
 
 El reporte debe rendir este diálogo literal, con los valores reemplazados:
 
 ```
+¿Cuál es el tipo de origen legacy? → $SOURCE_TYPE (BUS | WAS | ORQ)
 ¿Cuántas operaciones tiene el WSDL? → $OPS_LEGACY
-¿Qué framework corresponde según la matriz? → <REST si OPS=1 | SOAP si OPS>=2>
+¿Conecta con BANCS (invocaBancs)? → <SÍ | NO>
+¿Qué framework corresponde según la matriz MCP? → <ver tabla abajo>
 ¿Qué framework se usó en la migración? → <projectType de Check 0.1>
 ¿Coincide lo usado con lo que la matriz pide? → <SÍ ✅ | NO ❌>
 Veredicto final: <PASS | HIGH mal-clasificado | etc.>
 ```
 
-#### Paso 5 — Reglas de severidad
+#### Paso 6 — Reglas de severidad (matriz MCP-driven)
 
-- 1 op legacy + tipo REST → ✅ **PASS**. Diálogo: *"Es 1 op, va REST. ¿Está OK? Sí, está OK."*
-- 2+ ops legacy + tipo SOAP → ✅ **PASS**. Diálogo: *"Son N ops, va SOAP. ¿Está OK? Sí, está OK."*
-- 1 op legacy + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es 1 op → debió ir REST + WebFlux. Se migró como SOAP → está mal-clasificado."*
-- 2+ ops legacy + tipo REST → **HIGH** (mal-clasificado). Diálogo: *"Son N ops → REST+WebFlux no soporta dispatching multi-operation, necesita Spring WS sobre MVC."*
-- 1 op + tipo REST + `DB_USAGE: YES` → ✅ **PASS con flag** `ATTENTION_NEEDED_REST_WITH_DB`. Diálogo: *"Es 1 op con BD → queda en REST. ¿Usaste R2DBC o blocking boundary? Confirmá el approach con el equipo."*
+**BUS (IIB) + invocaBancs:**
+- BUS + tipo REST (WebFlux) → ✅ **PASS** (cualquier cantidad de ops). Diálogo: *"Es BUS con invocaBancs, va REST+WebFlux. ¿Está OK? Sí, está OK."*
+- BUS + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es BUS con invocaBancs → debió ir REST+WebFlux. El MCP con invocaBancs=true ignora projectType/webFramework. Se migró como SOAP → está mal-clasificado."*
 
-**Hallazgo documentado:** wsclientes0007 tiene 1 op y está migrado como SOAP (ver [memoria mis-classification](../../.claude/projects/C--Dev-Banco-Pichincha-CapaMedia/memory/reference_mcp_fabrics_gaps.md)). Es **caso mal-clasificado que NO se reclasifica ahora** por costo vs beneficio (ya está funcionando, pasa checklist, build verde). Los futuros servicios con 1 op deben usar el prompt REST (sin importar si tienen BD — la matriz es estricta por cantidad de operaciones).
+**WAS:**
+- WAS + 1 op + tipo REST → ✅ **PASS**. Diálogo: *"Es WAS con 1 op, va REST+MVC. ¿Está OK? Sí, está OK."*
+- WAS + 2+ ops + tipo SOAP → ✅ **PASS**. Diálogo: *"Es WAS con N ops, va SOAP+MVC. ¿Está OK? Sí, está OK."*
+- WAS + 1 op + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es WAS con 1 op → debió ir REST+MVC. Se migró como SOAP → está mal-clasificado."*
+- WAS + 2+ ops + tipo REST → **HIGH** (mal-clasificado). Diálogo: *"Es WAS con N ops → REST no soporta dispatching multi-operation para WAS, necesita Spring WS sobre MVC."*
+- WAS + tipo REST + `DB_USAGE: YES` → ✅ **PASS**. Diálogo: *"Es WAS con 1 op y BD → queda en REST+MVC con HikariCP+JPA. Correcto."*
 
-**Guardar en el contexto del reporte:** `projectType`, `goldStandard`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
+**ORQ:**
+- ORQ + tipo REST (WebFlux) → ✅ **PASS** (cualquier cantidad de ops). Diálogo: *"Es ORQ, va REST+WebFlux via deploymentType:orquestador. ¿Está OK? Sí, está OK."*
+- ORQ + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es ORQ → siempre va WebFlux. Se migró como SOAP → está mal-clasificado."*
+
+**Hallazgo documentado:** wsclientes0007 es BUS (IIB) con 1 op y está migrado como SOAP. Bajo la nueva matriz MCP, esto es **mal-clasificado** (BUS+invocaBancs siempre va REST+WebFlux). Es un caso legacy que NO se reclasifica ahora por costo vs beneficio (ya está funcionando, pasa checklist, build verde). Los futuros servicios BUS deben usar REST+WebFlux (via `invocaBancs: true`).
+
+**Guardar en el contexto del reporte:** `sourceType`, `invocaBancs`, `projectType`, `goldStandard`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
 
 ---
 
@@ -250,6 +296,33 @@ grep -l "extends.*Port\s" <PATH>/src/main/java/com/pichincha/sp/infrastructure/
 
 Esperado: **0 archivos** (deben usar `implements` sobre interfaces). **MEDIUM**.
 
+### Check 1.6 — Service Purity: CERO métodos privados en services [FB-JG]
+
+Los services (`application/service/`) deben contener **SOLO** las implementaciones de los métodos de la interfaz del input port. Son orquestadores puros — delegan a output ports y a utilities de `application/util/`. **CERO métodos privados** (validaciones, normalizaciones, formateos, builders) dentro de la clase service.
+
+```bash
+# Buscar métodos privados en services (excluyendo campos private final)
+grep -rnE "^\s+private\s+(?!final)" <PATH>/src/main/java/com/pichincha/sp/application/service/*.java
+```
+
+Cualquier match → **HIGH**. Acción: extraer cada método privado a una clase helper en `application/util/`:
+- `private void validateRequest(...)` → `application/util/<Domain>ValidationHelper.java`
+- `private <Type> normalize*(...)` → `application/util/<Domain>NormalizationHelper.java`
+- `private <Type> format*(...)` → `application/util/<Domain>FormatHelper.java`
+- `private <Type> build*(...)` → `application/util/<Domain>BuilderHelper.java`
+
+```bash
+# Verificar que existen helpers en application/util/ si el servicio tiene lógica de negocio
+find <PATH>/src/main/java/com/pichincha/sp/application/util/ -name "*Helper.java" -o -name "*Util.java" | wc -l
+```
+
+- 0 archivos y el servicio tiene validaciones/normalizaciones → **HIGH** (la lógica está enterrada en el service).
+- ≥ 1 archivo → ✅ PASS (la lógica está correctamente extraída).
+
+**Justificación:** services con métodos privados se convierten en clases gordas que violan SRP, son difíciles de testear unitariamente en aislamiento, y generan conflictos de merge cuando múltiples desarrolladores tocan el mismo archivo. Extraer a `application/util/` hace cada concern independientemente testeable y reutilizable entre services.
+
+**Referencia:** regla incorporada para evitar la acumulación de lógica auxiliar en services observada en migraciones anteriores.
+
 ---
 
 ## BLOQUE 2 — Logging y tracing
@@ -330,7 +403,7 @@ grep -rnE "log\.info\(\"(Basic|Retrieved|Starting|Processing|Got|Found|Mapping|N
 
 Cualquier match → **MEDIUM**. Revisar si son eventos de contrato o diagnóstico. Si es diagnóstico → pasar a `log.debug` (ServiceLogHelper ya lo soporta).
 
-**Referencia:** feedback Jonathan Arana / Alexis 2026-04-17 sobre wsclientes0007 (`log.info("Basic info retrieved for CIF: {}", ...)` bajado a debug en commit post-fix).
+**Referencia:** feedback del equipo [FB-JA] sobre wsclientes0007 (`log.info("Basic info retrieved for CIF: {}", ...)` bajado a debug en post-fix).
 
 ### Check 2.7 — No abuso de log.info
 
@@ -383,6 +456,95 @@ grep -nE "public\s+[A-Z]\w+Response\s+[A-Z]\w+\(" <PATH>/src/main/java/com/pichi
 
 Método en PascalCase → **MEDIUM** (rompe convención Java).
 
+### Check 3.5 — Naming profesional: sin nombres genéricos en clases, variables ni campos [FB-JG]
+
+Clases, variables inyectadas, y campos deben ser **específicos al dominio de negocio**. Nombres genéricos como `service`, `adapter`, `port`, `request`, `response`, `data`, `result`, `dto`, `entity`, `mapper` **sin prefijo de dominio** dificultan la lectura, generan ambigüedad cuando el proyecto crece, y no pasan peer review.
+
+#### 3.5.1 — Clases con nombres genéricos
+
+```bash
+# Buscar clases sin dominio — solo nombre genérico
+find <PATH>/src/main/java/com/pichincha/sp -name "*.java" | xargs grep -l "^public class \|^public interface \|^public record " | while read f; do
+  BASENAME=$(basename "$f" .java)
+  echo "$BASENAME" | grep -qxE "(Service|ServiceImpl|Adapter|Port|InputPort|OutputPort|Controller|Mapper|Helper|Request|Response|Dto|Config|Constants|Exception)" \
+    && echo "GENERIC CLASS: $BASENAME in $f"
+done
+```
+
+Cualquier match → **HIGH**. Ejemplos de violación y corrección:
+
+| Incorrecto (genérico) | Correcto (dominio explícito) | Por qué |
+|---|---|---|
+| `ServiceImpl.java` | `CustomerServiceImpl.java` | No dice QUÉ servicio |
+| `Adapter.java` | `CustomerAdapterBancs.java` | No dice QUÉ adapta ni HACIA dónde |
+| `InputPort.java` | `ConsultarClienteInputPort.java` | No dice QUÉ operación expone |
+| `OutputPort.java` | `BancsCustomerOutputPort.java` | No dice QUÉ downstream ni dominio |
+| `Request.java` | `CustomerRequest.java` | No dice QUÉ request |
+| `Response.java` | `ConsultarContactoResponse.java` | No dice de QUÉ operación |
+| `Mapper.java` | `BancsCustomerMapper.java` | No dice QUÉ mapea ni entre qué capas |
+| `Helper.java` | `SoapResponseHelper.java` | No dice QUÉ ayuda |
+| `Controller.java` | `WSClientes0024Controller.java` | No dice QUÉ servicio |
+| `Config.java` | `WebClientProperties.java` | No dice QUÉ configura |
+
+#### 3.5.2 — Variables inyectadas con nombres genéricos
+
+```bash
+# Buscar campos inyectados con nombre genérico (private final <Type> service/port/adapter/mapper/helper)
+grep -rnE "private final \w+ (service|port|adapter|mapper|helper|client|repository|config)\s*;" \
+    <PATH>/src/main/java/com/pichincha/sp/
+```
+
+Cualquier match → **MEDIUM**. El nombre del campo debe reflejar el dominio:
+
+| Incorrecto | Correcto | Contexto |
+|---|---|---|
+| `private final CustomerServicePort service;` | `private final CustomerServicePort customerService;` | En el Controller |
+| `private final BancsCustomerPort port;` | `private final BancsCustomerPort bancsCustomerPort;` | En el Service |
+| `private final BancsClient client;` | `private final BancsClient bancsClient;` | En el Adapter |
+| `private final SoapCustomerMapper mapper;` | `private final SoapCustomerMapper soapCustomerMapper;` | En el Controller |
+| `private final BancsCustomerMapper mapper;` | `private final BancsCustomerMapper bancsCustomerMapper;` | En el Adapter |
+
+**Excepción aceptada:** `private final CustomLogLevelHandler customLogLevelHandler;` y `private final ServiceLogHelper log;` — son nombres canónicos del banco.
+
+#### 3.5.3 — Variables locales y parámetros genéricos
+
+```bash
+# Buscar variables locales con nombres genéricos en métodos de negocio
+grep -rnE "\b(var|String|Object|Mono|List)\s+(data|result|response|request|value|item|obj|temp|tmp|res|req|ret)\s*[=;]" \
+    <PATH>/src/main/java/com/pichincha/sp/application/service/
+```
+
+Cualquier match en `application/service/` → **MEDIUM**. En la capa de negocio, las variables deben contar la historia del dominio:
+
+| Incorrecto | Correcto | Contexto |
+|---|---|---|
+| `var result = bancsPort.getCustomerInfo(...)` | `var customerInfo = bancsPort.getCustomerInfo(...)` | Describe QUÉ contiene |
+| `var response = bancsClient.call(...)` | `var bancsResponse = bancsClient.call(...)` | Clarifica el ORIGEN |
+| `var data = mapper.toCustomer(...)` | `var customer = mapper.toCustomer(...)` | Nombra la ENTIDAD |
+| `var request = CustomerRequest.builder()...` | `var customerRequest = CustomerRequest.builder()...` | Evita colisión con parámetro |
+| `var item : collection` | `var address : customerAddresses` | Nombra la COSA que itera |
+
+**Excepción aceptada:** variables en lambdas de una línea (`ex -> ...`, `e -> ...`, `t -> ...`) y parámetros de MapStruct `@Mapping` — el contexto es suficiente.
+
+#### 3.5.4 — Constantes genéricas
+
+```bash
+# Buscar constantes con nombres que no identifican su propósito
+grep -rnE "static final String (ERROR|MESSAGE|CODE|VALUE|NAME|TYPE|STATUS|DEFAULT|PARAM)\s*=" \
+    <PATH>/src/main/java/com/pichincha/sp/
+```
+
+Cualquier match → **MEDIUM**. Las constantes deben autodocumentarse:
+
+| Incorrecto | Correcto |
+|---|---|
+| `static final String ERROR = "999";` | `static final String ERROR_CODE_SERVICE = "9999";` (del catálogo `errores.xml`) |
+| `static final String MESSAGE = "OK";` | `static final String SUCCESS_MESSAGE_BANCS = "OK";` |
+| `static final String CODE = "0";` | `static final String SUCCESS_CODE = "0";` |
+| `static final String NAME = "WSClientes0024";` | `static final String WS_COMPONENTE = "WSClientes0024";` |
+
+**Referencia:** `CatalogExceptionConstants` debe usar el patrón `CONTEXT_NOUN` con códigos del catálogo oficial `sqb-cfg-errores-errors/errores.xml`: `WS_RECURSO`, `SUCCESS_CODE`, `ERROR_CODE_SERVICE` (9999), `ERROR_CODE_BANCS_INVOKE` (9929), `ERROR_CODE_BANCS_PARSE` (9922), `ERROR_CODE_HEADER` (9927).
+
 ### Check 3.4 — `postProcessWsdl.groovy` sin decapitalize activo [COMMIT-bf913b9] (solo SOAP)
 
 Solo detecta **invocaciones activas** de `decapitalize` (no la mera declaración de la función).
@@ -392,7 +554,7 @@ Solo detecta **invocaciones activas** de `decapitalize` (no la mera declaración
 grep -nE "\.decapitalize\(|= decapitalize\(" <PATH>/gradle/postProcessWsdl.groovy
 ```
 
-Cualquier match → **HIGH**. Revertido en commit `bf913b9` del 0007 (2026-04-14).
+Cualquier match → **HIGH**. Revertido en commit `bf913b9` del 0007 (ver Historial).
 
 **Nota:** las funciones `injectXmlRootElement()` y `updatePackageInfo()` son **necesarias** en el patrón del banco (generan `@XmlRootElement` y `package-info.java`), NO son problemáticas. Solo `decapitalize` invocada activamente rompería el PascalCase de los elementos raíz.
 
@@ -460,7 +622,7 @@ grep -c "Datos de la cabecera de la transaccion no se han asignado" \
 - 0 matches → **MEDIUM** (mensaje custom en vez del canónico).
 - ≥ 1 match ✓ PASS (puede ser 1 constante reusada o 2 literales).
 
-**Referencia:** wsclientes0007 post-fix 2026-04-16 (commit `bbcc62a` de Kevin Armas).
+**Referencia:** wsclientes0007 post-fix (commit `bbcc62a`).
 
 ### Check 4.6 — Patterns de validación del header externalizados [FB-JA] [Rule 9e.2]
 
@@ -491,7 +653,7 @@ grep -cE "^@Component|public class HeaderRequestValidator" \
 
 < 2 matches → **HIGH** (el validator debe ser `@Component` con inyección de props, no `final class` con métodos estáticos).
 
-**Referencia:** feedback Jonathan Arana / Alexis 2026-04-17 sobre wsclientes0007; refactor aplicado en post-fix del mismo día.
+**Referencia:** feedback del equipo [FB-JA] sobre wsclientes0007; refactor aplicado en post-fix.
 
 ---
 
@@ -505,22 +667,23 @@ grep -cE "^@Component|public class HeaderRequestValidator" \
 grep -A5 "public <T> T execute" <PATH>/src/main/java/com/pichincha/sp/infrastructure/output/adapter/bancs/helper/BancsClientHelper.java | grep -c "catch\s*(\s*RuntimeException"
 ```
 
-0 matches → **HIGH**. Sin este catch, `WebClientResponseException` burbujea como RuntimeException y el Controller devuelve "999 Error interno" en vez del error real de Bancs.
+0 matches → **HIGH**. Sin este catch, `WebClientResponseException` burbujea como RuntimeException y el Controller devuelve "9999 Error al procesar el servicio" genérico en vez del error real de Bancs.
 
-**Patrón requerido:**
+**Patrón requerido (códigos del catálogo `sqb-cfg-errores-errors/errores.xml`):**
 ```java
 try {
   response = doCall(txCode, ctx, body, responseType);
 } catch (BancsOperationException e) {
   throw e;
 } catch (RuntimeException e) {
-  throw new BancsOperationException("999",
-    e.getMessage() != null ? e.getMessage() : "Bancs integration exception",
+  throw new BancsOperationException(
+    CatalogExceptionConstants.ERROR_CODE_BANCS_INVOKE,  // "9929" from errores.xml
+    e.getMessage() != null ? e.getMessage() : "Error al invocar transaccion Bancs",
     txCode);
 }
 ```
 
-**Referencia:** wsclientes0015 NO lo tiene (hueco del gold standard). wsclientes0007 lo cubrió post-feedback de Jean Pierre.
+**Referencia:** wsclientes0015 NO lo tiene (hueco del gold standard). wsclientes0007 lo cubrió post-feedback del tech lead [FB-JG].
 
 ### Check 5.2 — Controller/Service atrapa BancsOperationException
 
@@ -579,7 +742,7 @@ public record BancsErrorCodesProperties(String iib, String bancsApp) {}
 // buildBancsErrorResponse → backendCodes.bancsApp()  (BancsOperationException)
 ```
 
-**Referencia:** wsclientes0024/0013/0006 (golds) todos tienen el bug `"00000"` — **no replicar**. wsclientes0007 lo corrigió post-auditoría 2026-04-16.
+**Referencia:** wsclientes0024/0013/0006 (golds) todos tienen el bug `"00000"` — **no replicar**. wsclientes0007 lo corrigió en post-auditoría (ver Historial).
 
 ### Check 5.5 — BusinessValidationException en domain
 
@@ -646,7 +809,7 @@ grep -cE 'assertEquals\("(INFO|ERROR|FATAL)",.*getTipo' \
 
 < 4 matches → **MEDIUM**. Cada rama del Controller debe tener al menos un test que asierte el `tipo` (success=INFO, business=ERROR, bancs=FATAL, unexpected=FATAL).
 
-**Referencia:** wsclientes0007 post-fix 2026-04-16 (tipo FATAL para header-missing + Bancs + Exception genérica). Los golds 0024/0013/0006 NO aplican esta clasificación — **no replicar**.
+**Referencia:** wsclientes0007 post-fix (tipo FATAL para header-missing + Bancs + Exception genérica). Los golds 0024/0013/0006 NO aplican esta clasificación — **no replicar**.
 
 ---
 
@@ -979,7 +1142,7 @@ Faltante → **HIGH**.
 
 ## BLOQUE 11 — REST strategies (solo si aplica)
 
-**Origen:** wsclientes0024 (gold standard REST, FROZEN 2026-04-14)
+**Origen:** wsclientes0024 (gold standard REST, referencia estable)
 
 Si `projectType != REST`, saltar.
 
@@ -1277,6 +1440,153 @@ Si hay match -> **HIGH** (CRITICAL). Acción: rotar el token en SonarCloud inmed
 
 ---
 
+## BLOQUE 15 — Estructura de error oficial y librerías opcionales
+
+**Origen:** [PDF-OFICIAL] `BPTPSRE-Estructura de error`, `BPTPSRE-Archivos de configuración`, `BPTPSRE-Servicios Configurables`, `BPTPSRE-Librería Audit Log Reactive`, `BPTPSRE-Librería Stratio Connector`.
+
+Este bloque NO es redundante con el BLOQUE 5 (que cubre propagación de errores Bancs). Cubre la **forma** de los 8 campos del `<error>` según el PDF oficial + la presencia correcta de las 2 librerías internas opcionales.
+
+### Check 15.1 — `error.recurso` respeta el formato `<SERVICIO>/<MÉTODO>`
+
+```bash
+# Buscar asignaciones / setters de recurso y ver que contengan "/"
+grep -rnE "setRecurso\(|RECURSO\s*=" <PATH>/src/main/java/ \
+  | grep -vE "//|\\*" \
+  | head -20
+```
+
+**Veredicto:** para cada match, el string literal debe contener `/` y empezar con el `spring.application.name` del servicio (ej: `tnd-msa-sp-wsclientes0024/getDatosBasicos`). Si hay un `setRecurso(...)` con string sin `/`, o que no empieza con el artifactId → **HIGH**.
+
+### Check 15.2 — `error.componente` sigue estructura oficial
+
+El formato depende del tipo de legacy (IIB vs WAS). Consultar `ANALISIS_<ServiceName>.md` para saber cuál aplica.
+
+**Casos IIB (mayoría):**
+
+```bash
+# Listar todos los valores literal que se asignan a componente
+grep -rnE "setComponente\(\"[^\"]+\"|COMPONENTE\s*=\s*\"[^\"]+" <PATH>/src/main/java/
+```
+
+Cada valor debe matchear uno de:
+- El `spring.application.name` (ej: `tnd-msa-sp-wsclientes0024`) — caso servicio interno / respuesta exitosa
+- `ApiClient` (o nombre de librería exacto) — caso error propagado desde librería
+- `TX\d{6}` (prefijo `TX` + 6 dígitos) — caso error de negocio desde ApiClient
+
+Cualquier otro literal → **MEDIUM** (revisar caso a caso).
+
+**Casos WAS (menos común):** valor debe matchear el nombre del método legacy, el `<NOMBRE_SERVICIO>`, o un valor literal de un `.properties` legacy. Si el origen no es rastreable → **MEDIUM**.
+
+### Check 15.3 — `error.mensajeNegocio` NUNCA se setea con valor real
+
+DataPower gestiona este campo en frente del microservicio. El servicio debe pasarlo como `null` o `""`.
+
+```bash
+# Buscar setters con string literal no vacío
+grep -rnE "setMensajeNegocio\(\"[^\"]+\"\)" <PATH>/src/main/java/
+```
+
+0 matches esperado → ✅ **PASS**. Cualquier match con contenido real → **HIGH** (DataPower va a sobreescribir pero mejor no enviar ruido). Excepción aceptada: `setMensajeNegocio(null)` o `setMensajeNegocio("")` son válidos (pasan el pipe builder por simetría).
+
+### Check 15.4 — `error.mensaje` sin prefijo `<NODO>-`
+
+```bash
+# Buscar mensajes con patrón "NODO-..." al principio
+grep -rnE "setMensaje\(\"[A-Z][A-Z_0-9]+-" <PATH>/src/main/java/
+```
+
+Si hay match (ej: `setMensaje("IIB-algo...")`, `setMensaje("WS0024-...")`) → **MEDIUM**. Acción: strippear el prefijo, dejar solo la descripción. QA valida solo descripción, no nodo.
+
+### Check 15.5 — `error.backend` no es `"00000"` literal
+
+Ya cubierto por **Check 5.4**. Aquí solo referencia cruzada: no duplicar el check, pero si 5.4 falla este bloque lo hereda como pendiente.
+
+### Check 15.6 — Audit Log Reactive: si está, está completa
+
+```bash
+# ¿La librería está declarada?
+grep -E "mdw-dm-lib-audit-log-reactive" <PATH>/build.gradle
+```
+
+Si **no** está → saltar 15.6 (servicio no la usa — OK).
+
+Si **sí** está:
+
+```bash
+# Controllers deben tener @LogAudit
+grep -L "@LogAudit" <PATH>/src/main/java/com/pichincha/sp/infrastructure/input/adapter/rest/*Controller.java
+
+# Services/adapters deben tener @LogAuditStep (no @LogAudit)
+grep -rL "@LogAuditStep" <PATH>/src/main/java/com/pichincha/sp/application/service/
+grep -rn "@LogAudit\b" <PATH>/src/main/java/com/pichincha/sp/application/service/
+
+# Kafka credentials via env vars, no literales
+grep -A2 "jaas:" <PATH>/src/main/resources/application.yml | grep -E "username=\"[^\$]"
+```
+
+**Veredicto:**
+- Controller sin `@LogAudit` → **HIGH**
+- Service/adapter con `@LogAudit` (debía ser `@LogAuditStep`) → **HIGH**
+- Service/adapter sin `@LogAuditStep` → **MEDIUM**
+- Kafka `username`/`password` literales en yml → **HIGH** (deben ser `${CCC_*}`)
+
+### Check 15.7 — Stratio Connector: si está, está completa
+
+```bash
+grep -E "mdw-dm-lib-stratio-connector" <PATH>/build.gradle
+```
+
+Si **no** está → saltar 15.7.
+
+Si **sí** está:
+
+```bash
+# Los adapters deben inyectar StratioQueryExecutor, no hand-rolled clients
+grep -rn "StratioQueryExecutor" <PATH>/src/main/java/com/pichincha/sp/infrastructure/output/adapter/
+
+# OAuth2 client-name debe ser unique (typically = spring.application.name)
+grep -A1 "client-name:" <PATH>/src/main/resources/application.yml
+
+# URL de Stratio y OAuth2 via env var
+grep -E "stratio:\s*$|token-uri:|base-url:" <PATH>/src/main/resources/application.yml
+```
+
+**Veredicto:**
+- Adapter Stratio sin inyectar `StratioQueryExecutor` (hand-rolled WebClient) → **HIGH**
+- `client-name` hardcodeado distinto del artifactId del servicio → **MEDIUM**
+- `stratio.base-url` o `token-uri` literales (no `${CCC_*}`) → **HIGH**
+- Si `spring.data.redis.enabled=true` pero falta `host`/`port` → **HIGH**
+
+### Check 15.8 — XMLs de configuración IIB: si aplica, inyectados como `@ConfigurationProperties`
+
+Si el ANALISIS reportó uso de `GestionarRecursoXML` en legacy:
+
+```bash
+# Buscar @ConfigurationProperties que mapee el XML (no debe leer XML en runtime)
+grep -rn "@ConfigurationProperties" <PATH>/src/main/java/com/pichincha/sp/infrastructure/config/
+```
+
+**Veredicto:**
+- Si el servicio migrado sigue leyendo `.xml` de disco con `XmlMapper`/`DocumentBuilder` en runtime → **HIGH**. Acción: migrar el contenido del XML a `application.yml` o ConfigMap, binding vía `@ConfigurationProperties`.
+- Si no hay trace de XML loading en el migrado → ✅ **PASS** (probablemente ya se migró a properties).
+
+### Check 15.9 — Configurables IIB desde CSV local: si aplica, resueltos en `application.yml` / Helm
+
+Si el ANALISIS reportó uso de `GestionarRecursoConfigurable` en legacy:
+
+```bash
+# Buscar placeholders pendientes o trazas del legacy en config
+grep -rnE "TBD|pendiente_validar|Environment\\.cache|GestionarRecursoConfigurable" <PATH>/src/main/resources/application.yml <PATH>/helm/ 2>/dev/null
+```
+
+**Veredicto:**
+- Cada campo usado del configurable debe trazarse al archivo local `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv` o a una `${CCC_*}` con presencia en Helm si es secreto o depende del ambiente.
+- Si queda `TBD` aunque el valor exista en el CSV local → **HIGH**.
+- Si el servicio deja nombres genéricos o env vars sin mapear los campos detectados en `ANALISIS_<ServiceName>.md` → **MEDIUM**.
+- Si todos los campos quedan resueltos con literal o `${CCC_*}` justificado → ✅ **PASS**.
+
+---
+
 ## FORMATO DEL REPORTE
 
 Generás el reporte en este formato, en el orden de los bloques. Para cada check: emoji de estado + descripción corta + detalles si FAIL.
@@ -1319,11 +1629,6 @@ Encontradas: `application/`, `domain/`, `infrastructure/`
 **Ref:** [FB-JG]
 
 ...
-
----
-
-## Changelog del checklist
-- 2026-04-14: versión inicial
 ```
 
 **Orden de severidad en la salida:**
@@ -1339,151 +1644,24 @@ Encontradas: `application/`, `domain/`, `infrastructure/`
 
 ---
 
-## EJEMPLO DE OUTPUT (preview sobre wsclientes0007)
-
-Aplicado a `C:\Dev\Banco Pichincha\CapaMedia\0007\destino` a fecha 2026-04-14:
-
-```markdown
-# Post-Migration Checklist Report
-**Project:** C:\Dev\Banco Pichincha\CapaMedia\0007\destino
-**Type:** SOAP
-**Gold standard:** wsclientes0015
-**Date:** 2026-04-14
-
-## Summary
-| Block | Pass | HIGH | MEDIUM | LOW |
-|---|---|---|---|---|
-| 0 Pre-check | 2/2 | 0 | 0 | 0 |
-| 1 Hexagonal | 5/5 | 0 | 0 | 0 |
-| 2 Logging | 4/5 | 0 | 0 | 1 |
-| 3 Naming | 3/4 | 1 | 0 | 0 |
-| 4 Validaciones | 2/4 | 1 | 1 | 0 |
-| 5 Error handling | 4/4 | 0 | 0 | 0 |
-| 6 Mappers/tipos | 3/4 | 0 | 1 | 0 |
-| 7 Config externa | 2/6 | 2 | 2 | 0 |
-| 8 Versiones | 3/4 | 0 | 1 | 0 |
-| 9 Tests | 3/5 | 0 | 2 | 0 |
-| 10 SOAP specifics | 4/4 | 0 | 0 | 0 |
-| 11 REST strategies | N/A | — | — | — |
-| 12 REST specifics | N/A | — | — | — |
-| **TOTAL** | **35/47** | **4** | **7** | **1** |
-
-**Verdict:** BLOCKED_BY_HIGH
-
----
-
-## Block 3 — Naming de métodos
-
-### 3.1 Output ports usan `get*` — ❌ HIGH
-**Hallado:** 2 métodos `query*` en puerto de lectura:
-  - `BancsCustomerOutputPort.queryTransactionalContact`
-  - `BancsCustomerOutputPort.queryCustomerInfoField`
-**Acción:** renombrar a `getTransactionalContact` y `getCustomerInfoField` (+ usos en service y tests).
-**Ref:** [FB-JG]
-
-### 3.2 `@PayloadRoot.localPart` PascalCase — ✅ PASS
-`"ConsultarContactoTransaccional01"` correcto.
-
-### 3.3 Java method camelCase — ✅ PASS
-### 3.4 postProcessWsdl sin decapitalize — ✅ PASS
-Commit bf913b9 revirtió la lógica problemática.
-
----
-
-## Block 4 — Validaciones
-
-### 4.1 HeaderRequestValidator existe — ❌ HIGH
-**Hallado:** 0 archivos en `infrastructure/input/adapter/soap/util/`.
-**Acción:** crear `HeaderRequestValidator` siguiendo el patrón de `wsclientes0024/HeaderRequestValidator.java` adaptado al tipo JAXB `GenericHeaderIn` que llega vía Spring WS.
-**Ref:** [FB-JG]
-
-### 4.2 No está en domain/application — ✅ PASS
-### 4.3 Controller invoca validator — ⚠ MEDIUM
-**Nota:** consecuencia de 4.1. Se resolverá junto con 4.1.
-### 4.4 Validaciones body en domain/app — ✅ PASS (informativo)
-
----
-
-## Block 7 — Configuración externa
-
-### 7.1 catalog-info.yaml completo — ❌ HIGH
-**Hallado:** archivo con placeholders sin resolver:
-  - `<owner>`, `<system>`, `<domain>`, `<lifecycle>`, `<dynatrace-entity-id>`, `<sonarcloud-project-key>`
-  - Bloque `spec.definition:` presente (debe eliminarse)
-  - Link de SwaggerHub presente (debe eliminarse)
-**Acción:** reemplazar con template canónico (ver §7 del checklist).
-**Ref:** [FB-JG]
-
-### 7.2 azure-pipelines.yml — ✅ PASS
-`CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"` ✓
-`KUBERNETES_NAMESPACE: tnd-middleware` ✓
-
-### 7.3 application.yml usa ENV del Helm — ⚠ MEDIUM
-**Hallado:** 2 URLs con valor por defecto hardcoded (aceptable), 0 secrets hardcoded.
-**Acción:** verificar que todos los endpoints productivos usen `${VAR:default}`.
-
-### 7.4 Validar Bancs/WebClient/CircuitBreaker — ⚠ MEDIUM
-**Hallado:** `bancs:` ✓, `webclient:` ✓, `resilience4j:` falta sección explícita.
-
-### 7.5 Helm por entorno — ❌ HIGH
-**Hallado:** solo `values.yaml` genérico, faltan `values-dev.yaml`, `values-test.yaml`, `values-prod.yaml`.
-**Ref:** [PDF-OFICIAL]
-
-### 7.6 @ConfigurationPropertiesScan — ✅ PASS
-
----
-
-## Block 2 — Logging
-
-### 2.1 @BpTraceable en Controller — ✅ PASS
-### 2.2 @BpLogger en todos los @Service — ✅ PASS (1/1 services, 1/1 métodos públicos cubiertos)
-### 2.3 @BpLogger en Adapters — ✅ PASS (4 métodos en BancsCustomerAdapter)
-### 2.4 Logs con GUID — ✅ PASS
-### 2.5 Abuso de log.info — ℹ LOW
-**Hallado:** `BancsCustomerAdapter.java` con 6 log.info. Revisar si son necesarios o parte del flujo normal.
-
----
-
-## Block 6 — Mappers y tipos
-
-### 6.1 Mappers dedicados — ✅ PASS
-SOAP mapper + Bancs mapper + repository mapper presentes.
-### 6.2 MapStruct — ✅ PASS
-### 6.3 Sin new Record(>=8 args) inline — ⚠ MEDIUM
-**Hallado:** `ConsultarContactoTransaccionalService.handleFallbackPath` y `.buildDirectResult` construyen `new CustomerContactResult(12 args)` inline.
-**Acción:** agregar factory estático `CustomerContactResult.fromFallback(...)` / `.fromDirect(...)` en el record.
-### 6.4 Sin Object/Map<String,Object> en puertos — ✅ PASS
-
----
-
-## Block 9 — Tests y calidad
-
-### 9.1 JaCoCo ≥ 75% — ✅ PASS (80.12%)
-### 9.2 Build verde — ✅ PASS (61 tests OK)
-### 9.3 Tests por capa — ⚠ MEDIUM
-**Hallado:** 1 test de service, 1 de controller, 4 de adapter/helper = 6 archivos. Falta test específico de `PhoneNormalizationUtil`.
-### 9.4 @Nested + S2187 — ✅ PASS (no usa @Nested)
-### 9.5 SonarLint — ℹ INFO (ejecutar en IDE local)
-
----
-
-## Changelog del checklist
-- 2026-04-14: versión inicial
-```
-
----
-
 ## CÓMO EJECUTARLO
 
-Desde Claude Code:
+Desde Claude Code, invocar el skill `/post-migracion` con el path al proyecto migrado (y opcionalmente el path al legacy original para habilitar el análisis cruzado del BLOQUE 0):
 
 ```
-/03-checklist-post-migracion.md path="C:/Dev/Banco Pichincha/CapaMedia/0007/destino"
+/post-migracion <MIGRATED_PATH> [<LEGACY_PATH>]
 ```
 
-O directamente en una instrucción:
+Ejemplos:
 
-> "Aplicá el checklist post-migración de `prompts/migracion/03-checklist-post-migracion.md` sobre `C:/Dev/Banco Pichincha/CapaMedia/0007/destino`. Devolveme solo HIGH y MEDIUM, skip PASS."
+```
+/post-migracion /ruta/absoluta/al/servicio-migrado
+/post-migracion /ruta/absoluta/al/servicio-migrado /ruta/absoluta/al/legacy-original
+```
+
+También puede ejecutarse como instrucción libre apuntando a este archivo:
+
+> "Aplicá el checklist post-migración de `prompts/post-migracion/03-checklist.md` sobre `<MIGRATED_PATH>`. Devolveme solo HIGH y MEDIUM, skip PASS."
 
 El agente debe:
 1. Detectar tipo de proyecto (Bloque 0)
@@ -1493,3 +1671,22 @@ El agente debe:
 5. Cerrar con Verdict
 
 NO auto-corrige. NO modifica archivos. Solo lee y reporta.
+
+---
+
+## Historial de decisiones (contexto de las reglas)
+
+Este historial documenta las decisiones clave que motivan los checks de este archivo. Sirve para entender **por qué** cada regla existe. Los detalles del servicio-ancla `wsclientes0007` aparecen porque fue el primero en aplicar cada corrección antes de que se consolidaran como regla.
+
+| Fecha | Servicio / commit | Decisión que originó una regla |
+|---|---|---|
+| 2026-04-14 | Checklist v1 — inicial | Primera versión del checklist. Base: gold standards `wsclientes0024` (REST) y `wsclientes0015` (SOAP). |
+| 2026-04-14 | `bf913b9` (wsclientes0007) | **`postProcessWsdl.groovy` sin `decapitalize`** — revertida la lógica que decapitalizaba el root element del WSDL. La fuente de verdad es el XSD en PascalCase. → Check 3.4. |
+| 2026-04-16 | `bbcc62a` (wsclientes0007) | **`error.tipo = FATAL`** para header-missing + Bancs + Exception genérica. Antes solo INFO/ERROR. También mensaje canónico `"Datos de la cabecera de la transaccion no se han asignado"` (error 9927 del catálogo `errores.xml`). → Checks 4.5 y 5.6. |
+| 2026-04-16 | wsclientes0007 post-audit | **`error.backend` desde el catálogo oficial** `sqb-cfg-codigosBackend-config/codigosBackend.xml`, NO hardcodeado como `"00000"`. Los golds 0024/0013/0006 tienen el bug `"00000"` — no replicar. → Check 5.4. |
+| 2026-04-17 | wsclientes0007 post-fix | **`log.info` reservado para eventos de contrato; diagnóstico a `log.debug`.** Origen: feedback del equipo [FB-JA]. → Checks 2.6 y 2.7. |
+| 2026-04-17 | wsclientes0007 post-fix | **Patrones del `HeaderRequestValidator` externalizados** a `HeaderValidationProperties` (`@ConfigurationProperties`, ConfigMap de OpenShift). Validator convertido en `@Component` inyectable, no `final class` estática. Origen: feedback del equipo [FB-JA]. → Check 4.6. |
+| 2026-04-18 | Matriz oficial formalizada | **1 op → REST + WebFlux, 2+ ops → SOAP + Spring MVC** (sin excepciones, igual para IIB / WAS / ORQ). La presencia de BD se trata como tecnología agregada dentro del prompt elegido, no como criterio para saltar a otro. wsclientes0007 queda como caso mal-clasificado histórico. → BLOQUE 0. |
+| 2026-04-20 | BPTPSRE PDFs incorporados | **Estructura de error oficial** con 8 campos (`mensajeNegocio` lo gestiona DataPower — NUNCA el servicio). **Patrones IIB** de config: `GestionarRecursoXML` (archivos XML) y `GestionarRecursoConfigurable` (cache), usando `ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv` como fuente operativa para poblar `application.yml` / Helm cuando haya configurables. **Patrones WAS** de config: `.properties` en `/apps/proy/OMNICANALIDAD_SERVICIOS/conf/` + clases `Propiedad.java`, `ErrorTipo.java`, `ServicioExcepcion`. **Librerías WebFlux opcionales**: `mdw-dm-lib-audit-log-reactive` (`@LogAudit`/`@LogAuditStep`) y `mdw-dm-lib-stratio-connector` (`StratioQueryExecutor`). → BLOQUE 15. |
+
+**Servicios-referencia citados en el checklist (`wsclientes0007/0013/0015/0024`):** son proyectos reales del banco usados como fuente de patrones o como ejemplos de anti-patrones. No se tocan desde este repo — son referencias de solo lectura. Los huecos conocidos de cada uno (`0024/0013/0006` con `"00000"` hardcodeado; `0015` con 3 ports Bancs y `log.info` excesivo; etc.) están documentados inline en cada Check correspondiente.

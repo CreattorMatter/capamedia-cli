@@ -4,6 +4,68 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.8.0] - 2026-04-22
+
+### Added - Sync prompts JGarcia + integracion bank-fix al check + audit completo
+
+**Sync canonical con 3 commits nuevos de jgarcia@pichincha.com:**
+
+- `56d2771 feat: Service clean`
+- `3dbf23f fix: Code 999 generic`
+- `cf79f2e feat: mejora was y bus`
+
+Corrida `capamedia canonical sync --source <prompts-jgarcia> --yes` aplicada.
+19 archivos del canonical actualizados. Cambios clave de JGarcia:
+
+- **Regla BUS/WAS/ORQ refinada:** "For BUS (IIB) services that connect to
+  BANCS, `invocaBancs: true` overrides everything - always REST+WebFlux
+  regardless of operation count. For WAS, operation count decides. For
+  ORQ, always WebFlux." — convive con la regla del script oficial
+  (`validate_hexagonal.py`: 1 op → REST+WebFlux, 2+ → SOAP+MVC).
+- **Service clean** (la misma regla SRP que Alexis nos pidio):
+  expandida en `migrate-rest-full.md` y `migrate-soap-full.md`.
+- **Code 999 generic:** fix en el mapeo de codigos de backend.
+- **Analisis-servicio** enriquecido con evidencia automatica
+  (file analysis: `*.esql -> IIB`, `*.java + web.xml -> WAS`).
+
+Diffs aplicados: +1,587 lineas / -595 lineas a los prompts canonicos.
+Log: `.capamedia/canonical-sync/20260422-135036.log`.
+
+**`capamedia check --auto-fix --bank-fix`** — los 4 autofixes del script
+oficial se encadenan al autofix propio. Un solo comando cubre los 9 checks
+(los 5 nuestros del block 1/2/5/15 + los 4 deterministas del banco 4/7/8/9):
+
+```bash
+capamedia check <migrated> --legacy <legacy> --auto-fix --bank-fix \
+    --bank-description "Consulta contacto transaccional" \
+    --bank-owner jusoria@pichincha.com
+```
+
+**`capamedia canonical audit`** extendido:
+
+- Audita ahora tambien `context/bank-official-rules.md`
+- Verifica que las 9 reglas oficiales del banco esten presentes por ID
+  (regex `Regla N`/`Rule N`). Falla si alguna falta.
+- Baseline despues del sync JGarcia: 7 sin imperativo, 36 sin ejemplo NO,
+  9/9 reglas oficiales presentes.
+
+### Testing
+
+- **264/264 tests PASS**. El sync de JGarcia (data del canonical) no
+  impacta los tests (que corren sobre codigo Python).
+- Smoke test `capamedia canonical audit` reporta las 9 reglas correctas.
+
+### Pendiente para v0.9.0
+
+- Auto-fix semantico de regla 6 (Service sin utils) con javalang / LSP.
+  Requiere refactor AST extractor dedicado.
+- Integrar `canonical audit` a CI: exit 1 si faltan reglas oficiales o
+  hay gaps imperativos.
+- Resolver mapping raro del `canonical sync` que pone `agents/*.md` de
+  JGarcia en `context/` (es inofensivo pero genera ruido en el diff).
+
+---
+
 ## [0.7.0] - 2026-04-22
 
 ### Added - Patrones oficiales al canonical + autofix para 4 reglas del banco

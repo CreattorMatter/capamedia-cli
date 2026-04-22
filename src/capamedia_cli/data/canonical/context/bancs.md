@@ -1,7 +1,7 @@
 ---
 paths:
-  - "src/main/java/**/output/adapter/bancs/**"
-  - "src/main/java/**/config/**"
+- src/main/java/**/output/adapter/bancs/**
+- src/main/java/**/config/**
 ---
 
 # Reglas de Integracion BANCS

@@ -144,6 +144,30 @@ def check_project(
             ),
         ),
     ] = False,
+    bank_fix: Annotated[
+        bool,
+        typer.Option(
+            "--bank-fix",
+            help=(
+                "Ademas de --auto-fix, aplica los 4 autofixes del script oficial "
+                "del banco (reglas 4, 7, 8, 9). Requiere --auto-fix."
+            ),
+        ),
+    ] = False,
+    bank_description: Annotated[
+        str | None,
+        typer.Option(
+            "--bank-description",
+            help="Descripcion del servicio para el catalog-info.yaml (regla 9)",
+        ),
+    ] = None,
+    bank_owner: Annotated[
+        str | None,
+        typer.Option(
+            "--bank-owner",
+            help="Email @pichincha.com para spec.owner del catalog-info.yaml",
+        ),
+    ] = None,
 ) -> None:
     """Corre el checklist BPTPSRE deterministico y escribe CHECKLIST_*.md."""
     migrated_path, legacy_path = _resolve_paths(migrated, legacy)
@@ -176,6 +200,28 @@ def check_project(
         )
         if autofix_report.log_path:
             console.print(f"[dim]Log: {autofix_report.log_path}[/dim]")
+
+        # --bank-fix encadena los 4 autofixes del script oficial
+        if bank_fix:
+            from capamedia_cli.core.bank_autofix import run_bank_autofix
+
+            bank_results = run_bank_autofix(
+                migrated_path,
+                description=bank_description,
+                owner=bank_owner,
+            )
+            applied = sum(1 for r in bank_results if r.applied)
+            console.print(
+                f"[bold]Bank autofix:[/bold] {applied}/{len(bank_results)} "
+                f"reglas oficiales aplicadas (4, 7, 8, 9)"
+            )
+            for r in bank_results:
+                style = "green" if r.applied else "dim"
+                status = "applied" if r.applied else "skip"
+                console.print(
+                    f"  - Regla {r.rule}: [{style}]{status}[/{style}]"
+                    + (f" - {r.notes}" if r.notes else "")
+                )
 
     ctx = CheckContext(migrated_path=migrated_path, legacy_path=legacy_path)
     results = run_all_blocks(ctx)

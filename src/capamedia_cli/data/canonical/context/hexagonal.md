@@ -1,7 +1,7 @@
 ---
 paths:
-  - "src/main/java/**/application/**"
-  - "src/main/java/**/domain/**"
+- src/main/java/**/application/**
+- src/main/java/**/domain/**
 ---
 
 # Reglas de Arquitectura Hexagonal OLA1

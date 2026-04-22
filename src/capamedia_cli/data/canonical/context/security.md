@@ -1,8 +1,8 @@
 ---
 paths:
-  - "src/**/*.java"
-  - "src/**/*.yml"
-  - "helm/**"
+- src/**/*.java
+- src/**/*.yml
+- helm/**
 ---
 
 # Reglas de Seguridad

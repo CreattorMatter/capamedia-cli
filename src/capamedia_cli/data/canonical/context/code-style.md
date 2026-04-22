@@ -1,6 +1,6 @@
 ---
 paths:
-  - "src/**/*.java"
+- src/**/*.java
 ---
 
 # Code Style - Banco Pichincha OLA1
@@ -19,8 +19,8 @@ paths:
 - Paquetes: lowercase (com.pichincha.sp)
 
 ## Naming por responsabilidad
-- Puerto entrada: *InputPort.java (interface) — NUNCA abstract class
-- Puerto salida: *OutputPort.java (interface) — NUNCA abstract class
+- Puerto entrada: *InputPort.java (abstract class)
+- Puerto salida: *OutputPort.java (abstract class)
 - Service impl: *ServiceImpl.java
 - Adapter: *Adapter.java o *BancsAdapter.java
 - DTO: *Dto.java, *DtoRequest.java, *DtoResponse.java
