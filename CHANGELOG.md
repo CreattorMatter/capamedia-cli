@@ -4,6 +4,44 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.16.1] - 2026-04-22
+
+### Fixed - `install`: direct-download fallback para Gradle y VS Code
+
+**Caso real reportado**: user con winget instalado tira
+`No package found matching input criteria` al hacer
+`winget install -e --id Gradle.Gradle`. Causa: el ID en el repo oficial
+de winget cambio o el source no lo resuelve en ciertas versiones.
+
+**Fix**: ultima ruta de fallback con descarga directa via PowerShell:
+
+- `_install_gradle_direct()`: descarga
+  `https://services.gradle.org/distributions/gradle-8.14-bin.zip`,
+  extrae a `$env:USERPROFILE\gradle\gradle-8.14\`, agrega
+  `...\gradle-8.14\bin` al PATH del user (permanente).
+
+- `_install_vscode_direct()`: descarga el User Installer de
+  `https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user`
+  y lo ejecuta silent con `/verysilent /mergetasks=addtopath` (agrega
+  `code` al PATH automatico).
+
+**Cuando se activa** (Windows only):
+  1. Si `_get_installer_command()` devuelve None (sin package manager)
+     y el paquete esta en `DIRECT_DOWNLOAD_PACKAGES` -> direct-download.
+  2. Si el package manager responde pero con `No package found` o `not
+     found` para Gradle/VS Code -> fallback automatico a direct-download.
+  3. Si el binario del package manager tira `FileNotFoundError` -> idem.
+
+**Limitacion**: el user tiene que cerrar/abrir PowerShell despues para
+que el PATH se refresque (Windows no lo hace en sesion activa sin
+broadcast-message).
+
+### Testing
+
+- **344/344 tests PASS**. Ruff limpio.
+
+---
+
 ## [0.16.0] - 2026-04-22
 
 ### Added - Comando `update` + auto-install de winget + URLs manuales

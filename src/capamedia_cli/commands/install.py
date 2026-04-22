@@ -215,6 +215,109 @@ def _choco_available() -> bool:
     return shutil.which("choco") is not None
 
 
+# Packages que tenemos install directo via PowerShell/descarga, como ultima
+# ruta cuando winget/scoop/choco fallan o no resuelven el paquete.
+DIRECT_DOWNLOAD_PACKAGES = {"Gradle", "VS Code"}
+
+
+def _install_gradle_direct() -> bool:
+    """Baja Gradle zip, extrae a ~/gradle, agrega al PATH del user.
+    Solo se usa como ultima ruta cuando los package managers fallan."""
+    gradle_version = "8.14"
+    ps_script = f"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$zipUrl = "https://services.gradle.org/distributions/gradle-{gradle_version}-bin.zip"
+$tmp = "$env:TEMP\\gradle-{gradle_version}-bin.zip"
+$extractPath = "$env:USERPROFILE\\gradle"
+Invoke-WebRequest -Uri $zipUrl -OutFile $tmp
+if (Test-Path $extractPath) {{ Remove-Item $extractPath -Recurse -Force }}
+Expand-Archive -Path $tmp -DestinationPath $extractPath -Force
+$gradleBin = "$extractPath\\gradle-{gradle_version}\\bin"
+$currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+if ($currentPath -notlike "*$gradleBin*") {{
+    [Environment]::SetEnvironmentVariable("PATH", "$currentPath;$gradleBin", "User")
+}}
+Write-Host "OK:$gradleBin"
+"""
+    console.print(f"  [dim]Descargando Gradle {gradle_version} y extrayendo a $env:USERPROFILE\\gradle...[/dim]")
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if result.returncode == 0:
+            console.print("  [green]OK[/green] Gradle descargado + PATH actualizado")
+            console.print(
+                "  [dim]Cerra/abri PowerShell para que `gradle --version` funcione[/dim]"
+            )
+            return True
+        console.print(f"  [red]Gradle direct install fallo:[/red] {(result.stderr or '')[:200]}")
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        console.print(f"  [red]Gradle direct install error:[/red] {exc}")
+        return False
+
+
+def _install_vscode_direct() -> bool:
+    """Baja el installer de VS Code y lo ejecuta en modo silencioso."""
+    ps_script = """
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$url = "https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-user"
+$tmp = "$env:TEMP\\VSCodeSetup.exe"
+Invoke-WebRequest -Uri $url -OutFile $tmp
+Start-Process -FilePath $tmp -ArgumentList "/verysilent","/mergetasks=!runcode,addcontextmenufiles,addcontextmenufolders,addtopath" -Wait
+Write-Host "OK"
+"""
+    console.print("  [dim]Descargando VS Code installer y corriendo silent...[/dim]")
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if result.returncode == 0:
+            console.print("  [green]OK[/green] VS Code instalado (user installer)")
+            console.print(
+                "  [dim]Cerra/abri PowerShell para que `code --version` funcione[/dim]"
+            )
+            return True
+        console.print(f"  [red]VS Code direct install fallo:[/red] {(result.stderr or '')[:200]}")
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        console.print(f"  [red]VS Code direct install error:[/red] {exc}")
+        return False
+
+
+def _try_direct_download(pkg_name: str) -> bool:
+    """Si tenemos un metodo direct-download para este paquete, probarlo."""
+    if pkg_name == "Gradle":
+        return _install_gradle_direct()
+    if pkg_name == "VS Code":
+        return _install_vscode_direct()
+    return False
+
+
 def _get_installer_command(package: Package, os_name: str) -> list[str] | None:
     """Devuelve el comando de install apropiado segun OS + package manager
     disponible. Prioridad en Windows: winget > scoop > choco."""
@@ -467,14 +570,46 @@ def install_toolchain(
         for pkg in to_install:
             cmd = _get_installer_command(pkg, os_name)
             if cmd is None:
+                # Sin package manager. Intentar direct-download si esta disponible.
+                if os_name == "windows" and pkg.name in DIRECT_DOWNLOAD_PACKAGES:
+                    task = progress.add_task(
+                        f"Instalando {pkg.name} (descarga directa)...", total=None
+                    )
+                    if not _try_direct_download(pkg.name):
+                        failures.append(pkg.name)
+                    progress.update(task, completed=1)
                 continue
             task = progress.add_task(f"Instalando {pkg.name}...", total=None)
             try:
                 result = subprocess.run(cmd, capture_output=True, check=False, timeout=600)
-                if result.returncode != 0:
+                package_manager_failed = result.returncode != 0
+                # Para paquetes con direct-download, si el pkg manager fallo
+                # con "no package found" u otro, fallback automatico.
+                if (
+                    package_manager_failed
+                    and os_name == "windows"
+                    and pkg.name in DIRECT_DOWNLOAD_PACKAGES
+                ):
+                    stderr_text = (result.stderr or b"").decode("utf-8", errors="ignore")
+                    stdout_text = (result.stdout or b"").decode("utf-8", errors="ignore")
+                    looks_recoverable = (
+                        "No package found" in stdout_text + stderr_text
+                        or "not found" in (stdout_text + stderr_text).lower()
+                    )
+                    if looks_recoverable:
+                        progress.update(task, description=f"Fallback {pkg.name} (descarga directa)...")
+                        if _try_direct_download(pkg.name):
+                            package_manager_failed = False
+                if package_manager_failed:
                     failures.append(pkg.name)
                 progress.update(task, completed=1)
             except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                # Binario no encontrado (winget/scoop/choco). Probar direct-download.
+                if os_name == "windows" and pkg.name in DIRECT_DOWNLOAD_PACKAGES:
+                    progress.update(task, description=f"Fallback {pkg.name} (descarga directa)...")
+                    if _try_direct_download(pkg.name):
+                        progress.update(task, completed=1)
+                        continue
                 failures.append(f"{pkg.name} ({e})")
                 progress.update(task, completed=1)
 
