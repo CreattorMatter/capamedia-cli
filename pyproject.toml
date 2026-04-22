@@ -1,6 +1,6 @@
 [project]
 name = "capamedia-cli"
-version = "0.3.8"
+version = "0.4.0"
 description = "CLI multi-harness para la migración de servicios legacy (IIB/WAS/ORQ) a Java 21 + Spring Boot hexagonal OLA1 en Banco Pichincha"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -64,6 +64,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Los tests usan camelcase para Mock classes, es convencion comun en pytest
+"tests/**/*.py" = ["N806", "N802"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 from capamedia_cli.commands.batch import (
@@ -20,6 +19,59 @@ from capamedia_cli.commands.batch import (
     _write_csv_report,
     _write_markdown_report,
 )
+from capamedia_cli.core.engine import EngineResult
+
+
+class _FakeEngine:
+    """Engine fake para tests: escribe payload al output_path como lo haria el MCP."""
+
+    name = "fake"
+    subscription_type = "test"
+
+    def __init__(
+        self,
+        payload: dict | None = None,
+        *,
+        exit_code: int = 0,
+        rate_limited: bool = False,
+        should_fail_if_called: bool = False,
+    ) -> None:
+        self._payload = payload
+        self._exit_code = exit_code
+        self._rate_limited = rate_limited
+        self._should_fail = should_fail_if_called
+        self.calls = 0
+
+    def is_available(self) -> tuple[bool, str]:
+        return (True, "fake engine")
+
+    def run_headless(self, einput) -> EngineResult:
+        self.calls += 1
+        if self._should_fail:
+            raise AssertionError("engine.run_headless should not be called (resume expected)")
+        if self._payload is not None:
+            einput.output_path.parent.mkdir(parents=True, exist_ok=True)
+            einput.output_path.write_text(
+                json.dumps(self._payload),
+                encoding="utf-8",
+            )
+        return EngineResult(
+            exit_code=self._exit_code,
+            stdout="ok" if self._exit_code == 0 else "",
+            stderr="",
+            duration_seconds=0.1,
+            rate_limited=self._rate_limited,
+        )
+
+
+def _migrate_payload(project: Path, *, build: str = "green") -> dict:
+    return {
+        "status": "ok",
+        "summary": "Migracion completa",
+        "framework": "REST",
+        "build_status": build,
+        "migrated_project": str(project),
+    }
 
 
 def _write_fabrics_metadata(workspace: Path, service: str, *, status: str = "ok") -> None:
@@ -144,28 +196,9 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
 
     schema_path = _ensure_migrate_schema(root)
 
-    def fake_run(cmd, *, input, text, capture_output, check, timeout):  # noqa: ANN001
-        assert cmd[:2] == ["codex", "exec"]
-        output_idx = cmd.index("--output-last-message") + 1
-        output_path = Path(cmd[output_idx])
-        output_path.write_text(
-            json.dumps(
-                {
-                    "status": "ok",
-                    "summary": "Migracion completa",
-                    "framework": "REST",
-                    "build_status": "green",
-                    "migrated_project": str(project),
-                }
-            ),
-            encoding="utf-8",
-        )
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
-
-    monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fake_run)
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._run_batch_check",
-        lambda service_name, migrated_project, legacy_root: {  # noqa: ARG005
+        lambda service_name, migrated_project, legacy_root: {
             "verdict": "READY_TO_MERGE",
             "HIGH": "0",
             "MEDIUM": "0",
@@ -178,7 +211,7 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
         service,
         root,
         schema_path,
-        codex_bin="codex",
+        engine=_FakeEngine(_migrate_payload(project)),
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -206,7 +239,7 @@ def test_process_migrate_service_fails_without_destino(tmp_path: Path) -> None:
         service,
         root,
         schema_path,
-        codex_bin="codex",
+        engine=_FakeEngine(should_fail_if_called=True),
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -231,7 +264,7 @@ def test_process_migrate_service_requires_fabrics_metadata(tmp_path: Path) -> No
         service,
         root,
         schema_path,
-        codex_bin="codex",
+        engine=_FakeEngine(should_fail_if_called=True),
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -243,7 +276,7 @@ def test_process_migrate_service_requires_fabrics_metadata(tmp_path: Path) -> No
     assert "evidencia de Fabrics" in row.detail
 
 
-def test_process_migrate_service_resume_skips_successful_run(tmp_path: Path, monkeypatch) -> None:
+def test_process_migrate_service_resume_skips_successful_run(tmp_path: Path) -> None:
     root = tmp_path
     service = "wsclientes0007"
     workspace = root / service
@@ -269,16 +302,12 @@ def test_process_migrate_service_resume_skips_successful_run(tmp_path: Path, mon
     )
     schema_path = _ensure_migrate_schema(root)
 
-    def fail_run(*args, **kwargs):  # noqa: ANN001,ARG001
-        raise AssertionError("subprocess.run should not be called on resume")
-
-    monkeypatch.setattr("capamedia_cli.commands.batch.subprocess.run", fail_run)
-
+    fake = _FakeEngine(should_fail_if_called=True)
     row = _process_migrate_service(
         service,
         root,
         schema_path,
-        codex_bin="codex",
+        engine=fake,
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -290,6 +319,7 @@ def test_process_migrate_service_resume_skips_successful_run(tmp_path: Path, mon
     assert row.status == "ok"
     assert row.fields["codex"] == "ok"
     assert row.fields["check"] == "READY_TO_MERGE"
+    assert fake.calls == 0  # resume debe evitar la llamada al engine
 
 
 def test_find_legacy_root_falls_back_to_local_resolver(tmp_path: Path) -> None:
@@ -309,23 +339,23 @@ def test_process_pipeline_service_success(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(
         "capamedia_cli.commands.clone.clone_service",
-        lambda service_name, workspace, shallow, skip_tx: None,  # noqa: ARG005
+        lambda service_name, workspace, shallow, skip_tx: None,
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.init.scaffold_project",
-        lambda target_dir, service_name, harnesses, artifact_token: (7, []),  # noqa: ARG005
+        lambda target_dir, service_name, harnesses, artifact_token: (7, []),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.inspect_fabrics_workspace",
-        lambda workspace: {"status": "ok", "detail": f"config={workspace}"},  # noqa: ARG005
+        lambda workspace: {"status": "ok", "detail": f"config={workspace}"},
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.generate",
-        lambda service_name, workspace, namespace, group_id, dry_run: _write_fabrics_metadata(workspace, service_name),  # noqa: ARG005
+        lambda service_name, workspace, namespace, group_id, dry_run: _write_fabrics_metadata(workspace, service_name),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._process_migrate_service",
-        lambda *args, **kwargs: BatchRow(  # noqa: ARG005
+        lambda *args, **kwargs: BatchRow(
             service,
             "ok",
             "pipeline ok",
@@ -349,7 +379,7 @@ def test_process_pipeline_service_success(tmp_path: Path, monkeypatch) -> None:
         artifact_token=None,
         namespace="tnd",
         group_id="com.pichincha.sp",
-        codex_bin="codex",
+        engine=_FakeEngine(should_fail_if_called=True),
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -402,7 +432,7 @@ def test_process_pipeline_service_resume_skips_completed_stages(tmp_path: Path, 
 
     monkeypatch.setattr(
         "capamedia_cli.commands.batch._process_migrate_service",
-        lambda *args, **kwargs: BatchRow(  # noqa: ARG005
+        lambda *args, **kwargs: BatchRow(
             service,
             "ok",
             "resume migrate",
@@ -438,7 +468,7 @@ def test_process_pipeline_service_resume_skips_completed_stages(tmp_path: Path, 
         artifact_token=None,
         namespace="tnd",
         group_id="com.pichincha.sp",
-        codex_bin="codex",
+        engine=_FakeEngine(should_fail_if_called=True),
         model=None,
         prompt_file=None,
         timeout_minutes=5,
@@ -462,15 +492,15 @@ def test_process_pipeline_service_fails_on_fabrics_preflight(tmp_path: Path, mon
 
     monkeypatch.setattr(
         "capamedia_cli.commands.clone.clone_service",
-        lambda service_name, workspace, shallow, skip_tx: None,  # noqa: ARG005
+        lambda service_name, workspace, shallow, skip_tx: None,
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.init.scaffold_project",
-        lambda target_dir, service_name, harnesses, artifact_token: (7, []),  # noqa: ARG005
+        lambda target_dir, service_name, harnesses, artifact_token: (7, []),
     )
     monkeypatch.setattr(
         "capamedia_cli.commands.fabrics.inspect_fabrics_workspace",
-        lambda workspace: {"status": "fail", "detail": "token faltante"},  # noqa: ARG005
+        lambda workspace: {"status": "fail", "detail": "token faltante"},
     )
 
     row = _process_pipeline_service(
@@ -481,7 +511,7 @@ def test_process_pipeline_service_fails_on_fabrics_preflight(tmp_path: Path, mon
         artifact_token=None,
         namespace="tnd",
         group_id="com.pichincha.sp",
-        codex_bin="codex",
+        engine=_FakeEngine(should_fail_if_called=True),
         model=None,
         prompt_file=None,
         timeout_minutes=5,

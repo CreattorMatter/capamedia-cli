@@ -4,6 +4,82 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.4.0] - 2026-04-22
+
+### Added - Engine abstraction + rate limit defensivo + autofix + dashboard
+
+**Sprint 1 del plan "cero trabajo humano" (Julian 2026-04-22).**
+
+**`core/engine.py` — Claude + Codex + auto-detect (punto 1):**
+
+- Nueva abstraccion `Engine` con dos implementaciones:
+  - **`ClaudeEngine`** via `claude -p` (Claude Code CLI, suscripcion Max)
+  - **`CodexEngine`** via `codex exec` (ChatGPT Plus/Pro, preserva comportamiento v0.3.8)
+- Ambos consumen de la **suscripcion del usuario**, NO de tokens API pagos.
+- Auto-detect con prioridad Claude > Codex. Flag `--engine claude|codex|auto`
+  en `batch migrate` y `batch pipeline`. Env var `CAPAMEDIA_ENGINE`.
+- `EngineResult` uniforme con `rate_limited: bool` y `retry_after_seconds`.
+- Deteccion de rate limit por regex sobre stderr/stdout (`429`, `rate_limit`,
+  `quota exceeded`, `retry-after: N`, etc.).
+- Nuevo comando **`capamedia batch engines`** lista los engines disponibles.
+
+**`core/scheduler.py` — BatchScheduler (puntos 6a + 6c):**
+
+- Throttle proactivo con `--max-services-per-window N` (0=off) y
+  `--window-hours H` (default 5h, coincide con Claude Max).
+- Pausa reactiva global cuando el engine reporta `rate_limited=True`.
+  Respeta `retry-after` si lo parsea, sino usa `default_rate_limit_pause`.
+- Thread-safe con `threading.Condition`. Sin configurar, es passthrough.
+
+**`core/autofix.py` — registry HIGH+MEDIUM (punto 3):**
+
+- 8 fixes deterministicos (regex + edit, sin AI) para los checks BPTPSRE
+  autofixeables: `1.3`, `2.2`, `5.1`, `15.1`, `15.2`, `15.3`, `15.4`.
+- Flag `--auto-fix` en `capamedia check`: loop hasta 3 rondas o 0 HIGH/MEDIUM
+  autofixeables. Lo que no converja se marca `NEEDS_HUMAN`.
+- Escribe `.capamedia/autofix/<timestamp>.log` con before/after.
+
+**`core/dashboard.py` — barras rich (punto 5):**
+
+- `capamedia batch watch --rich` (default en TTY) con `rich.live.Live`.
+- Barra por servicio (fase → %), agregada con total + ETA + success rate.
+- Fallback ASCII automatico en Windows consolas legacy (cp1252).
+- Footer con engine usado, iter avg, success rate.
+
+**Canonical clean-up (punto 4):**
+
+- `context/code-style.md`: `*Port.java (abstract class)` → `(interface)`.
+  El resto del canonical ya estaba correcto en v0.3.1.
+
+**Backward compatibility:**
+
+- `--codex-bin` sigue funcionando (ahora como binario del CodexEngine).
+- `--unsafe` existe en ambos engines (bypass de approvals/sandbox).
+- Prompts + scaffolds de MCP Fabrics no cambian.
+
+### Testing
+
+- **164/164 tests PASS** (vs 81 baseline de v0.3.8):
+  - `test_engine.py` (nuevo, 23 tests): rate limit detection, JSON extraction,
+    select_engine con auto-detect, is_available con binarios reales y mocks.
+  - `test_scheduler.py` (nuevo, 8 tests): throttle, pausa reactiva,
+    thread-safety bajo contencion.
+  - `test_autofix.py` (nuevo, 19 tests): cada fix individual + e2e.
+  - `test_dashboard.py` (nuevo, 22 tests): snapshot, aggregate, render.
+  - `test_batch.py` (17 actualizados): fake engine en vez de monkeypatch
+    de `subprocess.run`.
+- `ruff check` limpio en todos los archivos nuevos.
+
+### Pendiente para v0.5.0 (Sprint 2 del plan)
+
+- Punto 2a: `capamedia canonical sync` con prompts de CapaMedia.
+- Punto 2b: `clone --deep-scan` con Azure DevOps Code Search API.
+- Punto 7a: auditoria MUST/NEVER del canonical completo.
+- Punto 7b: inyeccion de catalogos (tx-adapter-catalog.json, xlsx) al FABRICS_PROMPT.
+- Punto 7e: self-correction con error especifico en retry (no solo "retry").
+
+---
+
 ## [0.3.8] - 2026-04-21
 
 ### Added - Bootstrap unattended + cierre cross-platform para batch
