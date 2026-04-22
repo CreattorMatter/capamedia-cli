@@ -244,7 +244,25 @@ def init_project(
         if service_name == "." or not service_name:
             service_name = target_dir.name
     elif service_name:
-        target_dir = Path.cwd() / service_name
+        # Auto-detect: si el CWD ya parece ser el workspace del servicio
+        # (tiene legacy/ o destino/ o la CWD termina con el nombre del servicio),
+        # asumir --here para evitar subcarpeta anidada.
+        cwd = Path.cwd()
+        looks_like_workspace = (
+            (cwd / "legacy").is_dir()
+            or (cwd / "destino").is_dir()
+            or cwd.name.lower() == service_name.lower()
+        )
+        if looks_like_workspace:
+            console.print(
+                f"[yellow]Tip:[/yellow] la carpeta actual ({cwd.name}) "
+                "parece ser el workspace del servicio (tiene legacy/destino o "
+                "el nombre coincide). Usando [cyan]--here[/cyan] automatico "
+                "para evitar subcarpeta anidada."
+            )
+            target_dir = cwd
+        else:
+            target_dir = cwd / service_name
     else:
         console.print("[red]Error:[/red] pasa el nombre del servicio o usa --here")
         raise typer.Exit(1)

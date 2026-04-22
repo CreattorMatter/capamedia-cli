@@ -4,6 +4,48 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.17.3] - 2026-04-22
+
+### Fixed - `init` detecta workspace automatico (evita subcarpeta anidada)
+
+**Caso real**: user estaba parado en `C:\...\wstecnicos0008\` (que ya tenia
+`legacy/`, `destino/`, `umps/` del clone y fabrics) y corrio
+`capamedia init wstecnicos0008 --ai claude` sin `--here`. Resultado: el
+CLI creo una subcarpeta anidada `wstecnicos0008\wstecnicos0008\` y puso
+ahi el scaffold (`.claude/`, `CLAUDE.md`, `.mcp.json`). Claude Code no
+encontraba el contexto al abrir desde el workspace padre.
+
+**Fix**: `init` detecta si el CWD ya parece workspace y activa `--here`
+automatico. Heuristica (3 senales):
+
+  1. CWD tiene carpeta `legacy/` (del clone)
+  2. CWD tiene carpeta `destino/` (del fabrics)
+  3. CWD se llama igual que el servicio pasado (`wstecnicos0008` === CWD.name)
+
+Si cualquier senal matchea, imprime tip:
+
+```
+Tip: la carpeta actual (wstecnicos0008) parece ser el workspace del
+servicio (tiene legacy/destino o el nombre coincide). Usando --here
+automatico para evitar subcarpeta anidada.
+```
+
+Y escribe en la misma carpeta. Si ninguna senal matchea (ej. corrida
+desde `C:\Dev\BancoPichincha\`), crea subcarpeta como antes.
+
+`--here` explicito sigue funcionando igual.
+
+### Testing
+
+- **377/377 tests PASS** (+5 en `test_init_auto_here.py`):
+  - Auto-here cuando CWD tiene `legacy/`
+  - Auto-here cuando CWD tiene `destino/`
+  - Auto-here cuando CWD name = service name
+  - Crea subcarpeta cuando CWD NO es workspace
+  - `--here` explicito no rompe
+
+---
+
 ## [0.17.2] - 2026-04-22
 
 ### Fixed - UMPs de servicios WAS viven en otro proyecto Azure
