@@ -965,11 +965,12 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
     full_yml = "\n".join(yml_texts)
     has_spring_kafka = "spring:" in full_yml and "kafka:" in full_yml
     has_logging_event = "logging:" in full_yml and "event:" in full_yml
-    has_kafka_off = re.search(
-        r"logging:\s*(?:[^\n]*\n\s+)*level:\s*(?:[^\n]*\n\s+)*org:\s*"
-        r"(?:[^\n]*\n\s+)*apache:\s*(?:[^\n]*\n\s+)*kafka:\s*OFF",
-        full_yml,
-    ) is not None or ("apache:" in full_yml and "kafka: OFF" in full_yml)
+    # Check 17.3: heuristica lineal (evita catastrophic backtracking del
+    # regex anidado previo). Buscamos `kafka: OFF` y `apache:` en el mismo
+    # yml; asumimos que si ambos aparecen, es la config `logging.level.org.
+    # apache.kafka: OFF` correcta. Caso borde (kafka: OFF fuera de apache:)
+    # es extremadamente raro en configs reales.
+    has_kafka_off = "apache:" in full_yml and "kafka: OFF" in full_yml
 
     if has_spring_kafka and has_logging_event:
         results.append(

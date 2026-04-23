@@ -4,6 +4,43 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.5] - 2026-04-23
+
+### Fixed - Block 17.3 catastrophic backtracking en regex de `kafka: OFF`
+
+**Bug**: el check `17.3 logging.level.org.apache.kafka: OFF` tenia un regex
+con 4 cuantificadores anidados `(?:[^\n]*\n\s+)*` que generaba
+**catastrophic backtracking** cuando el yml contenia `logging:` pero no
+tenia las claves `org:`/`apache:`/`kafka:` debajo.
+
+**Caso real**: al correr `capamedia review orq` sobre los 7 ORQs
+(ORQ0027/0028/0029/0037/0059/0062/0071), 3 de ellos (ORQ0027/0028/0037)
+colgaban indefinidamente con 100%+ CPU en el Block 17. Yml de 72 lineas
+generaba 72^4 = ~27M permutaciones de backtracking.
+
+**Fix**: reemplazado el regex anidado por heuristica lineal simple:
+
+```python
+# Antes (bug):
+has_kafka_off = re.search(
+    r"logging:\s*(?:[^\n]*\n\s+)*level:\s*(?:[^\n]*\n\s+)*org:\s*"
+    r"(?:[^\n]*\n\s+)*apache:\s*(?:[^\n]*\n\s+)*kafka:\s*OFF",
+    full_yml,
+) is not None or ("apache:" in full_yml and "kafka: OFF" in full_yml)
+
+# Despues (fix):
+has_kafka_off = "apache:" in full_yml and "kafka: OFF" in full_yml
+```
+
+La heuristica lineal es O(n) y cubre los casos reales. El caso borde
+(alguien pone `kafka: OFF` fuera de `logging.level.org.apache`) es
+extremadamente raro y no justifica el costo del regex anidado.
+
+### Testing
+
+- 555/555 tests PASS (incluyendo los 12 del Block 17 que siguen verdes).
+- Dumps de los 7 ORQs ahora corren en ~5s cada uno (antes: colgaban).
+
 ## [0.23.4] - 2026-04-23
 
 ### Added - Masividad: `batch clone --init` + `batch review`
