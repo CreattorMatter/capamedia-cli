@@ -4,6 +4,54 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.2] - 2026-04-22
+
+### Added - `capamedia review {orq,bus,was}` con subcomandos que fuerzan el tipo
+
+Feedback Julian: "podemos agregarle capamedia review orq de orquestador, bus
+o WAS, vamos a agregarle para que pueda decir: anda por esto para hacer este
+checklist sobre los bus, los orquestadores, los WAS".
+
+- `capamedia review` → autodetect (como antes)
+- `capamedia review orq` → fuerza `source_type=orq` (activa Block 20,
+  desactiva WAS+BD secrets)
+- `capamedia review bus` → fuerza `source_type=bus` (matriz BUS+invocaBancs
+  -> REST override en Block 0)
+- `capamedia review was` → fuerza `source_type=was` (matriz WAS: 1op REST /
+  2+ops SOAP, activa Block 19 properties + secrets KV si hay BD)
+
+Tambien disponible como flag `--kind` en el comando base:
+```
+capamedia review --kind orq
+capamedia review --kind was --legacy ./legacy/ws-xxx-was
+```
+
+Cuando el tipo forzado difiere del auto-detectado, el CLI imprime un aviso
+claro: *"autodeteccion del legacy dice was pero estas forzando orq. Uso el
+valor forzado."*
+
+Util cuando:
+- La autodeteccion falla (legacy no clonado, o ambiguo).
+- Querés auditar un proyecto "como si fuera X" para debug.
+- Un ORQ aun no clonó su legacy pero querés correr el Block 20.
+
+### Refactor
+
+- `commands/review.py` ahora exporta un `typer.Typer` app en vez de una
+  funcion suelta. `cli.py` usa `add_typer(review.app, name="review")`.
+- El core `review()` sigue siendo la funcion original (retrocompatible
+  para tests existentes).
+
+### Tests nuevos (9)
+
+- Subcomandos orq/bus/was wireados y visibles en help
+- `force_kind` setea `source_type` en el CheckContext (3 casos)
+- `--kind foo` invalido → exit 2
+- Override: force_kind vence al autodetectado
+- Sin `--kind`: autodetect funciona igual que v0.23.1
+
+Total: 549 tests passing.
+
 ## [0.23.1] - 2026-04-22
 
 ### Added - Slash command `/doublecheck` en Claude Code (y resto de harnesses)

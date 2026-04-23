@@ -94,7 +94,8 @@ app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("check")(check.check_project)
 app.command("checklist")(check.checklist_project)  # v0.23.0: alias doble-check
-app.command("review")(review.review)
+# v0.23.2: review con subcomandos `review orq|bus|was` para forzar el source_type
+app.add_typer(review.app, name="review")
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")

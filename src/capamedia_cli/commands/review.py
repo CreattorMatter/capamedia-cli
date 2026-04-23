@@ -357,6 +357,18 @@ def review(
             help="Solo corre los checks, no aplica autofixes.",
         ),
     ] = False,
+    force_kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help=(
+                "Fuerza el source_type del servicio (bus|orq|was). Si se "
+                "omite, autodetecta desde el legacy. Usado por los subcomandos "
+                "`review orq`, `review bus`, `review was` para overridear la "
+                "deteccion automatica."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Review end-to-end de un proyecto migrado externamente.
 
@@ -424,6 +436,25 @@ def review(
             has_bancs, _ = detect_bancs_connection(legacy_path)
         except Exception:
             pass
+
+    # v0.23.2: los subcomandos `review orq/bus/was` pasan force_kind y
+    # sobrescriben la auto-deteccion. Permite auditar un proyecto "como si
+    # fuera X" aunque el legacy no este disponible o la heuristica falle.
+    if force_kind:
+        normalized_kind = force_kind.lower().strip()
+        if normalized_kind not in {"bus", "orq", "was"}:
+            console.print(
+                f"[red]Error:[/red] --kind debe ser uno de: bus, orq, was. "
+                f"Recibido: [cyan]{force_kind}[/cyan]"
+            )
+            raise typer.Exit(code=2)
+        if source_type and source_type != normalized_kind:
+            console.print(
+                f"[yellow]Aviso:[/yellow] autodeteccion del legacy dice "
+                f"[cyan]{source_type}[/cyan] pero estas forzando "
+                f"[cyan]{normalized_kind}[/cyan]. Uso el valor forzado."
+            )
+        source_type = normalized_kind
 
     ctx = CheckContext(
         migrated_path=project_path,
@@ -677,3 +708,114 @@ def _print_summary_table(title: str, summary: dict[str, int], verdict: str) -> N
         else "red"
     )
     console.print(f"  Veredicto: [{color}]{verdict}[/{color}]")
+
+
+# ---------------------------------------------------------------------------
+# v0.23.2: Typer app con subcomandos por kind (orq/bus/was)
+# ---------------------------------------------------------------------------
+
+
+app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    help=(
+        "Review end-to-end de un proyecto migrado. Corre checklist + autofixes "
+        "+ validador oficial del banco.\n\n"
+        "Sin subcomando: autodetecta el tipo (BUS/WAS/ORQ) desde el legacy.\n"
+        "Con subcomando (orq/bus/was): fuerza el tipo para el Block 0 y blocks "
+        "condicionales (ej. Block 20 solo corre en ORQ)."
+    ),
+)
+
+
+@app.callback(invoke_without_command=True)
+def _review_callback(
+    ctx: typer.Context,
+    project_path: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Ruta al proyecto migrado. Si se omite, autodetecta ./destino/<svc>/.",
+        ),
+    ] = None,
+    legacy: Annotated[
+        Path | None,
+        typer.Option("--legacy", "-l", help="Path al legacy (autodetect si se omite)."),
+    ] = None,
+    max_iterations: Annotated[
+        int, typer.Option("--max-iterations", help="Max rondas del autofix loop.")
+    ] = 5,
+    bank_description: Annotated[
+        str | None,
+        typer.Option("--bank-description", help="Descripcion para catalog-info.yaml."),
+    ] = None,
+    bank_owner: Annotated[
+        str | None,
+        typer.Option("--bank-owner", help="Email @pichincha.com para spec.owner."),
+    ] = None,
+    skip_official: Annotated[
+        bool, typer.Option("--skip-official", help="No correr el validador oficial.")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Solo corre los checks, no aplica autofixes.")
+    ] = False,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Fuerza el source_type (bus|orq|was). Equivale a usar el subcomando.",
+        ),
+    ] = None,
+) -> None:
+    """Si no hay subcomando, correr review con autodeteccion (o --kind si se paso)."""
+    if ctx.invoked_subcommand is None:
+        review(
+            project_path=project_path, legacy=legacy,
+            max_iterations=max_iterations,
+            bank_description=bank_description, bank_owner=bank_owner,
+            skip_official=skip_official, dry_run=dry_run,
+            force_kind=kind,
+        )
+
+
+def _subcommand_review_factory(forced_kind: str):
+    """Genera la funcion de subcomando con force_kind fijo."""
+    def _subcommand(
+        project_path: Annotated[
+            Path | None, typer.Argument(help="Ruta al proyecto migrado.")
+        ] = None,
+        legacy: Annotated[
+            Path | None, typer.Option("--legacy", "-l", help="Path al legacy.")
+        ] = None,
+        max_iterations: Annotated[
+            int, typer.Option("--max-iterations")
+        ] = 5,
+        bank_description: Annotated[str | None, typer.Option("--bank-description")] = None,
+        bank_owner: Annotated[str | None, typer.Option("--bank-owner")] = None,
+        skip_official: Annotated[bool, typer.Option("--skip-official")] = False,
+        dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    ) -> None:
+        review(
+            project_path=project_path, legacy=legacy,
+            max_iterations=max_iterations,
+            bank_description=bank_description, bank_owner=bank_owner,
+            skip_official=skip_official, dry_run=dry_run,
+            force_kind=forced_kind,
+        )
+    return _subcommand
+
+
+# Registrar 3 subcomandos: capamedia review {orq|bus|was}
+app.command(
+    "orq",
+    help="Review forzando source_type=orq. Activa Block 20 (ORQ->migrado, no legacy).",
+)(_subcommand_review_factory("orq"))
+
+app.command(
+    "bus",
+    help="Review forzando source_type=bus. Block 0 aplica matriz BUS+invocaBancs->REST.",
+)(_subcommand_review_factory("bus"))
+
+app.command(
+    "was",
+    help="Review forzando source_type=was. Block 0 aplica matriz WAS: 1op REST / 2+ops SOAP.",
+)(_subcommand_review_factory("was"))
