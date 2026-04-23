@@ -509,19 +509,35 @@ public class Wsclientes0076OutputAdapter implements ConsultarClienteOutputPort {
 
 ## Regla 9f - Preservar el `application.yml` del MCP scaffold (merge, no replace)
 
-**Commit 898d25f del PromptCapaMedia (2026-04-22)**.
+**Commits 898d25f + 104addb del PromptCapaMedia (2026-04-22/23)**.
 
 **MUST**: el MCP Fabrics genera un `application.yml` con propiedades que la
-infraestructura del banco espera (`spring.header.*`, `spring.application.name`,
-`optimus.*`, `web-filter.*`, etc). El agente migrador DEBE **preservar TODAS
-las propiedades del scaffold**. Al migrar se **AGREGAN** las propiedades
-especificas de la migracion (`bancs.webclients`, `error-codes`, service
-config, `trace-logger`, etc) **junto a** las existentes.
+infraestructura del banco espera (`spring.header.channel`, `spring.header.medium`,
+`spring.application.name`, `optimus.*`, `web-filter.*`, etc). El agente migrador
+DEBE **preservar TODAS las propiedades del scaffold**. Al migrar se **AGREGAN**
+las propiedades especificas de la migracion (`bancs.webclients`, `error-codes`,
+service config, `trace-logger`, etc) **junto a** las existentes.
+
+### MANDATORIO (v0.23.9): `spring.header.channel` + `spring.header.medium`
+
+Estas DOS propiedades **DEBEN** estar siempre presentes como **literales**
+en el `application.yml` final, aplica para REST y SOAP por igual:
+
+```yaml
+spring:
+  header:
+    channel: digital    # MANDATORIO - literal, nunca ${CCC_*}
+    medium: web         # MANDATORIO - literal, nunca ${CCC_*}
+```
+
+Motivo: la infraestructura del banco lee estas dos keys para el tracing y
+routing global. Son literales fijos que no cambian por ambiente.
 
 **NEVER**:
 - Reemplazar el `application.yml` entero.
 - Quitar propiedades del scaffold pensando que "no se usan".
-- Borrar `spring.header.*` (ya fue explicitado en Regla 6.5).
+- Borrar `spring.header.channel` o `spring.header.medium`.
+- Convertirlas en `${CCC_*}` (son literales, no env vars).
 
 **UNICA propiedad a REMOVER** del scaffold: `spring.main.lazy-initialization`.
 Causa problemas con WebFlux (contexto reactivo) y con Spring WS (dispatcher
@@ -554,7 +570,7 @@ bancs:
 
 ## Regla 9g - Todos los configurables legacy en `application.yml`
 
-**Commit a91bda8 del PromptCapaMedia (2026-04-22)**.
+**Commits a91bda8 + 104addb del PromptCapaMedia (2026-04-22/23)**.
 
 **MUST**: TODA variable de configuracion identificada en el ANALYSIS
 (Section 15 "Service Configuration") — del servicio Y de sus UMPs — DEBE
@@ -567,26 +583,74 @@ tener su entrada en `application.yml`. Incluye variables de:
 - `GestionarRecursoXML` (IIB)
 - `CatalogoAplicaciones.properties`
 
-### Regla de commit
+### Regla de commit (actualizada en v0.23.9)
 
-- **Valores funcionales** (max records, resource names, timeouts de negocio,
-  lengths, prefixes, flags): commit como **literal** o con default inline
-  `${CCC_VAR:value}` cuando el valor es conocido del legacy.
-- **Secrets y env-dependent** (DB URLs, passwords, tokens): `${CCC_*}` sin
-  default. Cada `${CCC_*}` DEBE tener entrada en los **3 helms**
-  (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`).
-- **NUNCA** inventar valores. Si no esta disponible, `${CCC_*}` + comentario
-  `# valor no disponible — obtener de <fuente>`.
-- **NUNCA** dejar una variable sin documentar. Si el ANALYSIS la lista, DEBE
-  aparecer en `application.yml`.
+- **Valores fijos conocidos del legacy** (ej. resource names, component names,
+  lengths, prefixes, codigos de backend del catalogo): commit como **literal**
+  directo en `application.yml`.
+
+  ```yaml
+  transaction-attributes:
+    resource-01: "XYZ_RECURSO"            # literal
+    component-01: "XYZ_COMPONENTE"        # literal
+  error-messages:
+    backend: "00633"                      # literal (del catalogo)
+  ```
+
+- **Secrets + env-dependent** (DB URLs, passwords, tokens, URLs que cambian
+  por ambiente): usar `${CCC_*}` **SIN** defaults inline. Cada `${CCC_*}`
+  DEBE tener entrada en los **3 helms** (`helm/dev.yml`, `helm/test.yml`,
+  `helm/prod.yml`).
+
+  ```yaml
+  datasource:
+    url: ${CCC_DATASOURCE_URL}            # sin default, viene de Helm
+    username: ${CCC-ORACLE-OMNI-CATALOGA-USER}
+  ```
+
+- **NEVER inline defaults `${CCC_VAR:value}`**. TODO `${CCC_*}` obtiene su
+  valor **exclusivamente desde Helm**. Sin excepciones — ni siquiera para
+  codigos del catalogo oficial del banco.
+
+  **Por que**: permite que el Helm sea la unica fuente de verdad. Inline
+  defaults ocultan valores operativos y dificultan cambios sin redeploy.
+
+  ```yaml
+  # ✘ NO — inline default
+  error-messages:
+    backend: ${CCC_BANCS_ERROR_CODE:00633}
+
+  # ✔ OK — si es constante del catalogo, literal
+  error-messages:
+    backend: "00633"
+
+  # ✔ OK — si puede cambiar por ambiente, sin default (helm lo resuelve)
+  error-messages:
+    backend: ${CCC_BANCS_ERROR_CODE}
+  ```
+
+- **NEVER** inventar valores. Si no esta disponible en el legacy, usar
+  `${CCC_*}` + comentario `# valor no disponible — obtener de <fuente>`.
+- **NEVER** dejar una variable sin documentar. Si el ANALYSIS la lista,
+  DEBE aparecer en `application.yml`.
 - **Solo** declarar en Helm las `${CCC_*}` que realmente se referencian en
   `application.yml`. No variables huerfanas.
+
+### Autofix ejecutable
+
+La Regla 7 del banco (autofix `fix_yml_remove_defaults`) aplica exactamente
+esto: remueve todo `${CCC_VAR:default}` dejando solo `${CCC_VAR}`. Se
+dispara con `capamedia checklist` o `/doublecheck`.
+
+**Unica excepcion del autofix**: valores literales como `channel: digital`
+y `medium: web` NO tienen pattern `${VAR:default}`, no se tocan.
 
 ### Check ejecutable: Block 19 del checklist
 
 El CLI valida esto en `run_block_19` de `checklist_rules.py`, cruzando el
-`.capamedia/properties-report.yaml` (generado por `clone`) con las keys
-presentes en `application.yml` del destino.
+`.capamedia/properties-report.yaml` (generado por `clone` o por
+`_auto_generate_reports_from_local_legacy`) con las keys presentes en
+`application.yml` del destino.
 
 ---
 

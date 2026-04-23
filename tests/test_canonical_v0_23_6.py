@@ -146,6 +146,28 @@ def test_bank_official_rules_has_helm_pdb_rule() -> None:
     assert "SOAP" in content
 
 
+def test_bank_official_rules_prohibits_inline_defaults_v0_23_9() -> None:
+    """v0.23.9: Regla 9g actualizada - NEVER inline defaults `${CCC_VAR:value}`."""
+    path = CANONICAL_ROOT / "context" / "bank-official-rules.md"
+    content = path.read_text(encoding="utf-8")
+    # La prohibicion explicita debe estar
+    assert "NEVER inline defaults" in content or "inline defaults" in content.lower()
+    # Debe explicar el motivo (helm como unica fuente)
+    assert "exclusivamente desde Helm" in content or "Helm" in content
+
+
+def test_bank_official_rules_mandatory_spring_header_v0_23_9() -> None:
+    """v0.23.9: spring.header.channel/medium deben ser mandatorios always."""
+    path = CANONICAL_ROOT / "context" / "bank-official-rules.md"
+    content = path.read_text(encoding="utf-8")
+    # Check explicitos que son MANDATORIO
+    assert "channel: digital" in content
+    assert "medium: web" in content
+    # Como literal, no env var
+    # (el texto debe enfatizar "literal, nunca env var")
+    assert "MANDATORIO" in content or "MUST" in content
+
+
 def test_bank_official_rules_has_configurables_csv_reference() -> None:
     """v0.23.7: Regla 11 - referencia al CSV ConfigurablesBusOmniTest."""
     path = CANONICAL_ROOT / "context" / "bank-official-rules.md"

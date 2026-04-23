@@ -4,6 +4,72 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.9] - 2026-04-23
+
+### Changed - Alineacion con commit `104addb` del PromptCapaMedia: NEVER inline defaults, spring.header mandatorios
+
+Nuevo commit en el repo canonico (`feat: Rest do not delete header yml` por
+jgarcia, 2026-04-23) con 3 cambios que ahora estan integrados:
+
+#### 1. `spring.header.channel` y `spring.header.medium` MANDATORIOS
+
+Regla 9f actualizada: estas dos keys DEBEN estar siempre presentes como
+**literales** en `application.yml` final (REST y SOAP por igual):
+
+```yaml
+spring:
+  header:
+    channel: digital    # MANDATORIO - literal, nunca ${CCC_*}
+    medium: web         # MANDATORIO - literal, nunca ${CCC_*}
+```
+
+Motivo: la infra del banco las lee para tracing y routing global.
+
+#### 2. NEVER inline defaults `${CCC_VAR:value}`
+
+Regla 9g actualizada (contradiccion anterior removida):
+
+**ANTES (v0.23.6-v0.23.8)**:
+> "Valores funcionales: commit como literal o con default inline
+> `${CCC_VAR:value}` cuando el valor es conocido del legacy."
+
+**AHORA (v0.23.9)** — alineado al commit `104addb`:
+> "NEVER inline defaults `${CCC_VAR:value}`. TODO `${CCC_*}` obtiene su
+> valor **exclusivamente desde Helm**. Sin excepciones — ni siquiera para
+> codigos del catalogo oficial del banco."
+
+**Por que**: permite que el Helm sea la unica fuente de verdad. Inline
+defaults ocultan valores operativos y dificultan cambios sin redeploy.
+
+```yaml
+# ✘ NO (v0.23.9) — inline default
+error-messages:
+  backend: ${CCC_BANCS_ERROR_CODE:00633}
+
+# ✔ OK — si es constante del catalogo, literal
+error-messages:
+  backend: "00633"
+
+# ✔ OK — si puede cambiar por ambiente, sin default
+error-messages:
+  backend: ${CCC_BANCS_ERROR_CODE}
+```
+
+#### 3. Autofix ya lo cubre
+
+La Regla 7 del banco (`fix_yml_remove_defaults` en `bank_autofix.py`)
+remueve todo `${CCC_VAR:default}` automaticamente cuando se corre
+`capamedia checklist` / `/doublecheck`. La excepcion previa para
+`bancs.error-codes` (`${CCC_BANCS_ERROR_CODE_IIB:00638}`) queda eliminada
+del canonical — si es constante, se usa literal.
+
+### Tests nuevos (2)
+
+- `bank-official-rules.md` prohibe inline defaults explicitamente
+- `spring.header.channel/medium` son mandatorios como literales
+
+Total: 576 tests passing.
+
 ## [0.23.8] - 2026-04-23
 
 ### Added - `review` auto-genera reportes desde legacy local (sin `clone`)
