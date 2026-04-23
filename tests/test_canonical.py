@@ -26,6 +26,45 @@ def test_slash_commands_are_loaded() -> None:
     assert "check" in names
 
 
+def test_doublecheck_slash_command_exists(tmp_path: Path) -> None:
+    """v0.23.0: /doublecheck (alias de capamedia checklist) debe estar
+    disponible como slash command en Claude Code.
+    """
+    assets = load_canonical_assets()
+    names = {a.name for a in assets["prompt"]}
+    assert "doublecheck" in names, (
+        "/doublecheck debe existir como prompt canonical para que se genere "
+        ".claude/commands/doublecheck.md al correr `capamedia init`"
+    )
+
+    # El prompt debe tener los campos mínimos para ser un slash command valido
+    dc = next(a for a in assets["prompt"] if a.name == "doublecheck")
+    assert dc.description, "doublecheck debe tener description"
+    assert dc.frontmatter.get("type") == "prompt"
+
+
+def test_init_scaffolds_doublecheck_in_claude_commands(tmp_path: Path, monkeypatch) -> None:
+    """v0.23.0: `capamedia init --ai claude` escribe
+    `.claude/commands/doublecheck.md` al workspace para que `/doublecheck`
+    este disponible en Claude Code.
+    """
+    from capamedia_cli.commands.init import scaffold_project
+
+    monkeypatch.chdir(tmp_path)
+    scaffold_project(
+        target_dir=tmp_path,
+        service_name="wsfooXXXX",
+        harnesses=["claude"],
+    )
+    dc_file = tmp_path / ".claude" / "commands" / "doublecheck.md"
+    assert dc_file.exists(), (
+        "Despues de init, .claude/commands/doublecheck.md debe existir para "
+        "que /doublecheck sea un slash command visible en Claude Code"
+    )
+    content = dc_file.read_text(encoding="utf-8")
+    assert "doublecheck" in content.lower() or "doble check" in content.lower()
+
+
 def test_full_prompts_are_loaded() -> None:
     """The 5 detailed prompts ported from PromptCapaMedia must be present."""
     assets = load_canonical_assets()

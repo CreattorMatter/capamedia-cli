@@ -4,6 +4,29 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.1] - 2026-04-22
+
+### Added - Slash command `/doublecheck` en Claude Code (y resto de harnesses)
+
+Feedback Julian: tener `capamedia checklist` como CLI esta OK, pero tambien
+hace falta el slash command `/doublecheck` disponible en Claude Code (y
+todos los harnesses) para correrlo desde el chat sin salir del IDE.
+
+- Nuevo prompt canonical `canonical/prompts/doublecheck.md`.
+- Se publica automaticamente como `.claude/commands/doublecheck.md` al
+  correr `capamedia init --ai claude` (y analogamente en `.codex/`,
+  `.opencode/`, etc. para los otros harnesses).
+- El slash `/doublecheck` invoca internamente `capamedia checklist` + guia
+  al agente para interpretar el resultado (PASS / residuales HIGH / handoff
+  al owner).
+
+### Tests nuevos (2)
+
+- `doublecheck` esta cargado como prompt canonical
+- `init --ai claude` escribe `.claude/commands/doublecheck.md`
+
+Total: 540 tests passing.
+
 ## [0.23.0] - 2026-04-22
 
 ### Added - 5 features consolidadas del feedback de Julian
