@@ -38,6 +38,10 @@ class CheckContext:
     # Si esta poblado, el Check 1.4 usa la regla "1 port por dominio".
     # Si es None, cae al check viejo (solo Bancs unico).
     ump_domains: list = None  # type: ignore[assignment]
+    # v0.22.0: matriz MCP-driven (BUS + invocaBancs -> REST override,
+    # ORQ -> siempre WebFlux, WAS -> ops count decide)
+    source_type: str = ""       # "bus" | "was" | "orq" | "unknown" | ""
+    has_bancs: bool = False     # flag invocaBancs (MCP)
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -68,6 +72,37 @@ def _read_or_empty(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _expected_framework(
+    source_type: str, has_bancs: bool, ops_count: int
+) -> tuple[str, str]:
+    """Matriz MCP-driven oficial del banco (v0.22.0).
+
+    Returns (expected_framework, reason) donde framework es "rest" | "soap".
+
+    Reglas (prioridad de arriba abajo):
+      1. BUS (IIB) + invocaBancs=true -> REST+WebFlux (override MCP)
+      2. ORQ                          -> REST+WebFlux (deploymentType=orquestador)
+      3. WAS + 1 op                   -> REST + MVC
+      4. WAS + 2+ ops                 -> SOAP + MVC
+      5. Unknown/sin datos            -> fallback a ops count (1 -> rest, sino soap)
+    """
+    src = (source_type or "").lower()
+
+    if src == "bus" and has_bancs:
+        return ("rest", "BUS + invocaBancs=true fuerza WebFlux")
+    if src == "orq":
+        return ("rest", "ORQ siempre WebFlux (deploymentType=orquestador)")
+    if src == "was":
+        if ops_count == 1:
+            return ("rest", "WAS 1 op -> REST + MVC")
+        return ("soap", f"WAS {ops_count} ops -> SOAP + MVC")
+
+    # Fallback: sin source_type detectable, usar conteo de ops
+    if ops_count == 1:
+        return ("rest", "1 op -> REST (sin source_type, fallback a conteo)")
+    return ("soap", f"{ops_count} ops -> SOAP (sin source_type, fallback a conteo)")
 
 
 # -- Block 0: Pre-check con analisis cruzado legacy vs migrado ---------------
@@ -123,19 +158,37 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
     elif ctx.legacy_path and not legacy_wsdl:
         results.append(CheckResult("0.2b", "Block 0", "Count ops legacy vs migrado", "fail", severity="medium", detail="Legacy path provisto pero WSDL legacy no encontrado"))
 
-    # Dialogo conversacional - cruce con framework
-    expected_fw = "rest" if ops_migrated == 1 else "soap"
+    # v0.22.0: matriz MCP-driven.
+    # - BUS (IIB) + invocaBancs=true -> REST+WebFlux (override, ignora ops)
+    # - ORQ                          -> REST+WebFlux (siempre)
+    # - WAS                          -> 1 op=REST+MVC, 2+ ops=SOAP+MVC
+    # - unknown                      -> fallback al conteo de ops (comportamiento legacy)
+    expected_fw, reason = _expected_framework(
+        ctx.source_type, ctx.has_bancs, ops_migrated
+    )
     actual_fw = ctx.project_type
     ops_ref = ops_legacy if ops_legacy > 0 else ops_migrated
+
+    # Construir el diálogo conversacional con todos los datos de la matriz
+    src_disp = (ctx.source_type or "unknown").upper()
+    bancs_disp = "SI" if ctx.has_bancs else "NO"
     if expected_fw == actual_fw:
-        dialogo = f"Son {ops_ref} op(s), va {actual_fw.upper()}. Esta OK? Si, esta OK."
-        results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail=dialogo))
+        dialogo = (
+            f"source={src_disp} · invocaBancs={bancs_disp} · {ops_ref} op(s) "
+            f"-> {actual_fw.upper()} ({reason}). OK."
+        )
+        results.append(CheckResult("0.2c", "Block 0", "Framework vs matriz MCP", "pass", detail=dialogo))
     else:
-        if ops_migrated == 1 and actual_fw == "soap" and ctx.has_database:
-            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "pass", detail="1 op + BD => SOAP MVC (excepcion JPA)"))
-        else:
-            dialogo = f"Son {ops_ref} op(s) => deberia ir {expected_fw.upper()}. Se migro como {actual_fw.upper()} => MAL-CLASIFICADO"
-            results.append(CheckResult("0.2c", "Block 0", "Framework vs operaciones", "fail", severity="high", detail=dialogo, suggested_fix="Reclasificar el proyecto al framework correcto"))
+        dialogo = (
+            f"source={src_disp} · invocaBancs={bancs_disp} · {ops_ref} op(s) "
+            f"-> deberia ir {expected_fw.upper()} ({reason}). "
+            f"Se migro como {actual_fw.upper()} -> MAL-CLASIFICADO"
+        )
+        results.append(CheckResult(
+            "0.2c", "Block 0", "Framework vs matriz MCP", "fail",
+            severity="high", detail=dialogo,
+            suggested_fix="Reclasificar segun matriz: BUS+invocaBancs/ORQ -> REST+WebFlux, WAS 1op -> REST+MVC, WAS 2+ops -> SOAP+MVC",
+        ))
 
     # 0.3 - Operation names match
     if legacy_wsdl:
@@ -1171,6 +1224,83 @@ def run_block_18(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+_GENERIC_CLASS_NAMES = {
+    "Service", "ServiceImpl",
+    "Adapter",
+    "Port", "InputPort", "OutputPort",
+    "Controller",
+    "Mapper",
+    "Helper",
+    "Request", "Response",
+    "Dto",
+    "Config",
+    "Constants",
+    "Exception",
+    "Entity", "Repository",
+}
+
+
+_CLASS_DECL_RE = re.compile(
+    r"^\s*public\s+(?:final\s+|abstract\s+)?"
+    r"(?:class|interface|record|enum)\s+(\w+)",
+    re.MULTILINE,
+)
+
+
+def run_block_3(ctx: CheckContext) -> list[CheckResult]:
+    """Block 3 (v0.22.0): Naming profesional - sin nombres genericos.
+
+    Clases e interfaces publicas deben tener un prefijo de dominio. Nombres
+    como `Service.java`, `Adapter.java`, `Request.java` sin prefijo generan
+    ambiguedad y no pasan peer review (check 3.5 del canonical).
+
+    FAIL HIGH por cada clase con nombre en la blocklist `_GENERIC_CLASS_NAMES`.
+    """
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+    if not src_java.is_dir():
+        return results
+
+    offenders: list[tuple[str, Path]] = []
+    for java_file in src_java.rglob("*.java"):
+        if ".git" in java_file.parts or "build" in java_file.parts:
+            continue
+        try:
+            text = java_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _CLASS_DECL_RE.finditer(text):
+            class_name = match.group(1)
+            if class_name in _GENERIC_CLASS_NAMES:
+                offenders.append((class_name, java_file))
+
+    if not offenders:
+        results.append(CheckResult(
+            "3.5", "Block 3", "Naming profesional - sin nombres genericos",
+            "pass",
+            detail="todas las clases/interfaces/records tienen prefijo de dominio",
+        ))
+        return results
+
+    for class_name, java_file in offenders:
+        rel = java_file.relative_to(ctx.migrated_path) if java_file.is_relative_to(ctx.migrated_path) else java_file
+        results.append(CheckResult(
+            f"3.5.{class_name}", "Block 3",
+            f"Clase generica `{class_name}` sin prefijo de dominio",
+            "fail",
+            severity="high",
+            detail=f"{rel}: clase se llama `{class_name}` (nombre generico)",
+            suggested_fix=(
+                f"Renombrar a algo especifico del dominio, ej "
+                f"Customer{class_name}, Bancs{class_name}, "
+                f"<Operation>{class_name}. El sufijo tecnico esta bien, "
+                "lo que falta es el prefijo de negocio."
+            ),
+        ))
+
+    return results
+
+
 def run_block_19(ctx: CheckContext) -> list[CheckResult]:
     """Block 19 (v0.21.0): Properties delivery audit.
 
@@ -1277,6 +1407,7 @@ ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
     ("Block 2", run_block_2),
+    ("Block 3", run_block_3),  # v0.22.0: naming profesional
     ("Block 5", run_block_5),
     ("Block 7", run_block_7),
     ("Block 13", run_block_13),

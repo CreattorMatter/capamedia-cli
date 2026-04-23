@@ -87,7 +87,10 @@ infrastructure/
 - **Service Purity:** services SOLO contienen @Override de la interfaz del input port. CERO metodos privados (validaciones, normalizaciones, formateos). Extraer a `application/util/<Domain>*Helper.java`
 
 ## Referencia de patrones
-Usar tnd-msa-sp-wsclientes0024 como proyecto de referencia para copiar patrones exactos.
+Las reglas canonicas del banco viven en este mismo contexto (hexagonal, bancs,
+bank-official-rules, code-style, etc.). NO copiar de un servicio-ejemplo;
+aplicar las reglas como estan definidas aqui. Los patrones del banco evolucionan
+y un servicio migrado el mes pasado puede tener gaps que ya se resolvieron.
 
 ## Flujo de trabajo
 1. `/pre-migracion <ruta>` — Detecta tipo (IIB / WAS / ORQ) y genera ANALISIS_*.md

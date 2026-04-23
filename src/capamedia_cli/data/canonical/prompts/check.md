@@ -105,7 +105,7 @@ Escribir `CHECKLIST_<servicio>.md` con esta estructura:
 **Project:** <path>
 **Service:** <name>
 **Type:** SOAP | REST
-**Gold standard:** wsclientes0015 | wsclientes0024
+**Framework matrix:** canonical rules (no servicio-gold reference)
 **Date:** YYYY-MM-DD
 
 ## Summary

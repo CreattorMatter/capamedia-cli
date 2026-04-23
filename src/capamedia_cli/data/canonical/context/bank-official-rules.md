@@ -254,12 +254,12 @@ ni `medium: web` que son literales validos. Nuestro `fix_yml_remove_defaults`
 tiene guard explicito para este caso (usa el patron `${VAR:default}`, no
 matchea valores literales).
 
-**Bloque completo de referencia** (extraido del gold tnd-msa-sp-wsclientes0024):
+**Bloque completo de referencia** (patron canonico del banco):
 
 ```yaml
 spring:
   application:
-    name: tnd-msa-sp-wsclientes0024
+    name: <namespace>-msa-sp-<svc>     # ej. tnd-msa-sp-wsclientes0007
   header:
     channel: digital
     medium: web
@@ -384,10 +384,10 @@ metadata:
   name: tpl-middleware                                # ✔ literal obligatorio
   description: Consulta de contacto transaccional BANCS   # ✔ real (no "comming soon")
   annotations:
-    dev.azure.com/project-repo: tpl-middleware/tnd-msa-sp-wsclientes0024   # ✔ matches links[0]
-    sonarcloud.io/project-key: 46ce6caa-d7d5-49b5-9c8a-0958a64589c5        # ✔ UUID
+    dev.azure.com/project-repo: tpl-middleware/<namespace>-msa-sp-<svc>    # ✔ matches links[0]
+    sonarcloud.io/project-key: <uuid-de-sonarcloud>                         # ✔ UUID
   links:
-    - url: https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/tnd-msa-sp-wsclientes0024
+    - url: https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/<namespace>-msa-sp-<svc>
       title: Repositorio
     - url: https://app.swaggerhub.com/apis/BancoPichincha/customer-contact/1.0.0
       title: OpenAPI

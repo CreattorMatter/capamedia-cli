@@ -111,11 +111,11 @@ Before executing, verify that you have access to:
 
 4. **Servicios Configurables catalog (MANDATORY when the ANALYSIS reports `GestionarRecursoConfigurable`)** — Local file `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`. Treat it as the operational source of truth for `Environment.cache.<ConfigName>.<field>` values. Resolve every used field here before leaving any placeholder.
 
-5. **Gold standard reference project:** `tnd-msa-sp-wsclientes0024` — the ONLY approved REST migration reference. Uses `@RestController` + `@PostMapping`, Spring WebFlux (Netty reactive, NO .block()), `ErrorResolverHandler` (`ErrorWebExceptionHandler`) for SOAP Fault generation, single adapter with `@BancsService("ws-txNNNNNN")`, NO WebServiceConfig, NO NamespacePrefixInterceptor.
+5. **Canonical REST pattern (defined in this document):** `@RestController` + `@PostMapping`, Spring WebFlux (Netty reactive, NO `.block()`), `ErrorResolverHandler` (`ErrorWebExceptionHandler`) for SOAP Fault generation, single adapter with `@BancsService("ws-txNNNNNN")`, NO WebServiceConfig, NO NamespacePrefixInterceptor.
 
-> **CRITICAL: Do NOT reference wsclientes0015 for BUS migrations.** The 0015 was a BUS (IIB) service migrated as SOAP (@Endpoint, BancsClientHelper, .block(), WebServiceConfig, NamespacePrefixInterceptor). Under the current MCP matrix, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they NEVER use SOAP patterns. The 0015 is only valid as gold standard for WAS 2+ ops (SOAP prompt). For ALL services reaching this REST prompt (BUS, ORQ, WAS 1-op), use **wsclientes0024 exclusively**.
+> **CRITICAL: MCP matrix for REST.** BUS (IIB) with `invocaBancs: true` → REST+WebFlux always (MCP override, any number of ops). ORQ → REST+WebFlux always. WAS 1-op → REST+MVC. WAS 2+ ops → SOAP+MVC (uses the other prompt). If you see `@Endpoint`/`WebServiceConfig`/`BancsClientHelper`/`.block()` in a BUS or ORQ service, it is **mis-classified** under the current matrix — those are SOAP patterns.
 >
-> **Patterns from 0015 that must NEVER appear in a BUS/ORQ REST migration:**
+> **Patterns that must NEVER appear in a BUS/ORQ REST migration:**
 > - `@Endpoint` / `@PayloadRoot` — use `@RestController` + `@PostMapping`
 > - `WebServiceConfig` / `NamespacePrefixInterceptor` — use `package-info.java` with `@XmlSchema`
 > - `BancsClientHelper` abstract class — use direct `BancsClient` injection with `@BancsService`
@@ -130,14 +130,16 @@ If the analysis document is missing, **STOP** and request Phase 1 execution firs
 
 ## FUNDAMENTAL PRINCIPLE: ALIGN WITH THE GOLD STANDARD
 
-**The gold standard is `tnd-msa-sp-wsclientes0024` — the ONLY approved REST service. NEVER use wsclientes0015 as reference for BUS or ORQ migrations.**
+**The canonical REST pattern is defined in this document. Apply the rules as
+written here; do NOT copy patterns from specific legacy projects of the bank
+(those may contain gaps that have since been resolved in the canonical rules).**
 
-When implementing ANY aspect of the migration (build.gradle, application-test.yml, integration tests, error handling, dependency versions, YAML structure), the FIRST question must ALWAYS be: **"How does the gold standard (wsclientes0024) do this?"**
+When implementing ANY aspect of the migration (build.gradle, application-test.yml, integration tests, error handling, dependency versions, YAML structure), the FIRST question must ALWAYS be: **"How does the canonical REST pattern do this?"**
 
-- If the gold standard has it -> replicate it exactly
-- If the gold standard does NOT have it -> do NOT add it
-- If something fails -> check how the gold standard handles it BEFORE inventing a workaround
-- NEVER patch, workaround, or invent solutions. Copy the gold standard.
+- If the canonical pattern has it -> replicate it exactly
+- If the canonical pattern does NOT have it -> do NOT add it
+- If something fails -> check how the canonical pattern handles it BEFORE inventing a workaround
+- NEVER patch, workaround, or invent solutions. Copy the canonical pattern.
 
 ---
 
@@ -173,7 +175,7 @@ public abstract class CustomerServicePort { // NO
 grep -r "import org.springframework" src/main/java/**/domain/
 grep -r "import jakarta" src/main/java/**/domain/
 ```
-`GlobalErrorException` uses `HttpStatus` from Spring in the gold standard 0024. This is an accepted pragmatic choice for REST services — the error resolvers in infrastructure consume it directly.
+`GlobalErrorException` uses `HttpStatus` from Spring in the canonical REST pattern. This is an accepted pragmatic choice for REST services — the error resolvers in infrastructure consume it directly.
 
 **Rule 3 — `application/service/` NEVER imports classes from `infrastructure/`:**
 The application layer only knows about ports (interfaces) and domain models. Never infrastructure DTOs, adapters, config, or mappers.
@@ -274,7 +276,7 @@ public class CustomerAdapterBancs implements BancsCustomerPort {
 | `lib-trace-logger` | `com.pichincha.common.trace.logger.annotation` | `BpTraceable`, `BpLogger` |
 | `lib-trace-logger` | `com.pichincha.common.trace.logger.logger.custom.level` | `CustomLogLevel`, `CustomLogLevelHandler` |
 
-**NEVER fabricate import packages.** If unsure about a class location, check the gold standard reference project (wsclientes0024).
+**NEVER fabricate import packages.** If unsure about a class location, check the canonical patterns documented in this prompt and in the other context files (bancs, bank-official-rules, hexagonal).
 
 ### Header Validation — Bancs Block (Rule 9b)
 
@@ -305,7 +307,7 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 | `mensaje` | Description only — NO `<NODO>-` prefix | Legacy code (strip the `<NODO>-` prefix if present; legacy format was `<NODO>-<Description>`) | Canonical source: `sqb-cfg-errores-errors/errores.xml` |
 | `mensajeNegocio` | **ALWAYS null or empty string** | DataPower (front-end of the service, not the service itself) | **Never set a real value here.** The `buildGenericError(..., mensajeNegocio, ...)` utility accepts the param only for symmetry; pass `null`. |
 | `tipo` | `INFO` / `ERROR` / `FATAL` exactly as legacy | Legacy ESQL `SET error.tipo = '...'` | See Rule 9d in the SOAP prompt for the full classification (same rules apply) |
-| `recurso` | `<NOMBRE_SERVICIO>/<MÉTODO>` (literal slash) | Build from project artifactId + operation name | Example: `tnd-msa-sp-wsclientes0024/getDatosBasicos` |
+| `recurso` | `<NOMBRE_SERVICIO>/<MÉTODO>` (literal slash) | Build from project artifactId + operation name | Example: `<namespace>-msa-sp-<svc>/getDatosBasicos` |
 | `componente` | See cases below (IIB-sourced services; REST targets typically are IIB-sourced) | Depends on where the error originated | See table |
 | `backend` | 5-digit code from `sqb-cfg-codigosBackend-config/codigosBackend.xml` | Injected via `BancsErrorCodesProperties` — never hardcoded as `"00000"` | Canonical IDs: `00638` IIB, `00045` BANCS, `00633` WAS, `00640` DataPower, `00632` WSO2 |
 
@@ -313,8 +315,8 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 | Situation | `componente` value | Example |
 |---|---|---|
-| Error internal to the migrated microservice | `<NOMBRE_SERVICIO>` | `tnd-msa-sp-wsclientes0024` |
-| Successful response (any backend) | `<NOMBRE_SERVICIO>` | `tnd-msa-sp-wsclientes0024` |
+| Error internal to the migrated microservice | `<NOMBRE_SERVICIO>` | `<namespace>-msa-sp-<svc>` |
+| Successful response (any backend) | `<NOMBRE_SERVICIO>` | `<namespace>-msa-sp-<svc>` |
 | Error propagated from a library (e.g., `lib-bnc-api-client`) | `<LIBRERIA>` | `ApiClient` |
 | Controlled business error propagated from ApiClient | `TX<CÓDIGO>` (6-digit TX, prefixed `TX`) | `TX060480` |
 
@@ -391,7 +393,7 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 | Utility (static) | `<Noun>Helper.java` | `SoapResponseHelper` |
 | Constants | `<Noun>Constants.java` | `CatalogExceptionConstants` |
 
-**Note on `Impl` suffix:** In REST mode, `ServiceImpl` suffix IS allowed and matches the gold standard 0024 (e.g., `CustomerServiceImpl`).
+**Note on `Impl` suffix:** In REST mode, `ServiceImpl` suffix IS allowed and matches the canonical REST pattern (e.g., `CustomerServiceImpl`).
 
 ### Professional Naming — NO generic names (MANDATORY)
 
@@ -455,7 +457,7 @@ static final String SUCCESS_CODE = "0";
 
 ### Lombok — Use MINIMALLY (Gold Standard Pattern)
 
-**The gold standard wsclientes0024 uses:**
+**The canonical REST pattern uses:**
 - `@Getter` — for typed exceptions and enums
 - `@RequiredArgsConstructor` — for constructor injection
 - `@Builder` — on records for domain models and DTOs
@@ -945,9 +947,9 @@ jacocoTestReport {
     }
 }
 
-// --- WSDL generation tasks (same as gold standard) ---
+// --- WSDL generation tasks (same as canonical pattern) ---
 // cleanGeneratedWsdl, generateJavaFromWsdl, postProcessGeneratedWsdl, generateFromWsdl
-// Copy these tasks exactly from the gold standard build.gradle
+// Copy these tasks exactly from the canonical pattern build.gradle
 
 sourceSets {
     main {
@@ -981,9 +983,9 @@ tasks.named('compileJava') {
 
 2. **Copy WSDL/XSD to `src/main/resources/legacy/`** — verify and fix `schemaLocation` paths.
 
-3. **Copy `gradle/postProcessWsdl.groovy`** from the gold standard as-is. NEVER modify.
+3. **Copy `gradle/postProcessWsdl.groovy`** from the canonical pattern as-is. NEVER modify.
 
-4. **`Application.java`** — verify it matches gold standard:
+4. **`Application.java`** — verify it matches canonical pattern:
 ```java
 package com.pichincha.sp;
 
@@ -1130,7 +1132,7 @@ public record HeaderRequestModel(
 ) {}
 ```
 
-5. **Create `GlobalErrorException`** (gold standard 0024 pattern — uses HttpStatus):
+5. **Create `GlobalErrorException`** (canonical REST pattern pattern — uses HttpStatus):
 ```java
 package com.pichincha.sp.domain.exception;
 
@@ -1539,7 +1541,7 @@ public class <NombreServicio>Controller {
 
     // buildSuccessResponse, buildBusinessErrorResponse,
     // buildServiceErrorResponse, toRequestContext
-    // — follow gold standard 0024 pattern exactly
+    // — follow canonical REST pattern pattern exactly
 }
 ```
 
@@ -2725,7 +2727,7 @@ If the service can fetch data from two sources (BANCS + OCP/Stratio), implement:
    - `OcpOnlyStrategy` — OCP only, no failover
    - `OcpWithBancsFailoverStrategy` — OCP primary, BANCS fallback
 
-**The Service uses ONLY `CustomerQueryStrategyPort`** — NOT the individual ports directly. See gold standard 0024 for complete implementation.
+**The Service uses ONLY `CustomerQueryStrategyPort`** — NOT the individual ports directly. See canonical REST pattern for complete implementation.
 
 ---
 
@@ -2785,7 +2787,7 @@ find src -name "BancsClientHelper.java" | head -1
 
 **Objective:** Create deployment configuration for OpenShift.
 
-Use the Helm templates from the gold standard 0024 (dev/test/prod). Key environment variables:
+Use the Helm templates from the canonical REST pattern (dev/test/prod). Key environment variables:
 
 ```yaml
 # In values-dev.yaml, values-test.yaml, values-prod.yaml
@@ -2844,7 +2846,7 @@ grep "livenessProbe" helm/values-dev.yaml
 
 **Objective:** Achieve >= 75% JaCoCo coverage with comprehensive unit tests.
 
-**Testing patterns from gold standard 0024:**
+**Testing patterns from canonical REST pattern:**
 
 - `@ExtendWith(MockitoExtension.class)` for all unit tests
 - `@Mock` / `@InjectMocks` for dependency injection
@@ -2988,9 +2990,9 @@ grep -r "http://" src/main/resources/application.yml | grep -v "\${CCC"
 
 If any GATE fails:
 1. **Read the error message carefully**
-2. **Check the gold standard (wsclientes0024) for the correct approach**
+2. **Check the canonical REST pattern for the correct approach**
 3. **Fix the issue — do NOT invent workarounds**
 4. **Re-run the GATE**
 5. **If still failing after 3 attempts, STOP and report the issue**
 
-**The gold standard is ALWAYS the source of truth. When in doubt, copy the gold standard.**
+**The canonical pattern is ALWAYS the source of truth. When in doubt, copy the canonical pattern.**

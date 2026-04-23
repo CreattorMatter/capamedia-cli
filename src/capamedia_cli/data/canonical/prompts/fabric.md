@@ -73,7 +73,7 @@ mcp__fabrics__create_project_with_wsdl(
 )
 ```
 
-Si el MCP crea una subcarpeta `./destino/tnd-msa-sp-<servicio>/`, está OK — dejarla ahí.
+Si el MCP crea una subcarpeta `./destino/<namespace>-msa-sp-<servicio>/`, está OK — dejarla ahí.
 
 ## Paso 5 — Aplicar workarounds conocidos (MCP ≤ 2026-04-10)
 
@@ -102,7 +102,7 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 
 ### Gap 3 — Versiones desactualizadas
 
-Verificar y actualizar (si aplica) las versiones de Spring Boot, Jackson, Peer Review en `build.gradle` comparando con el gold standard clonado en `gold-ref/`.
+Verificar y actualizar (si aplica) las versiones de Spring Boot, Jackson, Peer Review en `build.gradle` contra las ultimas versiones aprobadas por el banco (consultar Artifacts feed `pkgs.dev.azure.com/BancoPichinchaEC/.../Framework`).
 
 ## Paso 6 — Completar con artefactos CapaMedia
 
@@ -110,15 +110,15 @@ Después del scaffold del MCP, copiar al destino:
 
 ```bash
 # Copiar .claude/ generado por capamedia init al destino
-cp -r .claude destino/tnd-msa-sp-<servicio>/
-cp CLAUDE.md destino/tnd-msa-sp-<servicio>/
-cp .sonarlint/connectedMode.json destino/tnd-msa-sp-<servicio>/.sonarlint/ 2>/dev/null || true
-cp .mcp.json destino/tnd-msa-sp-<servicio>/  # (el .gitignore lo ignora)
+cp -r .claude destino/<namespace>-msa-sp-<servicio>/
+cp CLAUDE.md destino/<namespace>-msa-sp-<servicio>/
+cp .sonarlint/connectedMode.json destino/<namespace>-msa-sp-<servicio>/.sonarlint/ 2>/dev/null || true
+cp .mcp.json destino/<namespace>-msa-sp-<servicio>/  # (el .gitignore lo ignora)
 ```
 
 ## Paso 7 — Registrar contexto
 
-Escribir `destino/tnd-msa-sp-<servicio>/migration-context.json`:
+Escribir `destino/<namespace>-msa-sp-<servicio>/migration-context.json`:
 
 ```json
 {
@@ -153,7 +153,7 @@ Escribir `destino/tnd-msa-sp-<servicio>/migration-context.json`:
 - Gap 2 (jaxws-rt) — NO aplica (projectType=rest)
 - Gap 3 (versiones) — sincronizado con gold-ref
 
-**Destino generado:** `./destino/tnd-msa-sp-<servicio>/`
+**Destino generado:** `./destino/<namespace>-msa-sp-<servicio>/`
 
 Revisá:
 1. `build.gradle` — que las dependencias sean las esperadas

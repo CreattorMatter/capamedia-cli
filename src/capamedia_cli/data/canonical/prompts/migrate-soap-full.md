@@ -135,9 +135,9 @@ Before executing, verify that you have access to:
 
 4. **Servicios Configurables catalog (MANDATORY when the ANALYSIS reports `GestionarRecursoConfigurable`)** -- Local file `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`. Treat it as the operational source of truth for `Environment.cache.<ConfigName>.<field>` values. Resolve every used field here before leaving any placeholder.
 
-5. **Gold standard reference project:** `tnd-msa-sp-wsclientes0015` -- the ONLY approved SOAP migration reference. Uses Spring WS `@Endpoint`, `BancsClientHelper` abstract + per-TX subclasses, `HeaderRequestModel`, `NamespacePrefixInterceptor`, `WebServiceConfig`, per-TX circuit breaker, Undertow blocking.
+5. **Gold standard reference project:** `<namespace>-msa-sp-<svc>` -- the ONLY approved SOAP migration reference. Uses Spring WS `@Endpoint`, `BancsClientHelper` abstract + per-TX subclasses, `HeaderRequestModel`, `NamespacePrefixInterceptor`, `WebServiceConfig`, per-TX circuit breaker, Undertow blocking.
 
-> **CRITICAL WARNING about wsclientes0015:** This gold standard was originally a **BUS (IIB)** service migrated as SOAP. Under the **current MCP matrix**, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they would NEVER use this SOAP prompt. The 0015 remains valid as a gold standard **exclusively for WAS services with 2+ operations** (the only case that reaches this prompt). When using 0015 as reference, be aware that its BANCS integration patterns (BancsClientHelper, per-TX circuit breaker) are correct for the SOAP/MVC stack, but its origin as a BUS service is a historical artifact that should NOT be taken as evidence that BUS services can use SOAP.
+> **CRITICAL WARNING about wsclientes0015:** This canonical pattern was originally a **BUS (IIB)** service migrated as SOAP. Under the **current MCP matrix**, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they would NEVER use this SOAP prompt. The 0015 remains valid as a canonical pattern **exclusively for WAS services with 2+ operations** (the only case that reaches this prompt). When using 0015 as reference, be aware that its BANCS integration patterns (BancsClientHelper, per-TX circuit breaker) are correct for the SOAP/MVC stack, but its origin as a BUS service is a historical artifact that should NOT be taken as evidence that BUS services can use SOAP.
 
 If the analysis document is missing, **STOP** and request Phase 1 execution first.
 
@@ -145,16 +145,16 @@ If the analysis document is missing, **STOP** and request Phase 1 execution firs
 
 ## FUNDAMENTAL PRINCIPLE: ALIGN WITH THE GOLD STANDARD
 
-**The gold standard is `tnd-msa-sp-wsclientes0015` -- the ONLY service approved via PR for SOAP/MVC migrations.**
+**The canonical pattern is `<namespace>-msa-sp-<svc>` -- the ONLY service approved via PR for SOAP/MVC migrations.**
 
-> **REMINDER:** wsclientes0015 was originally a BUS (IIB) service. Under the current MCP matrix, BUS+invocaBancs ALWAYS goes REST+WebFlux. The 0015 is valid as gold standard ONLY for **WAS services with 2+ operations** (the only services that reach this SOAP prompt). Do NOT use 0015 as justification to migrate a BUS service as SOAP.
+> **REMINDER:** this SOAP prompt applies ONLY to **WAS services with 2+ operations**. BUS (IIB) with `invocaBancs: true` ALWAYS goes REST+WebFlux (use the REST prompt). ORQ ALWAYS goes REST+WebFlux. Do not use this SOAP prompt as justification to migrate a BUS or ORQ service as SOAP.
 
-When implementing ANY aspect of the migration (build.gradle, application-test.yml, integration tests, error handling, dependency versions, YAML structure), the FIRST question must ALWAYS be: **"How does the gold standard (wsclientes0015) do this?"**
+When implementing ANY aspect of the migration (build.gradle, application-test.yml, integration tests, error handling, dependency versions, YAML structure), the FIRST question must ALWAYS be: **"How does the canonical SOAP pattern do this?"**
 
-- If the gold standard has it -> replicate it exactly
-- If the gold standard does NOT have it -> do NOT add it
-- If something fails -> check how the gold standard handles it BEFORE inventing a workaround
-- NEVER patch, workaround, or invent solutions. Copy the gold standard.
+- If the canonical pattern has it -> replicate it exactly
+- If the canonical pattern does NOT have it -> do NOT add it
+- If something fails -> check how the canonical pattern handles it BEFORE inventing a workaround
+- NEVER patch, workaround, or invent solutions. Copy the canonical pattern.
 
 ---
 
@@ -183,7 +183,7 @@ public abstract class ConsultarXxxInputPort { // NO
 3. Java 21 offers `sealed interface` if implementation restriction is needed
 4. Ports must NOT have behavior -- they only define the contract
 
-**NOTE: The gold standard project (wsclientes0015) uses interfaces in its ports. This is CORRECT and must be replicated. The project wsclientes0007 used abstract classes, which was a deviation that must NOT be repeated.**
+**NOTE:** the canonical SOAP pattern uses **interfaces** in its ports. Using abstract classes for ports is a deviation (observed in some legacy projects) and must NOT be used.
 
 **Rule 2 -- `domain/` has ZERO imports of Spring, SOAP, JPA, WebFlux -- NO EXCEPTIONS:**
 ```bash
@@ -329,7 +329,7 @@ return bancsClient.call(request, responseType).block();
 | `lib-trace-logger` | `com.pichincha.common.trace.logger.annotation` | `BpTraceable`, `BpLogger` |
 | `lib-trace-logger` | `com.pichincha.common.trace.logger.logger.custom.level` | `CustomLogLevel`, `CustomLogLevelHandler` |
 
-**NEVER fabricate import packages.** If unsure about a class location, check the gold standard reference project (wsclientes0015).
+**NEVER fabricate import packages.** If unsure about a class location, check the canonical pattern reference project (wsclientes0015).
 
 ### Header Validation -- Bancs Block (Rule 9b)
 
@@ -421,7 +421,7 @@ void givenMissingBancsHeader_whenConsultar_thenReturnsFatal() {
 - [`0010-WSR/.../ConsultarSeguridadNoFinanciero01.esql:585`](../../0010-WSR/legacy/_repo/com/bpichincha/esb/wsreglas0010/ConsultarSeguridadNoFinanciero01.esql:585) — `SET error.tipo = 'INFO'` para success
 - [`0010-WSR/ANALISIS_WSReglas0010.md:432`](../../0010-WSR/ANALISIS_WSReglas0010.md:432) — SOAP Fault / excepción IIB → `tipo='FATAL'`, triggerea contingencia
 
-**Violación común del gold standard:** los golds 0024/0013/0006 mezclan ERROR y FATAL o no distinguen. wsclientes0007 (post-fix) es el primero que aplica esta clasificación correctamente.
+**Violación común del canonical pattern:** los golds 0024/0013/0006 mezclan ERROR y FATAL o no distinguen. wsclientes0007 (post-fix) es el primero que aplica esta clasificación correctamente.
 
 **Validación rápida:**
 ```bash
@@ -440,7 +440,7 @@ grep -B2 "buildErrorResponse" src/main/java/**/Controller.java | \
 
 **Rule 9c -- NEVER hardcode `error.backend` as `"00000"` or empty string.** El campo `error.backend` de la respuesta SOAP debe venir del catálogo oficial del banco ([`sqb-cfg-codigosBackend-config/codigosBackend.xml`](https://dev.azure.com/BancoPichinchaEC/tpl-integrationbus-config/_git/sqb-cfg-codigosBackend-config)), inyectado vía `BancsErrorCodesProperties` como `@ConfigurationProperties`.
 
-**Origen:** UMP legacy usaba `Environment.cache.codigosBackend.iib` (IIB) o `.bancs_app` (BANCS) para poblar este campo, distinguiendo qué componente originó el error. Los gold standards (0024, 0013, 0006) tienen el bug de usar `"00000"` literal — **no replicar**.
+**Origen:** UMP legacy usaba `Environment.cache.codigosBackend.iib` (IIB) o `.bancs_app` (BANCS) para poblar este campo, distinguiendo qué componente originó el error. Los canonical patterns (0024, 0013, 0006) tienen el bug de usar `"00000"` literal — **no replicar**.
 
 **Valores oficiales (del catálogo):**
 
@@ -559,7 +559,7 @@ public class HeaderRequestValidator {
 | `mensaje` | Description only -- NO `<NODO>-` prefix | Legacy code (strip the `<NODO>-` prefix if present; legacy format was `<NODO>-<Description>`) | Canonical source: `sqb-cfg-errores-errors/errores.xml` |
 | `mensajeNegocio` | **ALWAYS null or empty string** | DataPower (front-end of the service, not the service itself) | **Never set a real value here.** Any helper method that accepts this parameter must receive `null` at the call site. |
 | `tipo` | `INFO` / `ERROR` / `FATAL` exactly as legacy | Legacy ESQL `SET error.tipo = '...'` | Full classification already in Rule 9d above |
-| `recurso` | `<NOMBRE_SERVICIO>/<MÉTODO>` (literal slash) | Build from project artifactId + operation name | Example: `tnd-msa-sp-wsclientes0015/ConsultarDireccionesCliente01` |
+| `recurso` | `<NOMBRE_SERVICIO>/<MÉTODO>` (literal slash) | Build from project artifactId + operation name | Example: `<namespace>-msa-sp-<svc>/ConsultarDireccionesCliente01` |
 | `componente` | See cases below -- **IIB and WAS have DIFFERENT formats** | Depends on source type and origin of the error | Critical for QA |
 | `backend` | 5-digit code from `sqb-cfg-codigosBackend-config/codigosBackend.xml` | Injected via `BancsErrorCodesProperties` -- never hardcoded as `"00000"` | Already covered by Rule 9c above |
 
@@ -567,8 +567,8 @@ public class HeaderRequestValidator {
 
 | Situation | `componente` value | Example |
 |---|---|---|
-| Error internal to the migrated microservice | `<NOMBRE_SERVICIO>` | `tnd-msa-sp-wsclientes0015` |
-| Successful response (any backend) | `<NOMBRE_SERVICIO>` | `tnd-msa-sp-wsclientes0015` |
+| Error internal to the migrated microservice | `<NOMBRE_SERVICIO>` | `<namespace>-msa-sp-<svc>` |
+| Successful response (any backend) | `<NOMBRE_SERVICIO>` | `<namespace>-msa-sp-<svc>` |
 | Error propagated from a library (e.g., `lib-bnc-api-client`) | `<LIBRERIA>` | `ApiClient` |
 | Controlled business error propagated from ApiClient | `TX<CÓDIGO>` (6-digit, `TX` prefix) | `TX060480` |
 
@@ -735,7 +735,7 @@ static final String SUCCESS_MESSAGE_BANCS = "OK";
 
 ### Lombok -- Use MINIMALLY (Gold Standard Pattern)
 
-**The gold standard wsclientes0015 uses ONLY 2 Lombok annotations:**
+**The canonical SOAP pattern uses ONLY 2 Lombok annotations:**
 - `@Getter` -- when needed (rare, mostly for typed exceptions)
 - `@RequiredArgsConstructor` -- for constructor injection of dependencies (ALWAYS instead of @Autowired)
 
@@ -745,7 +745,7 @@ static final String SUCCESS_MESSAGE_BANCS = "OK";
 |-------------------|-------------|
 | `@Data`, `@Builder`, `@AllArgsConstructor`, `@NoArgsConstructor` for DTOs/models | **Java `record`** (immutable, generates accessors, equals/hashCode, toString) |
 | `@Builder` on records | Records already have a canonical constructor -- use `new RecordName(...)` |
-| `@Slf4j` in services | Inject `ServiceLogHelper` (matches gold standard) |
+| `@Slf4j` in services | Inject `ServiceLogHelper` (matches canonical pattern) |
 | `@Setter` for utility classes | Explicit `private` constructor |
 | `@NoArgsConstructor(access = AccessLevel.PRIVATE)` for utility classes | Explicit `private FooUtil() {}` constructor |
 | `@Setter` for `@ConfigurationProperties` | Java `record` with `@ConfigurationProperties` (Spring 3.x supports this) |
@@ -885,7 +885,7 @@ Parameters:
 
 4. **`sonarcloud.io/project-key` con valor placeholder** en `catalog-info.yaml`. Reemplazar con el ID real del proyecto SonarCloud.
 
-5. **`CMDB_APPLICATION_ID: "CAPA_COMUN"`** en `azure-pipelines.yml`. Reemplazar con el valor correcto `"Red Hat OpenShift Container Platform"` (gold standard 0015).
+5. **`CMDB_APPLICATION_ID: "CAPA_COMUN"`** en `azure-pipelines.yml`. Reemplazar con el valor correcto `"Red Hat OpenShift Container Platform"` (canonical SOAP pattern).
 
 **Si tu versión del MCP ya cubre uno o más de estos gaps, documentarlo en `migration-context.json` bajo `scaffolding.gaps_fixed_by_mcp: [...]` y saltar el workaround correspondiente.**
 
@@ -914,11 +914,11 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 }
 ```
 4. **Jackson version:** Force `2.21.2` in resolution strategy (previous was 2.21.1)
-5. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml` (EXACT value from gold standard, NOT `"CAPA_COMUN"`)
+5. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml` (EXACT value from canonical pattern, NOT `"CAPA_COMUN"`)
 6. **For SOAP projects:** Customize `NamespacePrefixInterceptor` to match legacy namespace prefixes. Register it in `WebServiceConfig.addInterceptors()`.
-7. **Fix `schemaLocation` in XSD files:** If any XSD references `../TCSProcesarServicioSOAP/GenericSOAP.xsd` or similar external paths, fix the path to point locally (e.g., `GenericSOAP.xsd`). Copy `GenericSOAP.xsd` from the gold standard reference project to `src/main/resources/legacy/` if not present.
+7. **Fix `schemaLocation` in XSD files:** If any XSD references `../TCSProcesarServicioSOAP/GenericSOAP.xsd` or similar external paths, fix the path to point locally (e.g., `GenericSOAP.xsd`). Copy `GenericSOAP.xsd` from the canonical pattern reference project to `src/main/resources/legacy/` if not present.
 8. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly. If it fails due to missing XSD files, locate and copy them.
-9. **Move project files:** If the MCP creates a subfolder (e.g., `destino/tnd-msa-sp-wsclientes0015/`), move all contents to the root of the destination folder.
+9. **Move project files:** If the MCP creates a subfolder (e.g., `destino/<namespace>-msa-sp-<svc>/`), move all contents to the root of the destination folder.
 
 **If MCP fabrics is NOT available (not installed/connected)**, proceed with manual scaffolding below.
 
@@ -927,7 +927,7 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 **Actions:**
 
 1. **Read ANALYSIS** to extract:
-   - `nombre_msa` (e.g., `tnd-msa-sp-wsclientes0015`)
+   - `nombre_msa` (e.g., `<namespace>-msa-sp-<svc>`)
    - `tribu` (e.g., `tnd`)
    - `framework` (webflux or mvc)
    - SOAP operation names
@@ -991,7 +991,7 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 
 4. **DO NOT overwrite `build.gradle`** -- The MCP fabrics generates the `build.gradle` with the correct base structure. **NEVER replace it.** Only add `lib-bnc-api-client` and `lib-trace-logger` if the MCP did not include them.
 
-**GOLDEN RULE: The build.gradle must match the gold standard (wsclientes0015) pattern. When in doubt, compare with the gold standard -- NEVER invent solutions.**
+**GOLDEN RULE: The build.gradle must match the canonical SOAP pattern pattern. When in doubt, compare with the canonical pattern -- NEVER invent solutions.**
 
 **Add ONLY these dependencies if missing (do NOT duplicate):**
 ```groovy
@@ -1007,9 +1007,9 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 | Version | Header injection |
 |---------|------------------|
 | `1.1.0-alpha.20260327123718` (old) | **Automatic** -- no manual injection needed |
-| `1.1.0-alpha.20260401203204` (gold standard) | **Manual** -- must build `BancsHeaders` explicitly in `BancsClientHelper.toBancsHeaders()` |
+| `1.1.0-alpha.20260401203204` (canonical pattern) | **Manual** -- must build `BancsHeaders` explicitly in `BancsClientHelper.toBancsHeaders()` |
 
-**Use `1.1.0-alpha.20260401203204`** (the gold standard version) and implement manual header injection in `BancsClientHelper`:
+**Use `1.1.0-alpha.20260401203204`** (the canonical pattern version) and implement manual header injection in `BancsClientHelper`:
 
 ```java
 private BancsHeaders toBancsHeaders(HeaderRequestModel ctx) {
@@ -1022,23 +1022,23 @@ private BancsHeaders toBancsHeaders(HeaderRequestModel ctx) {
 
 If you see headers NOT being sent to BANCS at runtime, check that `BancsClientHelper.doCall()` includes `.header(toBancsHeaders(ctx))` in the `BancsRequest.builder()` chain.
 
-**DO NOT add ANY of the following -- the MCP generates them or the gold standard does NOT have them:**
+**DO NOT add ANY of the following -- the MCP generates them or the canonical pattern does NOT have them:**
 - Jackson explicit dependencies or version forcing (the BOM manages Jackson)
 - Netty version forcing in `resolutionStrategy` or `dependencyManagement`
 - `resilience4j-spring-boot3` (comes transitively from lib-bnc-api-client)
 - `resilience4j-reactor` (comes transitively)
-- `logstash-logback-encoder` (not in gold standard)
-- `reactor-test` (not in gold standard)
-- `lombok-mapstruct-binding` (not in gold standard)
+- `logstash-logback-encoder` (not in canonical pattern)
+- `reactor-test` (not in canonical pattern)
+- `lombok-mapstruct-binding` (not in canonical pattern)
 - `jacocoExclusions` variable or `jacocoTestCoverageVerification` (SonarQube handles coverage)
 - `jvmArgs` in the test block
 - ANY exclusions on `jaxws-rt` or `lib-bnc-api-client`
 
-**MapStruct MUST be `compileOnly`, NOT `implementation`** (matching gold standard).
+**MapStruct MUST be `compileOnly`, NOT `implementation`** (matching canonical pattern).
 
 **WSDL generated package MUST be `com.pichincha.sp.generated`** (NOT `com.pichincha.sp.infrastructure.soap.generated`).
 
-**WSDL task descriptions, log messages, and GroovyShell instantiation MUST match the gold standard exactly** (Spanish messages, reflection-based GroovyShell, RuntimeException not GradleException).
+**WSDL task descriptions, log messages, and GroovyShell instantiation MUST match the canonical pattern exactly** (Spanish messages, reflection-based GroovyShell, RuntimeException not GradleException).
 
 ```groovy
 sourceSets {
@@ -1091,7 +1091,7 @@ tasks.named('compileJava') {
     - `KUBERNETES_NAMESPACE` to `<tribu>-middleware`
     - Variable groups to `ocp-dev-<tribu>-middleware`, `ocp-test-<tribu>-middleware`, `ocp-prod-<tribu>-middleware`
 
-11. **`Application.java` -- verify it has `@ConfigurationPropertiesScan`** (matches gold standard wsclientes0015):
+11. **`Application.java` -- verify it has `@ConfigurationPropertiesScan`** (matches canonical SOAP pattern):
 
 ```java
 package com.pichincha.sp;
@@ -1860,7 +1860,7 @@ public class NamespacePrefixInterceptor implements EndpointInterceptor {
 3. Spring WS may generate lowercase `ns2:` prefixes on nested elements even after envelope normalization -- the regex pass strips these as a final cleanup
 4. Empty `<NS1:Header/>` elements are removed since legacy clients do not expect them
 
-**Copy the full implementation from the gold standard project** (`wsclientes0015`). This class is complex (~250 lines) and must be copied exactly -- do not attempt to simplify it.
+**Copy the full implementation from the canonical pattern project** (`wsclientes0015`). This class is complex (~250 lines) and must be copied exactly -- do not attempt to simplify it.
 
 ---
 
@@ -2275,7 +2275,7 @@ public <Operacion>Response <operacion>(@RequestPayload <Operacion> request) {
 
 #### 4.10 Configuration Classes
 
-**DO NOT use `@Configuration` on `@ConfigurationProperties` classes.** `@ConfigurationPropertiesScan` in `Application.java` auto-registers them. Using both is redundant and not the gold standard pattern.
+**DO NOT use `@Configuration` on `@ConfigurationProperties` classes.** `@ConfigurationPropertiesScan` in `Application.java` auto-registers them. Using both is redundant and not the canonical pattern pattern.
 
 ```java
 @ConfigurationProperties(prefix = "<config-prefix>")
@@ -2306,7 +2306,7 @@ Si el servicio consume backends adicionales (DataPower, WSO2, WAS, etc.), agrega
 
 #### 4.11 application.yml
 
-**MUST follow the gold standard wsclientes0015 structure EXACTLY.**
+**MUST follow the canonical SOAP pattern structure EXACTLY.**
 
 **MANDATORY RULE — All legacy config variables in application.yml:**
 Every configuration variable identified in the ANALYSIS (Section 15 "Service Configuration") — from the service itself AND from its UMP dependencies — MUST have a corresponding entry in `application.yml`. This includes variables from `.properties` files, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`, and `CatalogoAplicaciones.properties`.
@@ -2330,10 +2330,10 @@ Every configuration variable identified in the ANALYSIS (Section 15 "Service Con
 
 **DO NOT add to application.yml:**
 - `logging:` block -- log levels go in `logback-spring.xml` via `${TPL_LOG_INFO}` / `${TPL_LOG_WARN}`
-- `management:` block -- not in gold standard
-- `trace-logger.payload.*` -- not in gold standard
+- `management:` block -- not in canonical pattern
+- `trace-logger.payload.*` -- not in canonical pattern
 
-**Variable defaults: NEVER use inline defaults `${CCC_VAR:default}`.** All values come from environment (Helm). The gold standard never uses inline defaults.
+**Variable defaults: NEVER use inline defaults `${CCC_VAR:default}`.** All values come from environment (Helm). The canonical pattern never uses inline defaults.
 
 **Excepción única — `bancs.error-codes`:** los valores son constantes del catálogo oficial del banco (`00638` y `00045` no cambian entre entornos). Se permite inline default `${CCC_BANCS_ERROR_CODE_IIB:00638}` / `${CCC_BANCS_ERROR_CODE_BANCS_APP:00045}` para que el servicio arranque aunque el Helm no los declare — el ENV queda como válvula de escape si el banco decidiera cambiar un código oficial.
 
@@ -2478,7 +2478,7 @@ optimus:
 
 #### 4.11.1 logback-spring.xml (MANDATORY)
 
-Create `src/main/resources/logback-spring.xml` -- copy EXACTLY from the gold standard (wsclientes0015):
+Create `src/main/resources/logback-spring.xml` -- copy EXACTLY from the canonical SOAP pattern:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -2506,7 +2506,7 @@ The `TPL_LOG_INFO` and `TPL_LOG_WARN` env vars come from the Helm files. Do NOT 
 
 #### 4.12 application-test.yml
 
-**MUST match the gold standard (wsclientes0015) pattern exactly. DO NOT add extra properties.**
+**MUST match the canonical SOAP pattern pattern exactly. DO NOT add extra properties.**
 
 ```yaml
 spring:
@@ -2543,8 +2543,8 @@ CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_DURATION_THRESHOLD: 5s
 ```
 
 **DO NOT add:**
-- `spring.main.allow-bean-definition-overriding` (not in gold standard)
-- `CCC_LOG_*`, `CCC_TRACE_*`, `CCC_CUSTOM_LEVEL_*`, `CCC_PAYLOAD_MODE` (not in gold standard -- these go in `@SpringBootTest(properties = {})` of integration tests)
+- `spring.main.allow-bean-definition-overriding` (not in canonical pattern)
+- `CCC_LOG_*`, `CCC_TRACE_*`, `CCC_CUSTOM_LEVEL_*`, `CCC_PAYLOAD_MODE` (not in canonical pattern -- these go in `@SpringBootTest(properties = {})` of integration tests)
 - Service-specific CCC_* variables (phone normalization, etc.) -- these also go in `@SpringBootTest(properties = {})`
 
 ---
@@ -2553,7 +2553,7 @@ CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_DURATION_THRESHOLD: 5s
 
 Two integration test files are MANDATORY for the peer review to pass:
 
-**1. `ApplicationIntegrationTest.java`** -- Copy the pattern from the gold standard exactly:
+**1. `ApplicationIntegrationTest.java`** -- Copy the pattern from the canonical pattern exactly:
 - `@SpringBootTest(webEnvironment = RANDOM_PORT)` -- NO `classes =` attribute
 - `@ActiveProfiles("test")`
 - `@MockBean(name = "bancsClient") BancsClientAdapter` -- MANDATORY to avoid Resilience4j conflicts
@@ -3268,7 +3268,7 @@ Este historial documenta las decisiones clave que motivan reglas específicas de
 | 2026-04-20 | BPTPSRE PDFs incorporados | **Rule 4.1** — WAS + DB usa HikariCP+JPA+Oracle bajo Spring MVC (NUNCA WebFlux). **Rule 9f** — estructura oficial de error con 8 campos (`mensajeNegocio` = DataPower). Tabla `componente` distinta para IIB vs WAS (3-part en WAS). |
 
 **Golds citados como referencia o anti-patrón:**
-- `tnd-msa-sp-wsclientes0015` — gold SOAP; hueco conocido: 3 ports Bancs separados (hay que unificar a 1), `log.info` excesivo, mezcla ERROR/FATAL.
-- `tnd-msa-sp-wsclientes0024` — gold REST (referencia estable); hueco conocido: `error.backend` hardcodeado `"00000"` y mezcla ERROR/FATAL.
+- `<namespace>-msa-sp-<svc>` — gold SOAP; hueco conocido: 3 ports Bancs separados (hay que unificar a 1), `log.info` excesivo, mezcla ERROR/FATAL.
+- `<namespace>-msa-sp-<svc>` — gold REST (referencia estable); hueco conocido: `error.backend` hardcodeado `"00000"` y mezcla ERROR/FATAL.
 - `tnd-msa-sp-wsclientes0013/0006` — mismos huecos que 0024 en `error.backend` y `error.tipo`.
 - `tnd-msa-sp-wsclientes0007` — servicio-ancla de post-fixes (no es gold formal; es mal-clasificado histórico porque tiene 1 op migrado como SOAP).

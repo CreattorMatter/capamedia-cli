@@ -60,6 +60,42 @@ def _read_service_name(migrated: Path) -> str:
     return migrated.name
 
 
+def _populate_mcp_context(
+    migrated_path: Path,
+    legacy_path: Path | None,
+    service_name: str,
+) -> CheckContext:
+    """Build a CheckContext with source_type + has_bancs populated from the
+    legacy (v0.22.0). Alimenta la matriz MCP-driven del Block 0.
+
+    Si no hay legacy disponible, los campos quedan en "" / False y Block 0
+    cae al fallback por conteo de ops (comportamiento legacy).
+    """
+    source_type = ""
+    has_bancs = False
+
+    if legacy_path and legacy_path.is_dir():
+        try:
+            from capamedia_cli.core.legacy_analyzer import (
+                detect_bancs_connection,
+                detect_source_kind,
+            )
+
+            source_type = detect_source_kind(legacy_path, service_name)
+            has_bancs, _ = detect_bancs_connection(legacy_path)
+        except Exception:
+            # Fallback silencioso: si algo falla en la deteccion, el Block 0
+            # usa el fallback por conteo de ops.
+            pass
+
+    return CheckContext(
+        migrated_path=migrated_path,
+        legacy_path=legacy_path,
+        source_type=source_type,
+        has_bancs=has_bancs,
+    )
+
+
 def _write_report(service: str, results, migrated: Path, legacy: Path | None) -> Path:
     """Write CHECKLIST_<service>.md with summary + detailed findings."""
     dest = migrated / f"CHECKLIST_{service}.md"
@@ -184,10 +220,13 @@ def check_project(
         )
     )
 
+    # v0.22.0: auto-populate source_type + has_bancs desde el legacy (si existe).
+    # Esto alimenta la matriz MCP-driven del Block 0.
+    def _build_context() -> CheckContext:
+        return _populate_mcp_context(migrated_path, legacy_path, service)
+
     def _run() -> list:
-        return run_all_blocks(
-            CheckContext(migrated_path=migrated_path, legacy_path=legacy_path)
-        )
+        return run_all_blocks(_build_context())
 
     autofix_report = None
     if auto_fix:
@@ -223,7 +262,7 @@ def check_project(
                     + (f" - {r.notes}" if r.notes else "")
                 )
 
-    ctx = CheckContext(migrated_path=migrated_path, legacy_path=legacy_path)
+    ctx = _build_context()
     results = run_all_blocks(ctx)
 
     # Render table

@@ -97,24 +97,21 @@ git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-cfg-
 git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-cfg-errores-errors tx/sqb-cfg-errores-errors
 ```
 
-### Paso 5 — Clonar el gold standard correspondiente
+### Paso 5 — Contar operaciones del WSDL legacy
 
-Contá las operaciones del `<portType>` en el WSDL del legacy:
+Contá las operaciones del `<portType>` en el WSDL del legacy (insumo para
+decidir framework via matriz MCP en `/fabric`):
 
 ```bash
 WSDL=$(find legacy -name "*.wsdl" -not -path "*/node_modules/*" | head -1)
 OPS=$(awk '/<wsdl:portType/,/<\/wsdl:portType>/' "$WSDL" | grep -c "<wsdl:operation")
 ```
 
-Según el conteo:
-- **1 op** → `gold-ref/tnd-msa-sp-wsclientes0024` (REST gold)
-- **2+ ops** → `gold-ref/tnd-msa-sp-wsclientes0015` (SOAP gold)
-
-```bash
-mkdir -p gold-ref
-GOLD=$([ "$OPS" -eq 1 ] && echo "tnd-msa-sp-wsclientes0024" || echo "tnd-msa-sp-wsclientes0015")
-git clone https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/${GOLD} gold-ref/${GOLD}
-```
+El framework se decide segun la matriz MCP oficial del banco (BUS+invocaBancs
+siempre REST, ORQ siempre REST, WAS 1op REST / WAS 2+ops SOAP). Las reglas
+canonicas viven en los contextos del CLI (`bank-official-rules.md`,
+`hexagonal.md`, `bancs.md`) — no hace falta clonar un "servicio gold" de
+referencia.
 
 ### Paso 6 — Detectar tipo de fuente (IIB / WAS / ORQ)
 

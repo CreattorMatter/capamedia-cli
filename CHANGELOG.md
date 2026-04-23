@@ -4,6 +4,98 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.22.0] - 2026-04-22
+
+### Changed - Sincronizacion con repo canonico `PromptCapaMedia` + canonical sin servicios-gold
+
+Feedback Julian: "No quiero que queden referenciados ningun servicio como
+algo estandar o un gol estandar, por asi decirlo, pero si todo lo demas."
+
+Los ultimos 5 commits del `PromptCapaMedia` introdujeron 4 gaps en el CLI.
+Este release cierra los 4.
+
+#### Gap 1 — Matriz MCP-driven en codigo ejecutable
+
+Antes `run_block_0` decidia framework solo por conteo de ops (`1=REST else SOAP`)
+con excepcion BD+SOAP. Eso clasificaba mal a:
+- BUS con invocaBancs y 2+ ops (deberia REST+WebFlux)
+- ORQ con 2+ ops (deberia REST+WebFlux)
+
+**Fix**: nuevo helper `_expected_framework(source_type, has_bancs, ops_count)`
+implementa la matriz oficial:
+
+| Origen | Condicion | Framework |
+|---|---|---|
+| BUS (IIB) | `invocaBancs=true` | REST + WebFlux (override MCP) |
+| ORQ | siempre | REST + WebFlux (deploymentType=orquestador) |
+| WAS | 1 op | REST + MVC |
+| WAS | 2+ ops | SOAP + MVC |
+| Unknown | fallback | Conteo de ops |
+
+`CheckContext` suma campos `source_type` y `has_bancs`. Los comandos `check` y
+`review` los auto-populan desde el legacy via
+`detect_source_kind + detect_bancs_connection`.
+
+#### Gap 2 — Check 3.5 "Naming profesional" ejecutable (Block 3)
+
+Antes el texto estaba en el canonical pero no habia check ejecutable. Ahora
+`run_block_3` detecta clases/interfaces/records con nombres genericos:
+
+- `Service.java`, `ServiceImpl.java`
+- `Adapter.java`, `Controller.java`, `Mapper.java`, `Helper.java`
+- `Port.java`, `InputPort.java`, `OutputPort.java`
+- `Request.java`, `Response.java`, `Dto.java`
+- `Config.java`, `Constants.java`, `Exception.java`
+- `Entity.java`, `Repository.java`
+
+Cada match → FAIL HIGH con suggested_fix claro (ej. "Renombrar a
+`CustomerService` / `BancsAdapter` / `<Operation>Response`").
+
+#### Gap 3 — Templates SonarLint completos en scaffold
+
+Antes `init` solo generaba `connectedMode.json` (template con placeholder).
+Ahora agrega:
+
+- `connectedMode.example.json` — muestra el formato con un UUID de ejemplo
+- `README.md` — guia paso-a-paso para conectar SonarLint a SonarCloud
+  (VS Code / IntelliJ), con troubleshooting
+
+#### Gap 4 — Canonical sin referencias a servicios-gold (reformulado por Julian)
+
+El pedido original era agregar una advertencia sobre `wsclientes0015` como
+gold solo para WAS 2+ ops. Julian lo reformulo: **eliminar toda referencia a
+servicios especificos como "gold standard" o "referencia a copiar"** en el
+canonical del CLI.
+
+Trabajo de limpieza en 11 archivos canonical:
+- **De 108 menciones** a ~30 (solo mantenidas las que son historico/anti-patron,
+  no guia de copia)
+- **"gold standard"** como frase: de muchas apariciones a **1** (la propia
+  politica que dice "no nombrar servicios como gold standard")
+- `tnd-msa-sp-wsclientes0024` como hardcoded → `<namespace>-msa-sp-<svc>`
+- `tnd-msa-sp-wsclientes0015` como hardcoded → `<namespace>-msa-sp-<svc>`
+- "Copy from the gold standard" → "Apply the canonical pattern (defined in
+  this document)"
+- Tabla de historial del `checklist-rules.md` reescrita sin nombres de
+  servicios concretos
+
+Filosofia nueva: las reglas viven en los canonical del CLI
+(`bank-official-rules.md`, `hexagonal.md`, `bancs.md`, `checklist-rules.md`).
+El agente aplica las reglas, no copia de un servicio-ejemplo. Los patrones
+del banco evolucionan y un proyecto migrado hace un mes puede tener gaps
+ya resueltos en la version actual de las reglas.
+
+### Tests nuevos (25)
+
+- `test_block_0_mcp_matrix.py` (17): matriz pura de `_expected_framework`
+  (BUS+invocaBancs, ORQ, WAS 1/2+ ops, fallback, case-insensitive) +
+  integracion `run_block_0` con proyectos reales
+- `test_block_3_naming.py` (8): generic classes, interfaces, records flagged;
+  domain-prefixed pass; mixed; edge cases (sin src/main/java)
+- `test_sonarlint_scaffold.py` (1): init genera example.json + README.md
+
+Total: 514 tests passing.
+
 ## [0.21.0] - 2026-04-22
 
 ### Added - Properties delivery audit + autofix inject (feedback Julian)

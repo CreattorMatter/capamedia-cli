@@ -128,9 +128,13 @@ def _copy_templates(target_dir: Path, service_name: str, artifact_token_placehol
 
     # Nota: CLAUDE.md / AGENTS.md lo generan los adapters. Aca renderizamos
     # solo los templates que NO son cubiertos por adapters.
+    # v0.22.0: agregamos example + README de SonarLint para que el user
+    # tenga la guia completa de setup local sincronizado con SonarCloud.
     rendered_map = {
         "mcp.json.j2": ".mcp.json",
         "sonarlint-connectedMode.json.j2": ".sonarlint/connectedMode.json",
+        "sonarlint-connectedMode.example.json.j2": ".sonarlint/connectedMode.example.json",
+        "sonarlint-README.md.j2": ".sonarlint/README.md",
     }
     for src_name, dest_rel in rendered_map.items():
         src = tpl_dir / src_name

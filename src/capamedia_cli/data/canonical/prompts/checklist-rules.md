@@ -37,7 +37,7 @@ Después de correr el prompt de migración (`migracion/REST/02-REST-migrar-servi
 Dos argumentos (el segundo es opcional pero recomendado):
 
 1. **`<MIGRATED_PATH>`** — path absoluto al **proyecto migrado** (ej: `C:\Dev\Banco Pichincha\CapaMedia\0007\destino`). OBLIGATORIO.
-2. **`<LEGACY_PATH>`** — path absoluto al **servicio legacy original** (ej: `C:\Dev\Banco Pichincha\CapaMedia\0007\legacy\sqb-msa-wsclientes0007`). OPCIONAL pero recomendado: habilita el análisis cruzado del BLOQUE 0 (WSDL legacy vs migrado, conteo de operaciones, nombres, namespaces).
+2. **`<LEGACY_PATH>`** — path absoluto al **servicio legacy original** (ej: `<workspace>/legacy/sqb-msa-<svc>` o `<workspace>/legacy/ws-<svc>-was`). OPCIONAL pero recomendado: habilita el análisis cruzado del BLOQUE 0 (WSDL legacy vs migrado, conteo de operaciones, nombres, namespaces).
 
 Si no se pasa el segundo argumento, el BLOQUE 0 degrada a "solo cuenta en el WSDL copiado al proyecto migrado" y los Checks 0.3 y 0.4 se saltan con severidad **MEDIUM** (no se pudo cruzar con la fuente).
 
@@ -53,9 +53,10 @@ Cada bloque referencia su origen para que el lector sepa de dónde viene:
 
 ---
 
-## BLOQUE 0 — Pre-check: identificar tipo de proyecto y gold standard
+## BLOQUE 0 — Pre-check: identificar tipo de proyecto y clasificarlo
 
-Antes de auditar, detectar qué tipo de servicio es y qué gold standard le corresponde.
+Antes de auditar, detectar qué tipo de servicio es y qué framework debe usar
+según la matriz oficial MCP.
 
 ### Check 0.1 — Tipo de proyecto (SOAP vs REST)
 
@@ -68,11 +69,14 @@ grep -rl "@RestController" <PATH>/src/main/java
 ```
 
 **Decisión:**
-- Hay `@Endpoint` → **SOAP** (gold standard: `tnd-msa-sp-wsclientes0015`, pero SOLO válido para WAS 2+ ops)
-- Hay `@RestController` y no `@Endpoint` → **REST** (gold standard: `tnd-msa-sp-wsclientes0024`)
+- Hay `@Endpoint` → **SOAP**
+- Hay `@RestController` y no `@Endpoint` → **REST**
 - Ambos o ninguno → **FAIL HIGH** (proyecto malformado)
 
-> **ADVERTENCIA sobre wsclientes0015:** Fue originalmente un servicio BUS (IIB) migrado como SOAP. Bajo la matriz MCP actual, BUS+invocaBancs SIEMPRE va REST+WebFlux. El 0015 es gold standard SOLO para WAS con 2+ operaciones. Si el proyecto auditado es BUS y tiene patrones SOAP del 0015 (@Endpoint, WebServiceConfig, NamespacePrefixInterceptor, BancsClientHelper, .block()), es **mal-clasificado**.
+> **Nota:** las reglas canonicas se expresan aqui de forma abstracta. Si un
+> proyecto del banco (aun uno antiguo marcado historicamente como "referencia")
+> viola las reglas de este checklist, prevalece el checklist. No copiar
+> patrones de proyectos concretos; aplicar las reglas como estan definidas.
 
 ### Check 0.2 — Clasificacion MCP: source type + parametro clave ↔ framework
 
@@ -180,7 +184,7 @@ Veredicto final: <PASS | HIGH mal-clasificado | etc.>
 - ORQ + tipo REST (WebFlux) → ✅ **PASS** (cualquier cantidad de ops). Diálogo: *"Es ORQ, va REST+WebFlux via deploymentType:orquestador. ¿Está OK? Sí, está OK."*
 - ORQ + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es ORQ → siempre va WebFlux. Se migró como SOAP → está mal-clasificado."*
 
-**Hallazgo documentado:** wsclientes0007 es BUS (IIB) con 1 op y está migrado como SOAP. Bajo la nueva matriz MCP, esto es **mal-clasificado** (BUS+invocaBancs siempre va REST+WebFlux). Es un caso legacy que NO se reclasifica ahora por costo vs beneficio (ya está funcionando, pasa checklist, build verde). Los futuros servicios BUS deben usar REST+WebFlux (via `invocaBancs: true`).
+**Hallazgo documentado:** existen servicios BUS (IIB) con 1 op migrados historicamente como SOAP. Bajo la matriz MCP oficial, esto es **mal-clasificado** (BUS+invocaBancs siempre va REST+WebFlux). Esos casos legacy NO se reclasifican retroactivamente por costo vs beneficio si ya estan en produccion. Los futuros servicios BUS deben usar REST+WebFlux (via `invocaBancs: true`).
 
 **Guardar en el contexto del reporte:** `sourceType`, `invocaBancs`, `projectType`, `goldStandard`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
 
@@ -272,7 +276,7 @@ Esperado: **0 matches**. Cualquier hit es **HIGH**.
 grep -l "public abstract class.*Port\|public abstract class.*InputPort\|public abstract class.*OutputPort" <PATH>/src/main/java/com/pichincha/sp/application/
 ```
 
-Esperado: **0 archivos**. Abstract classes para puertos es desviación (caso wsclientes0007 original). **HIGH**.
+Esperado: **0 archivos**. Abstract classes para puertos es desviación del patron hexagonal. **HIGH**.
 
 ### Check 1.4 — UN SOLO output port Bancs [FB-JG]
 
@@ -286,7 +290,7 @@ ls <PATH>/src/main/java/com/pichincha/sp/application/*/port/output/ | grep -iE "
 
 **Acción sugerida:** consolidar métodos en un único `BancsCustomerOutputPort` (o nombre equivalente al dominio del servicio). La pluralidad de adapters/helpers a nivel infrastructure sigue siendo válida; lo que se unifica es el puerto visible desde application.
 
-**Referencia:** wsclientes0015 tiene 3 ports Bancs (`CustomerAddressBancsPort`, `GeoLocationBancsPort`, `CorrespondenceBancsPort`) — **NO replicar**. wsclientes0024 y wsclientes0007 cumplen.
+**Nota:** algunos servicios legacy del banco tienen 3+ ports Bancs separados (ej. uno por sub-dominio) — **NO replicar**. La regla canonica es 1 port Bancs por servicio.
 
 ### Check 1.5 — Adaptadores implementan puertos (no abstract class)
 
@@ -350,7 +354,7 @@ done
 
 Si `public > @BpLogger` en cualquier service → **HIGH**. Cada método público debe tener `@BpLogger`.
 
-**Referencia:** wsclientes0015 viola esto (2 de 3 services sin la anotación) — **NO replicar**.
+**Nota:** algunos servicios legacy del banco no tienen esta anotacion aplicada consistentemente — **NO replicar** ese gap; siempre aplicar segun la regla.
 
 ### Check 2.3 — `@BpLogger` en Adapters de infrastructure
 
@@ -377,7 +381,7 @@ grep -rnE "import org\.slf4j\." <PATH>/src/main/java/
 
 Cualquier match → **HIGH**. El proyecto debe usar exclusivamente la librería de logging del banco (`ServiceLogHelper`, `@BpLogger`, `@BpTraceable`). Los imports directos de `org.slf4j.Logger`, `org.slf4j.LoggerFactory` o la anotación Lombok `@Slf4j` están prohibidos porque duplican el logging y no se integran con la trazabilidad corporativa.
 
-**Patrón incorrecto (detectado en wsclientes0007):**
+**Patrón incorrecto (anti-patron conocido):**
 ```java
 import org.slf4j.Logger;           // ← PROHIBIDO
 import org.slf4j.LoggerFactory;    // ← PROHIBIDO
@@ -403,7 +407,7 @@ grep -rnE "log\.info\(\"(Basic|Retrieved|Starting|Processing|Got|Found|Mapping|N
 
 Cualquier match → **MEDIUM**. Revisar si son eventos de contrato o diagnóstico. Si es diagnóstico → pasar a `log.debug` (ServiceLogHelper ya lo soporta).
 
-**Referencia:** feedback del equipo [FB-JA] sobre wsclientes0007 (`log.info("Basic info retrieved for CIF: {}", ...)` bajado a debug en post-fix).
+**Origen:** feedback del equipo [FB-JA] — `log.info("Basic info retrieved for CIF: {}", ...)` bajado a debug es el anti-patron tipico: logs de diagnostico (no de contrato) no deben ir a INFO.
 
 ### Check 2.7 — No abuso de log.info
 
@@ -622,7 +626,7 @@ grep -c "Datos de la cabecera de la transaccion no se han asignado" \
 - 0 matches → **MEDIUM** (mensaje custom en vez del canónico).
 - ≥ 1 match ✓ PASS (puede ser 1 constante reusada o 2 literales).
 
-**Referencia:** wsclientes0007 post-fix (commit `bbcc62a`).
+**Origen:** post-fix de servicio de referencia (tipo FATAL agregado a header-missing + Bancs + Exception generica, ademas de INFO/ERROR).
 
 ### Check 4.6 — Patterns de validación del header externalizados [FB-JA] [Rule 9e.2]
 
@@ -653,7 +657,7 @@ grep -cE "^@Component|public class HeaderRequestValidator" \
 
 < 2 matches → **HIGH** (el validator debe ser `@Component` con inyección de props, no `final class` con métodos estáticos).
 
-**Referencia:** feedback del equipo [FB-JA] sobre wsclientes0007; refactor aplicado en post-fix.
+**Origen:** feedback del equipo [FB-JA]; refactor aplicado en servicios migrados.
 
 ---
 
@@ -683,7 +687,7 @@ try {
 }
 ```
 
-**Referencia:** wsclientes0015 NO lo tiene (hueco del gold standard). wsclientes0007 lo cubrió post-feedback del tech lead [FB-JG].
+**Nota:** en algunos servicios antiguos del banco este check NO estaba cubierto. Aplicar siempre segun la regla, no segun lo que hagan proyectos legacy.
 
 ### Check 5.2 — Controller/Service atrapa BancsOperationException
 
@@ -742,7 +746,7 @@ public record BancsErrorCodesProperties(String iib, String bancsApp) {}
 // buildBancsErrorResponse → backendCodes.bancsApp()  (BancsOperationException)
 ```
 
-**Referencia:** wsclientes0024/0013/0006 (golds) todos tienen el bug `"00000"` — **no replicar**. wsclientes0007 lo corrigió en post-auditoría (ver Historial).
+**Nota:** varios servicios antiguos del banco (migrados antes del 2026-04) tienen el bug `"00000"` hardcodeado. **No replicar** — siempre leer del catalogo oficial `codigosBackend.xml`.
 
 ### Check 5.5 — BusinessValidationException en domain
 
@@ -809,7 +813,7 @@ grep -cE 'assertEquals\("(INFO|ERROR|FATAL)",.*getTipo' \
 
 < 4 matches → **MEDIUM**. Cada rama del Controller debe tener al menos un test que asierte el `tipo` (success=INFO, business=ERROR, bancs=FATAL, unexpected=FATAL).
 
-**Referencia:** wsclientes0007 post-fix (tipo FATAL para header-missing + Bancs + Exception genérica). Los golds 0024/0013/0006 NO aplican esta clasificación — **no replicar**.
+**Nota:** varios servicios antiguos del banco no aplican esta clasificacion (solo INFO/ERROR, sin FATAL). **No replicar** esa simplificacion — siempre distinguir los 3 tipos.
 
 ---
 
@@ -861,7 +865,7 @@ done
 grep -rnE "new \w+\([^;]{200,}" <PATH>/src/main/java/com/pichincha/sp/application/service/*.java
 ```
 
-Cualquier match → **MEDIUM**. Si un service construye un record con muchos argumentos, extraer a factory estático en el record (ej: `Result.success(...)`, `Result.failure(...)`) como hace wsclientes0015 con `ConsultAddressesResult`.
+Cualquier match → **MEDIUM**. Si un service construye un record con muchos argumentos, extraer a factory estático en el record (ej: `Result.success(...)`, `Result.failure(...)`).
 
 ### Check 6.4 — Sin `Object`/`Map<String, Object>` en contratos de puertos [FB-JG]
 
@@ -1061,7 +1065,7 @@ grep -r "UndertowServletWebServerFactory\|UndertowReactiveWebServerFactory" \
 
 Si aparece `UndertowServletWebServerFactory` en un proyecto SOAP + BUS → **esperado** (Spring WS requiere servlet); el `webflux` starter se usa solo para el `WebClient` outbound. Este híbrido es el **patrón BUS oficial** del banco.
 
-**Referencia:** bug del MCP observado en wsclientes0007 scaffold inicial (commit `3fa03db` sin webflux) y corregido manualmente en `e1bff14`.
+**Nota:** bug historico del MCP Fabrics: algunos scaffolds iniciales no incluian webflux en los servicios que lo requerian (ORQ o BUS+invocaBancs). Se arregla agregando la dependencia manualmente.
 
 ### Check 8.6 — `jaxws-rt` presente en servicios SOAP [MCP gap]
 
@@ -1179,7 +1183,7 @@ Faltante → **HIGH**.
 
 ## BLOQUE 11 — REST strategies (solo si aplica)
 
-**Origen:** wsclientes0024 (gold standard REST, referencia estable)
+**Origen:** proyecto REST de referencia del banco
 
 Si `projectType != REST`, saltar.
 
@@ -1239,7 +1243,7 @@ ls <PATH>/src/test/java/com/pichincha/sp/infrastructure/output/adapter/strategy/
 
 ## BLOQUE 12 — REST specifics (solo si `projectType = REST`)
 
-**Origen:** wsclientes0024 (gold standard REST) + prompt `REST/02-REST-migrar-servicio.md`
+**Origen:** patron REST canonico del banco + prompt `REST/02-REST-migrar-servicio.md`
 
 Si `projectType != REST`, saltar este bloque.
 
@@ -1492,7 +1496,7 @@ grep -rnE "setRecurso\(|RECURSO\s*=" <PATH>/src/main/java/ \
   | head -20
 ```
 
-**Veredicto:** para cada match, el string literal debe contener `/` y empezar con el `spring.application.name` del servicio (ej: `tnd-msa-sp-wsclientes0024/getDatosBasicos`). Si hay un `setRecurso(...)` con string sin `/`, o que no empieza con el artifactId → **HIGH**.
+**Veredicto:** para cada match, el string literal debe contener `/` y empezar con el `spring.application.name` del servicio (ej: `<namespace>-msa-sp-<svc>/getDatosBasicos`). Si hay un `setRecurso(...)` con string sin `/`, o que no empieza con el artifactId → **HIGH**.
 
 ### Check 15.2 — `error.componente` sigue estructura oficial
 
@@ -1506,7 +1510,7 @@ grep -rnE "setComponente\(\"[^\"]+\"|COMPONENTE\s*=\s*\"[^\"]+" <PATH>/src/main/
 ```
 
 Cada valor debe matchear uno de:
-- El `spring.application.name` (ej: `tnd-msa-sp-wsclientes0024`) — caso servicio interno / respuesta exitosa
+- El `spring.application.name` (ej: `<namespace>-msa-sp-<svc>`) — caso servicio interno / respuesta exitosa
 - `ApiClient` (o nombre de librería exacto) — caso error propagado desde librería
 - `TX\d{6}` (prefijo `TX` + 6 dígitos) — caso error de negocio desde ApiClient
 
@@ -1632,7 +1636,9 @@ Generás el reporte en este formato, en el orden de los bloques. Para cada check
 # Post-Migration Checklist Report
 **Project:** <path>
 **Type:** SOAP | REST
-**Gold standard:** wsclientes0015 | wsclientes0024
+**Referencia canonica:** las reglas del banco viven en este checklist. No
+copiar patrones de proyectos concretos; aplicar las reglas como estan
+definidas aca.
 **Date:** YYYY-MM-DD
 
 ---
@@ -1713,17 +1719,22 @@ NO auto-corrige. NO modifica archivos. Solo lee y reporta.
 
 ## Historial de decisiones (contexto de las reglas)
 
-Este historial documenta las decisiones clave que motivan los checks de este archivo. Sirve para entender **por qué** cada regla existe. Los detalles del servicio-ancla `wsclientes0007` aparecen porque fue el primero en aplicar cada corrección antes de que se consolidaran como regla.
+Este historial documenta las decisiones clave que motivan los checks. Sirve
+para entender **por qué** cada regla existe — no para copiar patrones de
+servicios concretos. Las reglas son abstractas y viven en este checklist.
 
-| Fecha | Servicio / commit | Decisión que originó una regla |
-|---|---|---|
-| 2026-04-14 | Checklist v1 — inicial | Primera versión del checklist. Base: gold standards `wsclientes0024` (REST) y `wsclientes0015` (SOAP). |
-| 2026-04-14 | `bf913b9` (wsclientes0007) | **`postProcessWsdl.groovy` sin `decapitalize`** — revertida la lógica que decapitalizaba el root element del WSDL. La fuente de verdad es el XSD en PascalCase. → Check 3.4. |
-| 2026-04-16 | `bbcc62a` (wsclientes0007) | **`error.tipo = FATAL`** para header-missing + Bancs + Exception genérica. Antes solo INFO/ERROR. También mensaje canónico `"Datos de la cabecera de la transaccion no se han asignado"` (error 9927 del catálogo `errores.xml`). → Checks 4.5 y 5.6. |
-| 2026-04-16 | wsclientes0007 post-audit | **`error.backend` desde el catálogo oficial** `sqb-cfg-codigosBackend-config/codigosBackend.xml`, NO hardcodeado como `"00000"`. Los golds 0024/0013/0006 tienen el bug `"00000"` — no replicar. → Check 5.4. |
-| 2026-04-17 | wsclientes0007 post-fix | **`log.info` reservado para eventos de contrato; diagnóstico a `log.debug`.** Origen: feedback del equipo [FB-JA]. → Checks 2.6 y 2.7. |
-| 2026-04-17 | wsclientes0007 post-fix | **Patrones del `HeaderRequestValidator` externalizados** a `HeaderValidationProperties` (`@ConfigurationProperties`, ConfigMap de OpenShift). Validator convertido en `@Component` inyectable, no `final class` estática. Origen: feedback del equipo [FB-JA]. → Check 4.6. |
-| 2026-04-18 | Matriz oficial formalizada | **1 op → REST + WebFlux, 2+ ops → SOAP + Spring MVC** (sin excepciones, igual para IIB / WAS / ORQ). La presencia de BD se trata como tecnología agregada dentro del prompt elegido, no como criterio para saltar a otro. wsclientes0007 queda como caso mal-clasificado histórico. → BLOQUE 0. |
-| 2026-04-20 | BPTPSRE PDFs incorporados | **Estructura de error oficial** con 8 campos (`mensajeNegocio` lo gestiona DataPower — NUNCA el servicio). **Patrones IIB** de config: `GestionarRecursoXML` (archivos XML) y `GestionarRecursoConfigurable` (cache), usando `ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv` como fuente operativa para poblar `application.yml` / Helm cuando haya configurables. **Patrones WAS** de config: `.properties` en `/apps/proy/OMNICANALIDAD_SERVICIOS/conf/` + clases `Propiedad.java`, `ErrorTipo.java`, `ServicioExcepcion`. **Librerías WebFlux opcionales**: `mdw-dm-lib-audit-log-reactive` (`@LogAudit`/`@LogAuditStep`) y `mdw-dm-lib-stratio-connector` (`StratioQueryExecutor`). → BLOQUE 15. |
+| Fecha | Decisión que originó una regla |
+|---|---|
+| 2026-04-14 | Checklist v1 inicial. Base: patrones REST/SOAP canonicos del banco, expresados en reglas abstractas (sin servicio-gold). |
+| 2026-04-14 | `postProcessWsdl.groovy` sin `decapitalize` — revertida la lógica que decapitalizaba el root element del WSDL. La fuente de verdad es el XSD en PascalCase. → Check 3.4. |
+| 2026-04-16 | `error.tipo = FATAL` para header-missing + Bancs + Exception genérica. Antes solo INFO/ERROR. También mensaje canónico `"Datos de la cabecera de la transaccion no se han asignado"` (error 9927 del catálogo `errores.xml`). → Checks 4.5 y 5.6. |
+| 2026-04-16 | `error.backend` desde el catálogo oficial `sqb-cfg-codigosBackend-config/codigosBackend.xml`, NO hardcodeado como `"00000"`. Varios servicios antiguos tienen ese bug — no replicar. → Check 5.4. |
+| 2026-04-17 | `log.info` reservado para eventos de contrato; diagnóstico a `log.debug`. Origen: feedback del equipo [FB-JA]. → Checks 2.6 y 2.7. |
+| 2026-04-17 | Patrones del `HeaderRequestValidator` externalizados a `HeaderValidationProperties` (`@ConfigurationProperties`, ConfigMap de OpenShift). Validator convertido en `@Component` inyectable, no `final class` estática. Origen: feedback del equipo [FB-JA]. → Check 4.6. |
+| 2026-04-18 | Matriz oficial formalizada: 1 op → REST + WebFlux, 2+ ops → SOAP + Spring MVC para WAS. BUS+invocaBancs y ORQ siempre → REST + WebFlux. La presencia de BD se trata como tecnología agregada dentro del prompt elegido, no como criterio para saltar a otro. → BLOQUE 0. |
+| 2026-04-20 | BPTPSRE PDFs incorporados. **Estructura de error oficial** con 8 campos (`mensajeNegocio` lo gestiona DataPower — NUNCA el servicio). **Patrones IIB** de config: `GestionarRecursoXML` y `GestionarRecursoConfigurable`. **Patrones WAS** de config: `.properties` en `/apps/proy/OMNICANALIDAD_SERVICIOS/conf/` + clases `Propiedad.java`, `ErrorTipo.java`, `ServicioExcepcion`. **Librerías WebFlux opcionales**: `mdw-dm-lib-audit-log-reactive` y `mdw-dm-lib-stratio-connector`. → BLOQUE 15. |
 
-**Servicios-referencia citados en el checklist (`wsclientes0007/0013/0015/0024`):** son proyectos reales del banco usados como fuente de patrones o como ejemplos de anti-patrones. No se tocan desde este repo — son referencias de solo lectura. Los huecos conocidos de cada uno (`0024/0013/0006` con `"00000"` hardcodeado; `0015` con 3 ports Bancs y `log.info` excesivo; etc.) están documentados inline en cada Check correspondiente.
+**Politica canonica:** las reglas se expresan en abstracto. Si un proyecto
+concreto del banco viola una regla, prevalece el checklist — no se copia del
+proyecto. Anti-patrones historicos se mencionan como tales ("no replicar"),
+sin nombrar servicios especificos como "gold standard".

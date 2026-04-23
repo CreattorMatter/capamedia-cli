@@ -1,0 +1,51 @@
+# SonarLint - Setup local
+
+Este workspace está preparado para usar **SonarLint (SonarQube for IDE)**
+sincronizado con SonarCloud de Banco Pichincha, para validar las mismas reglas
+que aplica CI en cada PR.
+
+## Archivos en este directorio
+
+- `connectedMode.json` — tu configuración activa (va en el repo si el project
+  key es el real; fuera del repo si está con placeholder).
+- `connectedMode.example.json` — ejemplo con un project key ficticio, sólo
+  para mostrar el formato.
+- `connectedMode.template.json` — template inicial con placeholder para
+  reemplazar con el project key real cuando SonarCloud registre el repo.
+
+## Pasos
+
+### 1. Instalar la extensión
+
+- **VS Code:** instalar "SonarQube for IDE" (antes SonarLint) desde el marketplace.
+- **IntelliJ:** `File → Settings → Plugins → Marketplace → SonarQube for IDE`.
+
+### 2. Token de SonarCloud
+
+1. Ingresá a `https://sonarcloud.io/account/security/` con tu cuenta corporativa.
+2. Click en *Generate Token* — nombre sugerido: `sonarlint-local-{{ service_name }}`.
+3. **Copiar el token AHORA**. No se va a mostrar de nuevo.
+
+### 3. Conectar SonarLint a SonarCloud
+
+1. `VS Code → Settings → SonarLint → Connected Mode`.
+2. *Add SonarCloud Connection* → organization: `bancopichinchaec`.
+3. Pegar el token.
+4. Seleccionar este proyecto; el IDE escribe `connectedMode.json` automáticamente.
+
+### 4. Validación
+
+Una vez sincronizado, las reglas de SonarCloud aparecen en el panel "Problems"
+de VS Code. Antes de cada PR, validar que no haya nuevos *issues* propios
+(errores heredados del legacy pueden quedar pero no se deberían sumar).
+
+## Troubleshooting
+
+- **Nada aparece:** `SonarLint: Show All Rules` → confirmá que aparezcan
+  reglas de SonarCloud. Si no, revisá que el binding esté activo en
+  `SonarLint: Show Connections`.
+- **Binding no se activa:** borrá `connectedMode.json` y reiniciá VS Code.
+  Si el template vuelve con placeholder, reemplazá `<PROJECT_KEY_FROM_SONARCLOUD>`
+  por el key real de SonarCloud (copiar desde `sonarcloud.io` → proyecto → key).
+- **"Project key not found":** el repo aún no fue analizado por SonarCloud.
+  Corré el pipeline al menos una vez para que se registre.

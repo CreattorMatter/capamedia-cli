@@ -409,7 +409,28 @@ def review(
     # ── Fase 1: Nuestro checklist con autofix loop ──────────────────────────
     console.print("\n[bold cyan]Fase 1[/bold cyan] Nuestro checklist + autofix loop")
 
-    ctx = CheckContext(migrated_path=project_path, legacy_path=legacy_path)
+    # v0.22.0: auto-populate source_type + has_bancs desde el legacy
+    # para alimentar la matriz MCP-driven del Block 0.
+    source_type = ""
+    has_bancs = False
+    if legacy_path and legacy_path.is_dir():
+        try:
+            from capamedia_cli.core.legacy_analyzer import (
+                detect_bancs_connection,
+                detect_source_kind,
+            )
+
+            source_type = detect_source_kind(legacy_path, project_path.name)
+            has_bancs, _ = detect_bancs_connection(legacy_path)
+        except Exception:
+            pass
+
+    ctx = CheckContext(
+        migrated_path=project_path,
+        legacy_path=legacy_path,
+        source_type=source_type,
+        has_bancs=has_bancs,
+    )
 
     def _rerun() -> list:
         return run_all_blocks(ctx)
