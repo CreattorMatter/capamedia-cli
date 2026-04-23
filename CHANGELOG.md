@@ -4,6 +4,87 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.0] - 2026-04-22
+
+### Changed - `capamedia review` ahora autodetecta paths y deja `destino/` limpio
+
+**Feedback del user (Julian)**: dos mejoras de UX al review:
+
+1. "No hace falta que pongamos legacy. Podemos estar en la carpeta raíz y poner
+   capamedia review. Las dos carpetas legacy/ y destino/ se autodetectan. Si
+   no encuentra, tira error claro."
+2. "Cuando corre la checklist oficial del banco genera un .md dentro del
+   destino. Estaría bueno sacarlo afuera así no jode cuando pusheamos sin
+   querer al repo del servicio migrado."
+
+**Autodeteccion de paths**:
+
+```bash
+# Antes (v0.19.x):
+capamedia review ./destino/tnd-msa-sp-wstecnicos0008 --legacy ./legacy/ws-wstecnicos0008-was
+
+# Ahora (v0.20.0), parado en el workspace root:
+capamedia review
+```
+
+- `project_path` pasa a ser argumento **opcional**.
+- Si se omite, el CLI busca `./destino/<unico-subdir>/` desde el CWD.
+- `--legacy` tambien se autodetecta desde `./legacy/<unico-subdir>/`.
+- Errores claros con hint de fix si falta `destino/`, esta vacio, o tiene
+  varios subdirs (en ese caso sugiere el path explicito).
+
+**Reubicacion de reportes** (v0.20.0):
+
+Todos los artefactos del review ahora se escriben en
+`<workspace>/.capamedia/reports/` y `<workspace>/.capamedia/autofix/`,
+NO dentro de `destino/`. Esto mantiene el proyecto Java migrado limpio,
+sin que un `git add -A` arrastre los reportes al repo del banco.
+
+Archivos que se reubican:
+- `hexagonal_validation_*.md` / `.json` (del validador oficial)
+- `hexagonal_report_*.md` / `.json`
+- `review_<ts>.json` (log consolidado del review)
+- `<ts>.log` (logs del autofix loop)
+
+**Antes (v0.19.x) - archivos que quedaban en destino/**:
+```
+destino/tnd-msa-sp-wstecnicos0008/
+  .capamedia/
+    autofix/20260422T203244.log
+    review/20260422-210322.json
+  hexagonal_validation_20260422.md     ← polucion repo
+  hexagonal_validation_20260422.json   ← polucion repo
+```
+
+**Ahora (v0.20.0)**:
+```
+wstecnicos0008/                        ← workspace
+  destino/tnd-msa-sp-wstecnicos0008/   ← LIMPIO, ready para git push
+  .capamedia/
+    reports/
+      hexagonal_validation_20260422.md
+      hexagonal_validation_20260422.json
+      review_20260422-210322.json
+    autofix/
+      20260422T203244.log
+```
+
+**Compatibilidad**: pasar `project_path` explicito sigue funcionando igual
+que antes. Si el path no esta bajo un `destino/`, workspace root == project
+(fallback legacy) y no hay reubicacion.
+
+### Tests nuevos (14)
+
+- `_find_single_subdir` (3): unico, multiple, ignora ocultos
+- `_autodetect_review_paths` (5): resolve both, legacy opcional, falta destino,
+  destino vacio, multiples subdirs
+- `_resolve_workspace_root` (2): bajo destino/ sube 2 niveles, fallback
+- `_relocate_generated_reports` (3): mueve md+json, noop cuando ws==project,
+  sobrescribe duplicados
+- `review` integracion (2): sin args desde workspace, falla sin destino
+
+Total: 423 tests passing.
+
 ## [0.19.0] - 2026-04-22
 
 ### Added - `clone` detecta `.properties` especificos y los reporta como blockers de handoff

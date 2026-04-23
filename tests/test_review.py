@@ -10,6 +10,10 @@ import pytest
 import typer
 
 from capamedia_cli.commands.review import (
+    _autodetect_review_paths,
+    _find_single_subdir,
+    _relocate_generated_reports,
+    _resolve_workspace_root,
     _run_official_validator,
     _summarize_results,
     _verdict_from_summary,
@@ -69,7 +73,9 @@ def test_write_review_log_creates_json(tmp_path: Path) -> None:
     phases = [{"phase": "1-test", "data": "ok"}]
     log_path = _write_review_log(tmp_path, phases, "PR_READY")
     assert log_path.exists()
-    assert log_path.parent.name == "review"
+    # v0.20.0: los logs del review viven en .capamedia/reports/
+    assert log_path.parent.name == "reports"
+    assert log_path.name.startswith("review_")
     data = json.loads(log_path.read_text(encoding="utf-8"))
     assert data["final_verdict"] == "PR_READY"
     assert data["phases"] == phases
@@ -261,10 +267,10 @@ def test_review_pr_ready_when_all_green(tmp_path: Path) -> None:
         # No debe raise (exit_code=0 = no Exit lanzado)
         review(project_path=tmp_path)
 
-    # Log consolidado fue escrito
-    log_dir = tmp_path / ".capamedia" / "review"
+    # v0.20.0: log consolidado en .capamedia/reports/review_<ts>.json
+    log_dir = tmp_path / ".capamedia" / "reports"
     assert log_dir.exists()
-    logs = list(log_dir.glob("*.json"))
+    logs = list(log_dir.glob("review_*.json"))
     assert len(logs) == 1
     data = json.loads(logs[0].read_text(encoding="utf-8"))
     assert data["final_verdict"] == "PR_READY"
@@ -338,3 +344,181 @@ def test_review_skip_official_does_not_call_validator(tmp_path: Path) -> None:
     ):
         review(project_path=tmp_path, skip_official=True)
         mock_official.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# v0.20.0 - Autodetect paths + relocate reports
+# ---------------------------------------------------------------------------
+
+
+def _make_workspace(tmp_path: Path, with_legacy: bool = True) -> Path:
+    """Crea estructura tipica: destino/tnd-msa-sp-<svc>/ + legacy/ws-*-was/."""
+    ws = tmp_path / "wstecnicos0008"
+    (ws / "destino" / "tnd-msa-sp-wstecnicos0008" / "src" / "main" / "java").mkdir(
+        parents=True
+    )
+    if with_legacy:
+        (ws / "legacy" / "ws-wstecnicos0008-was").mkdir(parents=True)
+    return ws
+
+
+def test_find_single_subdir_returns_the_only_one(tmp_path: Path) -> None:
+    parent = tmp_path / "destino"
+    parent.mkdir()
+    (parent / "tnd-msa-sp-foo").mkdir()
+    assert _find_single_subdir(parent).name == "tnd-msa-sp-foo"
+
+
+def test_find_single_subdir_returns_none_when_multiple(tmp_path: Path) -> None:
+    parent = tmp_path / "destino"
+    parent.mkdir()
+    (parent / "foo").mkdir()
+    (parent / "bar").mkdir()
+    assert _find_single_subdir(parent) is None
+
+
+def test_find_single_subdir_ignores_hidden_dirs(tmp_path: Path) -> None:
+    parent = tmp_path / "destino"
+    parent.mkdir()
+    (parent / "tnd-msa-sp-foo").mkdir()
+    (parent / ".DS_Store").mkdir()  # hidden, debe ignorarse
+    (parent / ".idea").mkdir()
+    assert _find_single_subdir(parent).name == "tnd-msa-sp-foo"
+
+
+def test_autodetect_resolves_both_when_workspace_clean(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path)
+    project, legacy, workspace = _autodetect_review_paths(ws)
+    assert project.name == "tnd-msa-sp-wstecnicos0008"
+    assert project.parent.name == "destino"
+    assert legacy.name == "ws-wstecnicos0008-was"
+    assert workspace == ws
+
+
+def test_autodetect_legacy_is_optional(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path, with_legacy=False)
+    project, legacy, workspace = _autodetect_review_paths(ws)
+    assert project is not None
+    assert legacy is None  # sin legacy es OK, block 0 se saltea
+    assert workspace == ws
+
+
+def test_autodetect_fails_when_no_destino(tmp_path: Path) -> None:
+    # Sin destino/ debe dar exit code 2 con mensaje claro
+    with pytest.raises(typer.Exit) as exc:
+        _autodetect_review_paths(tmp_path)
+    assert exc.value.exit_code == 2
+
+
+def test_autodetect_fails_when_destino_empty(tmp_path: Path) -> None:
+    (tmp_path / "destino").mkdir()
+    with pytest.raises(typer.Exit) as exc:
+        _autodetect_review_paths(tmp_path)
+    assert exc.value.exit_code == 2
+
+
+def test_autodetect_fails_when_multiple_destino_subdirs(tmp_path: Path) -> None:
+    destino = tmp_path / "destino"
+    destino.mkdir()
+    (destino / "proj-a").mkdir()
+    (destino / "proj-b").mkdir()
+    with pytest.raises(typer.Exit) as exc:
+        _autodetect_review_paths(tmp_path)
+    assert exc.value.exit_code == 2
+
+
+def test_resolve_workspace_root_from_destino_path(tmp_path: Path) -> None:
+    """Si project_path esta dentro de destino/, workspace es 2 niveles arriba."""
+    ws = _make_workspace(tmp_path)
+    project = ws / "destino" / "tnd-msa-sp-wstecnicos0008"
+    assert _resolve_workspace_root(project) == ws
+
+
+def test_resolve_workspace_root_fallback_when_not_under_destino(tmp_path: Path) -> None:
+    """Si el project_path no esta bajo destino/, fallback al project_path mismo."""
+    project = tmp_path / "some-other-project"
+    project.mkdir()
+    assert _resolve_workspace_root(project) == project
+
+
+def test_relocate_moves_hexagonal_reports(tmp_path: Path) -> None:
+    ws = _make_workspace(tmp_path)
+    project = ws / "destino" / "tnd-msa-sp-wstecnicos0008"
+    # Simula reportes generados por el validador oficial
+    (project / "hexagonal_validation_20260422.md").write_text("# report", encoding="utf-8")
+    (project / "hexagonal_validation_20260422.json").write_text("{}", encoding="utf-8")
+
+    moved = _relocate_generated_reports(project, ws)
+    assert len(moved) == 2
+    # Los originales ya no estan en destino/
+    assert not (project / "hexagonal_validation_20260422.md").exists()
+    assert not (project / "hexagonal_validation_20260422.json").exists()
+    # Estan en .capamedia/reports/ del workspace
+    reports_dir = ws / ".capamedia" / "reports"
+    assert (reports_dir / "hexagonal_validation_20260422.md").exists()
+    assert (reports_dir / "hexagonal_validation_20260422.json").exists()
+
+
+def test_relocate_is_noop_when_workspace_equals_project(tmp_path: Path) -> None:
+    """Si workspace == project (fallback legacy), no debe mover nada."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "hexagonal_validation_x.md").write_text("x", encoding="utf-8")
+    moved = _relocate_generated_reports(project, project)
+    assert moved == []
+    # El archivo sigue en su lugar
+    assert (project / "hexagonal_validation_x.md").exists()
+
+
+def test_relocate_overwrites_existing_reports(tmp_path: Path) -> None:
+    """Correr review 2 veces no debe fallar por archivos duplicados."""
+    ws = _make_workspace(tmp_path)
+    project = ws / "destino" / "tnd-msa-sp-wstecnicos0008"
+    reports_dir = ws / ".capamedia" / "reports"
+    reports_dir.mkdir(parents=True)
+    # Existe un reporte viejo
+    (reports_dir / "hexagonal_validation_old.md").write_text("old", encoding="utf-8")
+    # Y ahora se genera uno nuevo con el mismo nombre
+    (project / "hexagonal_validation_old.md").write_text("new", encoding="utf-8")
+
+    moved = _relocate_generated_reports(project, ws)
+    assert len(moved) == 1
+    # El viejo fue sobrescrito por el nuevo
+    assert (reports_dir / "hexagonal_validation_old.md").read_text(encoding="utf-8") == "new"
+
+
+def test_review_no_args_autodetects_from_cwd(tmp_path: Path, monkeypatch) -> None:
+    """Correr `capamedia review` sin args desde el workspace root funciona."""
+    ws = _make_workspace(tmp_path)
+    monkeypatch.chdir(ws)
+
+    clean_results = [_FakeResult("pass") for _ in range(3)]
+
+    class _AutofixReport:
+        iterations = 1
+        total_applied = 0
+        converged = True
+        log_path = None
+
+    with (
+        patch("capamedia_cli.commands.review.run_autofix_loop", return_value=_AutofixReport()),
+        patch("capamedia_cli.commands.review.run_bank_autofix", return_value=[]),
+        patch("capamedia_cli.commands.review.run_all_blocks", return_value=clean_results),
+    ):
+        review(skip_official=True)  # sin project_path
+
+    # El log fue escrito en <workspace>/.capamedia/reports/ (no en destino/)
+    reports_dir = ws / ".capamedia" / "reports"
+    assert reports_dir.exists()
+    logs = list(reports_dir.glob("review_*.json"))
+    assert len(logs) == 1
+    data = json.loads(logs[0].read_text(encoding="utf-8"))
+    assert data["final_verdict"] == "PR_READY"
+
+
+def test_review_no_args_fails_when_not_in_workspace(tmp_path: Path, monkeypatch) -> None:
+    """Sin destino/ en CWD, el comando tira exit 2 sin intentar correr nada."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(typer.Exit) as exc:
+        review()
+    assert exc.value.exit_code == 2

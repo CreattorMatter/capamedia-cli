@@ -31,6 +31,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,136 @@ console = Console()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _find_single_subdir(parent: Path) -> Path | None:
+    """Devuelve el unico subdir (no oculto) dentro de parent, o None si hay 0 o >1."""
+    if not parent.is_dir():
+        return None
+    subdirs = [
+        p for p in parent.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    ]
+    return subdirs[0] if len(subdirs) == 1 else None
+
+
+def _count_visible_subdirs(parent: Path) -> int:
+    if not parent.is_dir():
+        return 0
+    return sum(
+        1 for p in parent.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    )
+
+
+def _autodetect_review_paths(cwd: Path) -> tuple[Path, Path | None, Path]:
+    """Autodetecta (project_path, legacy_path, workspace_root) desde cwd.
+
+    Reglas:
+    - cwd debe tener `destino/` (con un unico subdir adentro).
+    - `legacy/` es opcional: si existe con un unico subdir, se toma.
+    - Si falta `destino/` o tiene !=1 subdirs, se tira error con hint claro.
+    """
+    destino_root = cwd / "destino"
+    if not destino_root.is_dir():
+        console.print(
+            "[red]Error:[/red] no se encontro [cyan]./destino/[/cyan] en "
+            f"[cyan]{cwd}[/cyan].\n"
+            "[yellow]Opciones:[/yellow]\n"
+            "  1) Correr desde el workspace root del servicio "
+            "(donde estan [cyan]destino/[/cyan] y [cyan]legacy/[/cyan]).\n"
+            "  2) Pasar el path explicito: [cyan]capamedia review <project_path>[/cyan]"
+        )
+        raise typer.Exit(code=2)
+
+    project = _find_single_subdir(destino_root)
+    if project is None:
+        n = _count_visible_subdirs(destino_root)
+        if n == 0:
+            console.print(
+                f"[red]Error:[/red] [cyan]{destino_root}[/cyan] esta vacio. "
+                "Correr [cyan]capamedia fabrics generate[/cyan] primero."
+            )
+        else:
+            subdirs = sorted(
+                p.name for p in destino_root.iterdir()
+                if p.is_dir() and not p.name.startswith(".")
+            )
+            console.print(
+                f"[red]Error:[/red] [cyan]{destino_root}[/cyan] tiene "
+                f"{n} subcarpetas: {subdirs}.\n"
+                "No se puede autodetectar. Pasar path explicito: "
+                f"[cyan]capamedia review ./destino/{subdirs[0]}[/cyan]"
+            )
+        raise typer.Exit(code=2)
+
+    legacy_root = cwd / "legacy"
+    legacy_subdir = _find_single_subdir(legacy_root)
+    if legacy_root.is_dir() and legacy_subdir is None:
+        n = _count_visible_subdirs(legacy_root)
+        if n > 1:
+            # No error — solo warning, legacy es opcional
+            console.print(
+                f"[yellow]Aviso:[/yellow] [cyan]{legacy_root}[/cyan] tiene "
+                f"{n} subcarpetas, no se puede autodetectar el legacy. "
+                "Block 0 (cross-check) se va a saltear. Pasar "
+                "[cyan]--legacy <path>[/cyan] explicitamente para activarlo."
+            )
+
+    return project, legacy_subdir, cwd
+
+
+def _resolve_workspace_root(project_path: Path) -> Path:
+    """Sube desde project_path hasta encontrar el workspace root.
+
+    Si project_path es `.../destino/tnd-msa-sp-<svc>/`, workspace root es 2
+    niveles arriba (donde estan `destino/` y `legacy/`). Si no, fallback al
+    project_path mismo (comportamiento legacy).
+    """
+    if project_path.parent.name == "destino":
+        return project_path.parent.parent
+    return project_path
+
+
+def _relocate_generated_reports(
+    project_path: Path,
+    workspace_root: Path,
+) -> list[Path]:
+    """Mueve los reportes que el validador oficial genera DENTRO del proyecto
+    hacia `<workspace_root>/.capamedia/reports/` para mantener `destino/`
+    limpio (listo para git push sin ruido).
+
+    Devuelve la lista de nuevos paths. Si workspace_root == project_path
+    (fallback legacy), no mueve nada.
+    """
+    if workspace_root.resolve() == project_path.resolve():
+        return []
+
+    reports_dir = workspace_root / ".capamedia" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    moved: list[Path] = []
+    patterns = [
+        "hexagonal_validation_*.md",
+        "hexagonal_validation_*.json",
+        "hexagonal_report_*.md",
+        "hexagonal_report_*.json",
+    ]
+    for pattern in patterns:
+        for src in project_path.glob(pattern):
+            dest = reports_dir / src.name
+            try:
+                if dest.exists():
+                    dest.unlink()
+                shutil.move(str(src), str(dest))
+                moved.append(dest)
+            except OSError as exc:
+                console.print(
+                    f"[yellow]Aviso:[/yellow] no se pudo mover {src.name} "
+                    f"a .capamedia/reports/: {exc}"
+                )
+
+    return moved
 
 
 def _summarize_results(results: list) -> dict[str, int]:
@@ -141,18 +272,22 @@ def _run_official_validator(project_path: Path) -> tuple[int, int, str]:
 
 
 def _write_review_log(
-    project_path: Path,
+    root: Path,
     phases: list[dict[str, Any]],
     final_verdict: str,
 ) -> Path:
-    """Escribe `.capamedia/review/<ts>.json` con todas las fases."""
-    log_dir = project_path / ".capamedia" / "review"
+    """Escribe `<root>/.capamedia/reports/review_<ts>.json` con todas las fases.
+
+    `root` suele ser el workspace_root (v0.20.0+) para mantener destino/ limpio.
+    En invocaciones legacy donde workspace == project, cae en el mismo lugar.
+    """
+    log_dir = root / ".capamedia" / "reports"
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_path = log_dir / f"{ts}.json"
+    log_path = log_dir / f"review_{ts}.json"
     log_data = {
         "timestamp": ts,
-        "project_path": str(project_path),
+        "workspace_root": str(root),
         "phases": phases,
         "final_verdict": final_verdict,
     }
@@ -170,17 +305,21 @@ def _write_review_log(
 
 def review(
     project_path: Annotated[
-        Path,
+        Path | None,
         typer.Argument(
-            help="Ruta al proyecto Java migrado (destino/tnd-msa-sp-<svc>/).",
+            help=(
+                "Ruta al proyecto Java migrado. Si se omite, autodetecta "
+                "[cyan]./destino/<unico-subdir>/[/cyan] desde el CWD. "
+                "Legacy se autodetecta tambien desde [cyan]./legacy/[/cyan]."
+            ),
         ),
-    ],
+    ] = None,
     legacy: Annotated[
         Path | None,
         typer.Option(
             "--legacy",
             "-l",
-            help="Path al legacy original (opcional, habilita cross-check block 0).",
+            help="Path al legacy. Si se omite, autodetecta ./legacy/<unico-subdir>/.",
         ),
     ] = None,
     max_iterations: Annotated[
@@ -224,19 +363,40 @@ def review(
     Aplica nuestro checklist completo + autofixes en loop + validador oficial
     del banco. Pensado para proyectos que el equipo migra sin pasar por el
     CLI y necesitan un pase de limpieza antes del PR.
+
+    **Autodetectar paths (v0.20.0)**: si se corre desde el workspace root
+    (donde estan `destino/` y `legacy/`), no hace falta pasar argumentos.
+    Los reportes generados por el validador oficial se reubican a
+    `<workspace>/.capamedia/reports/` para mantener `destino/` limpio.
     """
-    project_path = project_path.resolve()
-    if not project_path.is_dir():
-        console.print(f"[red]El proyecto no existe:[/red] {project_path}")
-        raise typer.Exit(code=2)
+    # Autodeteccion si no se paso project_path
+    if project_path is None:
+        cwd = Path.cwd()
+        project_path, legacy_auto, workspace_root = _autodetect_review_paths(cwd)
+        if legacy is None:
+            legacy = legacy_auto
+        console.print(
+            f"[dim]Autodetectado[/dim] proyecto=[cyan]{project_path.relative_to(cwd)}[/cyan]"
+            + (
+                f" · legacy=[cyan]{legacy.relative_to(cwd)}[/cyan]"
+                if legacy else " · legacy=[yellow](no detectado)[/yellow]"
+            )
+        )
+    else:
+        project_path = project_path.resolve()
+        if not project_path.is_dir():
+            console.print(f"[red]El proyecto no existe:[/red] {project_path}")
+            raise typer.Exit(code=2)
+        workspace_root = _resolve_workspace_root(project_path)
 
     legacy_path = legacy.resolve() if legacy else None
 
     console.print(
         Panel.fit(
             "[bold]capamedia review[/bold] — pipeline completo\n"
-            f"Proyecto: [cyan]{project_path}[/cyan]\n"
-            f"Legacy:   [cyan]{legacy_path or '(no provisto)'}[/cyan]\n"
+            f"Proyecto:  [cyan]{project_path}[/cyan]\n"
+            f"Legacy:    [cyan]{legacy_path or '(no provisto)'}[/cyan]\n"
+            f"Workspace: [cyan]{workspace_root}[/cyan]\n"
             f"Max iter: {max_iterations}\n"
             f"Dry run:  {'SI (sin autofix)' if dry_run else 'NO'}\n"
             f"Validator oficial: {'SKIP' if skip_official else 'ON'}",
@@ -266,7 +426,9 @@ def review(
         phases_log.append({"phase": "1-checklist", "dry_run": True, "summary": phase1_summary})
         autofix_report = None
     else:
-        log_dir = project_path / ".capamedia" / "autofix"
+        # v0.20.0: logs del autofix van a <workspace>/.capamedia/autofix/
+        # para mantener destino/ limpio (git push sin ruido).
+        log_dir = workspace_root / ".capamedia" / "autofix"
         autofix_report = run_autofix_loop(
             project_path, _rerun, max_iter=max_iterations, log_dir=log_dir
         )
@@ -344,6 +506,21 @@ def review(
         official_passed, official_total, official_report = _run_official_validator(
             project_path
         )
+
+        # v0.20.0: reubicar reportes generados (md/json) a .capamedia/reports/
+        # del workspace para mantener destino/ limpio (git push sin ruido).
+        moved = _relocate_generated_reports(project_path, workspace_root)
+        if moved:
+            # Si el reporte oficial fue movido, actualizar la referencia
+            for m in moved:
+                if m.name.endswith(".md"):
+                    official_report = str(m)
+                    break
+            console.print(
+                f"  [dim]Reubicados {len(moved)} reporte(s) a "
+                f"{(workspace_root / '.capamedia' / 'reports').relative_to(workspace_root)}/[/dim]"
+            )
+
         color = "green" if official_passed == official_total and official_total > 0 else "red"
         console.print(
             f"  Resultado: [{color}]{official_passed}/{official_total} checks pasados[/{color}]"
@@ -386,7 +563,8 @@ def review(
     table.add_row("PR ready", f"[{color}]{final_verdict}[/{color}]")
     console.print(table)
 
-    log_path = _write_review_log(project_path, phases_log, final_verdict)
+    # v0.20.0: log consolidado va a .capamedia/reports/ del workspace (no al destino)
+    log_path = _write_review_log(workspace_root, phases_log, final_verdict)
     console.print(f"\n[dim]Log consolidado: {log_path}[/dim]")
 
     if not pr_ready:
