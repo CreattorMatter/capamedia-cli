@@ -6,6 +6,9 @@ from pathlib import Path
 
 from capamedia_cli.core.legacy_analyzer import (
     PropertiesReference,
+    _detect_specific_file_from_propiedad_java,
+    _infer_specific_file_from_root_name,
+    _resolve_specific_properties_file,
     detect_properties_references,
 )
 
@@ -188,3 +191,157 @@ def test_dataclass_defaults() -> None:
     assert p.keys_used == []
     assert p.sample_values == {}
     assert p.referenced_from == []
+
+
+# ---------------------------------------------------------------------------
+# v0.20.2 - WAS principal tambien se detecta (no solo UMPs)
+# ---------------------------------------------------------------------------
+
+
+def test_was_principal_detects_its_own_properties(tmp_path: Path) -> None:
+    """Bug v0.19.0: WAS principal (ws-<svc>-was) no tenia 'ump' en el nombre
+    y las Propiedad.get("K") del codigo del servicio se descartaban.
+
+    Ahora debe detectar wsclientes0076.properties via heuristica de root.
+    """
+    was_root = tmp_path / "ws-wsclientes0076-was"
+    _mk_java(
+        was_root / "wsclientes0076-aplicacion" / "Constantes.java",
+        """
+        public static final String URL_SERVICIO = Propiedad.get("URL_SERVICIO");
+        public static final String TIMEOUT = Propiedad.get("TIMEOUT");
+        """,
+    )
+    refs = detect_properties_references([was_root])
+    specific = [r for r in refs if r.file_name == "wsclientes0076.properties"]
+    assert len(specific) == 1, (
+        "El WAS principal tambien debe detectar sus propias Propiedad.get() - "
+        f"refs encontradas: {[r.file_name for r in refs]}"
+    )
+    entry = specific[0]
+    assert entry.status == "PENDING_FROM_BANK"
+    assert entry.source_hint == "service"
+    assert set(entry.keys_used) == {"URL_SERVICIO", "TIMEOUT"}
+
+
+def test_was_principal_plus_ump_detects_both(tmp_path: Path) -> None:
+    """Flow real: WAS principal + UMP, cada uno con su propio .properties."""
+    was_root = tmp_path / "ws-wsclientes0076-was"
+    ump_root = tmp_path / "ump-umptecnicos0023-was"
+
+    _mk_java(
+        was_root / "wsclientes0076-aplicacion" / "Servicio.java",
+        'String x = Propiedad.get("TIMEOUT");',
+    )
+    _mk_java(
+        ump_root / "umptecnicos0023-core" / "Constantes.java",
+        'String y = Propiedad.get("URL_XML");',
+    )
+
+    refs = detect_properties_references([was_root, ump_root])
+    pending = [r for r in refs if r.status == "PENDING_FROM_BANK"]
+    names = {r.file_name for r in pending}
+    # Ambos archivos se detectan por separado
+    assert "wsclientes0076.properties" in names
+    assert "umptecnicos0023.properties" in names
+
+
+def test_propiedad_java_takes_priority_over_root_name(tmp_path: Path) -> None:
+    """Si Propiedad.java dice RUTA_ESPECIFICA = "/apps/.../foobar.properties",
+    el detector debe usar ese nombre (fuente de verdad), no el del root."""
+    root = tmp_path / "ws-wsclientes0076-was"
+    # Propiedad.java dice otra cosa
+    _mk_java(
+        root / "src" / "Propiedad.java",
+        '''
+        private static final String RUTA_ESPECIFICA =
+            "/apps/proy/OMNICANALIDAD_SERVICIOS/conf/servicioCustom.properties";
+        ''',
+    )
+    _mk_java(
+        root / "src" / "Uses.java",
+        'String a = Propiedad.get("SOME_KEY");',
+    )
+
+    refs = detect_properties_references([root])
+    names = {r.file_name for r in refs if r.status == "PENDING_FROM_BANK"}
+    # Debe usar servicioCustom.properties, NO wsclientes0076.properties
+    assert "servicioCustom.properties" in names
+    # Las keys estan asociadas al archivo correcto
+    custom = next(r for r in refs if r.file_name == "servicioCustom.properties")
+    assert "SOME_KEY" in custom.keys_used
+
+
+def test_ms_prefix_root_resolves() -> None:
+    """ms-<svc>-was (variante WAS) tambien resuelve heuristicamente."""
+    name = _infer_specific_file_from_root_name(Path("ms-wsclientes0076-was"))
+    assert name == "wsclientes0076.properties"
+
+
+def test_sqb_msa_prefix_root_resolves() -> None:
+    """sqb-msa-<svc> (IIB) tambien resuelve heuristicamente."""
+    name = _infer_specific_file_from_root_name(Path("sqb-msa-wsclientes0006"))
+    assert name == "wsclientes0006.properties"
+
+
+def test_unknown_root_name_returns_none() -> None:
+    """Root que no matchea ningun pattern conocido devuelve None."""
+    name = _infer_specific_file_from_root_name(Path("random-folder-name"))
+    assert name is None
+
+
+def test_resolve_falls_back_to_root_when_no_propiedad_java(tmp_path: Path) -> None:
+    """Sin Propiedad.java, cae al resolver por nombre de root."""
+    root = tmp_path / "ws-wsclientes0076-was"
+    root.mkdir()
+    file_name, hint = _resolve_specific_properties_file(root)
+    assert file_name == "wsclientes0076.properties"
+    assert hint == "service"
+
+
+def test_resolve_reads_propiedad_java_when_present(tmp_path: Path) -> None:
+    """Con Propiedad.java, lo usa como fuente de verdad."""
+    root = tmp_path / "ws-wsclientes0076-was"
+    _mk_java(
+        root / "Propiedad.java",
+        '''
+        private static final String RUTA_ESPECIFICA =
+            "/apps/proy/OMNICANALIDAD_SERVICIOS/conf/override.properties";
+        ''',
+    )
+    file_name, hint = _resolve_specific_properties_file(root)
+    assert file_name == "override.properties"
+    # No empieza con "ump", asi que source es "service"
+    assert hint == "service"
+
+
+def test_resolve_ump_via_propiedad_java(tmp_path: Path) -> None:
+    """Si RUTA_ESPECIFICA apunta a ump*.properties, hint es ump:<name>."""
+    root = tmp_path / "ump-umptecnicos0023-was"
+    _mk_java(
+        root / "Propiedad.java",
+        '''
+        private static final String RUTA_ESPECIFICA =
+            "/apps/proy/OMNICANALIDAD_SERVICIOS/conf/umptecnicos0023.properties";
+        ''',
+    )
+    file_name, hint = _resolve_specific_properties_file(root)
+    assert file_name == "umptecnicos0023.properties"
+    assert hint == "ump:umptecnicos0023"
+
+
+def test_propiedad_java_detector_returns_none_when_not_found(tmp_path: Path) -> None:
+    """Si no hay Propiedad.java en el root, devuelve None (no crashea)."""
+    root = tmp_path / "empty-root"
+    root.mkdir()
+    assert _detect_specific_file_from_propiedad_java(root) is None
+
+
+def test_propiedad_java_without_ruta_especifica(tmp_path: Path) -> None:
+    """Propiedad.java existe pero sin RUTA_ESPECIFICA -> None."""
+    root = tmp_path / "ws-wsclientes0076-was"
+    _mk_java(
+        root / "Propiedad.java",
+        'public class Propiedad { /* no RUTA_ESPECIFICA here */ }',
+    )
+    assert _detect_specific_file_from_propiedad_java(root) is None

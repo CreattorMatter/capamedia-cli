@@ -4,6 +4,68 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.2] - 2026-04-22
+
+### Fixed - El detector de `.properties` ahora tambien cubre el WAS principal (no solo UMPs)
+
+**Bug reportado por Julian**: "Vamos a buscar los puntos properties del WAS,
+pero después los UMP también tienen unos puntos properties; eso también hay
+que buscarlos."
+
+**Causa raiz en v0.19.0**: el detector inferia el nombre del archivo
+`.properties` especifico con una heuristica simple:
+
+```python
+ump_match = re.search(r"(ump[a-z]+\d{4})", root_name_lower)
+if ump_match:
+    specific_file_name = f"{ump_match.group(1)}.properties"
+# else: specific_file_name = ""  <-- se descartaba silenciosamente
+```
+
+Entonces para el WAS principal (root `ws-<svc>-was`, sin "ump" en el nombre),
+todas las llamadas `Propiedad.get("K")` del codigo del servicio se perdian.
+
+**Fix v0.20.2**: resolver robusto en 2 pasos:
+
+1. **Propiedad.java como fuente de verdad** — nueva regex `RE_RUTA_ESPECIFICA`
+   lee la constante que define la ruta al .properties especifico:
+   ```java
+   private static final String RUTA_ESPECIFICA =
+       "/apps/proy/OMNICANALIDAD_SERVICIOS/conf/wsclientes0076.properties";
+   ```
+
+2. **Heuristica de fallback ampliada** — `_infer_specific_file_from_root_name`
+   cubre los 4 patterns Azure del banco:
+   - `ump-<svc>-was`  → `<svc>.properties`
+   - `ws-<svc>-was`   → `<svc>.properties`   ← **antes no se cubria**
+   - `ms-<svc>-was`   → `<svc>.properties`   ← **antes no se cubria**
+   - `sqb-msa-<svc>`  → `<svc>.properties`   ← **antes no se cubria**
+
+### Comportamiento nuevo
+
+Cuando hay WAS principal + UMPs, el detector ahora reporta **ambos** archivos
+por separado:
+
+```
+.properties detectados:
+  ✗ wsclientes0076.properties    [PENDIENTE - pedir al owner]   service
+  ✗ umptecnicos0023.properties   [PENDIENTE - pedir al owner]   ump:umptecnicos0023
+
+ATENCION: hay 2 .properties especificos del servicio/UMP que NO estan en el repo.
+```
+
+### Tests nuevos (11)
+
+`test_properties_detector.py`:
+- WAS principal detecta sus propias Propiedad.get() (bug de v0.19.0)
+- WAS + UMP: ambos detectados por separado
+- Propiedad.java tiene prioridad sobre heuristica de root
+- ms-<svc>-was y sqb-msa-<svc> se resuelven
+- Root desconocido retorna None sin crashear
+- Propiedad.java sin RUTA_ESPECIFICA retorna None
+
+Total: 447 tests passing.
+
 ## [0.20.1] - 2026-04-22
 
 ### Fixed - `clone`/`init` auto-padean el nombre del servicio a 4 digitos

@@ -465,6 +465,91 @@ RE_RESOURCE_BUNDLE = re.compile(
     r'ResourceBundle\s*\.\s*getBundle\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"'
 )
 
+# En Propiedad.java el banco define la constante RUTA_ESPECIFICA apuntando al
+# archivo .properties especifico del componente (UMP o servicio). Ej:
+#   private static final String RUTA_ESPECIFICA =
+#       "/apps/proy/OMNICANALIDAD_SERVICIOS/conf/wsclientes0076.properties";
+RE_RUTA_ESPECIFICA = re.compile(
+    r"RUTA_ESPECIFICA\s*=\s*"
+    r'"/apps/proy/[^"]+?/([A-Za-z_][A-Za-z0-9_]*)\.properties"',
+    re.IGNORECASE,
+)
+
+# Heuristicas para inferir el nombre del archivo .properties desde el nombre
+# del root de clone (cuando Propiedad.java no esta disponible). Ejemplos:
+#   ump-umptecnicos0023-was  -> umptecnicos0023.properties
+#   ws-wsclientes0076-was    -> wsclientes0076.properties
+#   ms-wsclientes0076-was    -> wsclientes0076.properties
+#   sqb-msa-wsclientes0006   -> wsclientes0006.properties
+_ROOT_PATTERNS = [
+    re.compile(r"^ump-([a-z]+\d{4})-was$", re.IGNORECASE),
+    re.compile(r"^ws-([a-z]+\d{4})-was$", re.IGNORECASE),
+    re.compile(r"^ms-([a-z]+\d{4})-was$", re.IGNORECASE),
+    re.compile(r"^sqb-msa-([a-z]+\d{4})$", re.IGNORECASE),
+]
+
+
+def _detect_specific_file_from_propiedad_java(root: Path) -> str | None:
+    """Busca `Propiedad.java` (clase util del banco) en el root y extrae el
+    nombre del .properties especifico desde la constante RUTA_ESPECIFICA.
+
+    Retorna el nombre del archivo (ej "wsclientes0076.properties") o None si
+    no se encuentra.
+    """
+    for f in root.rglob("Propiedad.java"):
+        if ".git" in f.parts or "build" in f.parts or "target" in f.parts:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = RE_RUTA_ESPECIFICA.search(text)
+        if m:
+            return f"{m.group(1)}.properties"
+    return None
+
+
+def _infer_specific_file_from_root_name(root: Path) -> str | None:
+    """Heuristica de fallback: infiere el nombre del .properties por el nombre
+    de la carpeta del root clonado. Funciona para los 4 patterns Azure.
+    """
+    name = root.name.lower()
+    for pat in _ROOT_PATTERNS:
+        m = pat.match(name)
+        if m:
+            return f"{m.group(1)}.properties"
+    return None
+
+
+def _resolve_specific_properties_file(root: Path) -> tuple[str | None, str]:
+    """Resuelve el nombre del archivo .properties especifico para un root.
+
+    Estrategia (en orden):
+      1. Leer Propiedad.java y extraer RUTA_ESPECIFICA (lo correcto).
+      2. Fallback: inferir del nombre del root (ws-<x>-was, ump-<x>-was, etc).
+
+    Retorna (file_name, source_hint):
+      file_name: "wsclientes0076.properties" o None si no se pudo resolver.
+      source_hint: "service" | "ump:<ump_name>" | "unknown".
+    """
+    # 1. Propiedad.java (lo correcto)
+    from_java = _detect_specific_file_from_propiedad_java(root)
+    if from_java:
+        file_stem = from_java.rsplit(".", 1)[0]
+        if file_stem.startswith("ump"):
+            return from_java, f"ump:{file_stem}"
+        return from_java, "service"
+
+    # 2. Heuristica de fallback por nombre de root
+    from_root = _infer_specific_file_from_root_name(root)
+    if from_root:
+        file_stem = from_root.rsplit(".", 1)[0]
+        if file_stem.startswith("ump"):
+            return from_root, f"ump:{file_stem}"
+        return from_root, "service"
+
+    return None, "unknown"
+
 # Archivos que son catalogo compartido (embebidos en v0.18.0).
 # Comparacion case-insensitive porque los nombres varian
 # (generalServices vs generalservices, CatalogoAplicaciones vs catalogoaplicaciones).
@@ -522,15 +607,12 @@ def detect_properties_references(
         if not root.exists():
             continue
 
-        root_name_lower = root.name.lower()
-        # Heuristica para source_hint: si el root empieza con "ump-" o contiene
-        # un nombre tipo umpXXX, lo marcamos como source del UMP correspondiente
-        source_hint = ""
-        ump_match = re.search(r"(ump[a-z]+\d{4})", root_name_lower)
-        if ump_match:
-            source_hint = f"ump:{ump_match.group(1)}"
-        else:
-            source_hint = "service"
+        # v0.20.2: resolver robusto del .properties especifico del root.
+        # Antes: solo inferiamos por root_name si matcheaba "ump[a-z]+\d{4}",
+        # entonces el WAS principal (ws-<svc>-was) se descartaba silenciosamente.
+        # Ahora: leemos Propiedad.java (fuente de verdad) y si no, inferimos por
+        # nombre de carpeta para los 4 patrones Azure (ws-, ms-, ump-, sqb-msa-).
+        specific_file_name, source_hint = _resolve_specific_properties_file(root)
 
         for pattern in ("**/*.java", "**/*.xml"):
             for f in root.rglob(pattern):
@@ -570,13 +652,8 @@ def detect_properties_references(
                         entry.referenced_from.append(str(f))
                     refs[name_key] = entry
 
-        # Propiedad.get("KEY") -> las keys van al archivo especifico del UMP
-        # (si hay 1 ump por root) o del servicio. Asociamos por nombre de root.
-        # Inferimos el nombre del archivo a partir del ump_match o source_hint.
-        specific_file_name = ""
-        if ump_match:
-            specific_file_name = f"{ump_match.group(1)}.properties"
-
+        # Propiedad.get("KEY") -> keys al archivo especifico ya resuelto arriba
+        # (via Propiedad.java o nombre de root).
         for f in root.rglob("*.java"):
             if ".git" in f.parts or "build" in f.parts or "target" in f.parts:
                 continue
