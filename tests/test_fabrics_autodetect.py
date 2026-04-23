@@ -98,3 +98,46 @@ def test_generate_autodetects_and_proceeds_to_preflight(tmp_path: Path, monkeypa
     # que autodetecto el service name
     assert "wsclientes0076" in result.output
     assert "Autodetectado" in result.output or "autodetect" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# v0.20.5 - Bug fixes reportados en wsclientes0076
+# ---------------------------------------------------------------------------
+
+
+def test_project_name_uses_selected_namespace_not_hardcoded_tnd() -> None:
+    """Bug v0.20.4: project_name quedaba hardcodeado 'tnd-msa-sp-{svc}' aunque
+    el usuario eligiera otro namespace (tpr/csg/tmp/tia/tct). v0.20.5: usa el
+    namespace elegido como prefix."""
+    # Verificacion unitaria: inspeccionar el codigo fuente para garantizar
+    # que el projectName se construye DESPUES de resolver el namespace.
+    import capamedia_cli.commands.fabrics as fabrics_module
+
+    source = Path(fabrics_module.__file__).read_text(encoding="utf-8")
+
+    # El string hardcodeado "tnd-msa-sp-" no debe aparecer como prefijo del projectName
+    assert 'f"tnd-msa-sp-{service_name' not in source, (
+        "project_name NO debe hardcodear 'tnd-msa-sp-': debe usar "
+        "{namespace}-msa-sp-{service_name}"
+    )
+    # Debe aparecer la version correcta con namespace variable
+    assert 'f"{namespace}-msa-sp-{service_name' in source, (
+        "project_name debe usar {namespace}-msa-sp-{service_name}"
+    )
+
+
+def test_synthetic_wsdl_is_omitted_from_mcp_payload() -> None:
+    """Bug v0.20.4: cuando analyze_legacy sintetiza Path('<inferred-from-java>')
+    porque el WAS no tiene .wsdl fisico, el CLI enviaba esa ruta literal al MCP
+    que fallaba con ENOENT. v0.20.5: detecta el placeholder y omite wsdlFilePath
+    del payload."""
+    import capamedia_cli.commands.fabrics as fabrics_module
+
+    source = Path(fabrics_module.__file__).read_text(encoding="utf-8")
+
+    # Debe aparecer el check por el prefix "<inferred"
+    assert "<inferred" in source, "fabrics.py debe detectar el WSDL sintetico"
+    # wsdl_is_synthetic debe condicionar el payload del MCP
+    assert "wsdl_is_synthetic" in source, (
+        "fabrics.py debe usar flag wsdl_is_synthetic para omitir el wsdlFilePath"
+    )

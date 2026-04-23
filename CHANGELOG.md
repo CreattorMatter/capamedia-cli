@@ -4,6 +4,64 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.5] - 2026-04-22
+
+### Fixed - 2 bugs del `fabrics generate` (reportados por Julian en wsclientes0076)
+
+**Bug 1: projectName hardcodeado a `tnd-msa-sp-` ignorando el namespace elegido**
+
+El comando preguntaba interactivamente el namespace (`tnd/tpr/csg/tmp/tia/tct`)
+pero el `project_name` se calculaba antes con prefix `tnd-msa-sp-` hardcoded:
+
+```python
+# v0.20.4 bug:
+project_name = f"tnd-msa-sp-{service_name.lower()}"  # antes de resolver namespace
+...
+if namespace is None:
+    namespace = Prompt.ask(...)   # ya es tarde, project_name ya uso "tnd-"
+```
+
+Julian eligio `tpr` pero el proyecto quedo en `destino/tnd-msa-sp-wsclientes0076/`.
+
+**Fix**: mover la resolucion de namespace ANTES del calculo de project_name:
+
+```python
+# v0.20.5:
+if namespace is None:
+    namespace = Prompt.ask(...)
+project_name = f"{namespace}-msa-sp-{service_name.lower()}"
+```
+
+**Bug 2: WSDL sintetico se pasaba al MCP causando ENOENT**
+
+Para WAS con solo anotaciones JAX-WS (sin `.wsdl` fisico), `analyze_legacy`
+sintetiza `Path("<inferred-from-java>")` como marcador. El CLI tomaba ese
+placeholder, lo convertia en path absoluto y lo enviaba al MCP Fabrics:
+
+```
+"wsdlFilePath": "C:\\Dev\\BancoPichincha\\wsclientes0076\\<inferred-from-java>"
+```
+
+Lo que resultaba en:
+```
+ENOENT: no such file or directory, copyfile '...\\<inferred-from-java>' ->
+  '...\\src\\main\\resources\\legacy\\<inferr...
+```
+
+El scaffold se generaba igual, pero el error confundia y ensuciaba el output.
+
+**Fix**: detectar el prefix `<inferred` y:
+1. Omitir `wsdlFilePath` del payload al MCP (asi no intenta copyfile).
+2. Mostrar warning claro explicando que el agente migrador va a reconstruir
+   el contrato SOAP desde las anotaciones Java durante `/migrate`.
+
+### Tests nuevos (2)
+
+- `projectName` NO hardcodea `tnd-msa-sp-`: verificacion al source
+- `wsdlFilePath` sintetico se omite del payload: check via substring
+
+Total: 462 tests passing.
+
 ## [0.20.4] - 2026-04-22
 
 ### Changed - `fabrics generate` autodetecta service_name desde `.capamedia/config.yaml`

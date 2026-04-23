@@ -743,11 +743,30 @@ def generate(
 
     # tecnologia: mismo mapping que antes
     tecnologia = "was" if analysis.source_kind == "was" else "bus"
-    wsdl_abs = str(analysis.wsdl.path.resolve())
-    project_name = f"tnd-msa-sp-{service_name.lower()}"
+
+    # v0.20.5: detectar WSDL sintetico (WAS sin .wsdl fisico, solo anotaciones
+    # JAX-WS). analyze_legacy sintetiza Path("<inferred-from-java>") como
+    # marcador. El MCP Fabrics no sabe manejar eso y falla con ENOENT.
+    wsdl_is_synthetic = (
+        analysis.wsdl is not None
+        and str(analysis.wsdl.path).startswith("<inferred")
+    )
+    if wsdl_is_synthetic:
+        wsdl_abs = ""  # Se omite del payload al MCP
+        console.print(
+            "\n[yellow]Aviso:[/yellow] el WAS legacy no tiene un `*.wsdl` fisico "
+            "(usa anotaciones JAX-WS @WebService). El MCP Fabrics va a generar "
+            "el scaffold igual, pero NO va a copiar un WSDL a "
+            "[cyan]src/main/resources/legacy/[/cyan]. Durante [cyan]/migrate[/cyan] "
+            "el agente reconstruye el contrato desde las anotaciones Java."
+        )
+    else:
+        wsdl_abs = str(analysis.wsdl.path.resolve())
     project_path = str((ws / "destino").resolve())
 
-    # Step 4: Resolve namespace (enum MCP)
+    # Step 4: Resolve namespace (enum MCP) ANTES de calcular projectName
+    # v0.20.5 bug fix: antes se hardcodeaba "tnd-msa-sp-{svc}" aunque el user
+    # eligiera otro namespace. Ahora el prefix usa el namespace elegido.
     if namespace is None:
         console.print()
         console.print("[bold yellow]Namespace del catalogo[/bold yellow] (obligatorio, no inferible)")
@@ -758,15 +777,21 @@ def generate(
             default="tnd",
         )
 
+    project_name = f"{namespace}-msa-sp-{service_name.lower()}"
+
     # Show summary
     console.print()
     table = Table(title="Parametros deducidos para el MCP", title_style="bold cyan")
     table.add_column("Parametro", style="cyan")
     table.add_column("Valor", style="bold")
     table.add_column("Origen", style="dim")
-    table.add_row("projectName", project_name, "derivado de service_name")
+    table.add_row("projectName", project_name, f"{namespace}-msa-sp-<svc>")
     table.add_row("projectPath", project_path, "ws/destino")
-    table.add_row("wsdlFilePath", wsdl_abs, "legacy WSDL")
+    table.add_row(
+        "wsdlFilePath",
+        wsdl_abs if wsdl_abs else "[dim](omitido - WAS sin WSDL fisico)[/dim]",
+        "legacy WSDL",
+    )
     table.add_row("groupId", group_id, "--group-id")
     table.add_row("namespace", namespace, "interactivo / --namespace")
     table.add_row("tecnologia", tecnologia, f"source_kind={analysis.source_kind}")
@@ -778,7 +803,6 @@ def generate(
     mcp_args = {
         "projectName": project_name,
         "projectPath": project_path,
-        "wsdlFilePath": wsdl_abs,
         "groupId": group_id,
         "namespace": namespace,
         "tecnologia": tecnologia,
@@ -786,6 +810,11 @@ def generate(
         "webFramework": web_framework,
         "invocaBancs": invoca_bancs,
     }
+    # v0.20.5: omitir wsdlFilePath del payload si es sintetico (WAS sin
+    # .wsdl fisico). Si lo enviaramos, el MCP intenta copyfile y explota
+    # con ENOENT.
+    if wsdl_abs:
+        mcp_args["wsdlFilePath"] = wsdl_abs
 
     if dry_run:
         console.print("\n[yellow]--dry-run: no invoco el MCP.[/yellow]")
