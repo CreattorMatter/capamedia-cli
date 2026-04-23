@@ -36,6 +36,7 @@ from capamedia_cli.commands import (
     check,
     check_install,
     clone,
+    discovery,
     doctor,
     fabrics,
     init,
@@ -81,6 +82,7 @@ app.command("check-install")(check_install.check_install)
 app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
+app.command("discovery")(discovery.discovery)
 app.command("check")(check.check_project)
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
