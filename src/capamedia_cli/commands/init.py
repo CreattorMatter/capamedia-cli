@@ -238,6 +238,19 @@ def init_project(
     ] = None,
 ) -> None:
     """Inicializa un proyecto CapaMedia con los slash commands del harness elegido."""
+    # v0.20.1: auto-padding a 4 digitos segun convencion del banco
+    if service_name and service_name != ".":
+        from capamedia_cli.commands.clone import normalize_service_name
+
+        normalized, was_padded = normalize_service_name(service_name)
+        if was_padded:
+            console.print(
+                f"[yellow]Tip:[/yellow] [cyan]{service_name}[/cyan] -> "
+                f"[cyan]{normalized}[/cyan] (auto-padded a 4 digitos; "
+                "convencion Banco Pichincha)"
+            )
+            service_name = normalized
+
     # Resolve target dir
     if here or service_name == ".":
         target_dir = Path.cwd()

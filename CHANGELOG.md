@@ -4,6 +4,57 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.1] - 2026-04-22
+
+### Fixed - `clone`/`init` auto-padean el nombre del servicio a 4 digitos
+
+**Bug reportado por Julian**: corriendo `capamedia clone wsclientes76` (el
+repo real es `ws-wsclientes0076-was` en `tpl-integration-services-was`),
+el CLI fallaba con:
+
+```
+FAIL no se encontro en ningun proyecto Azure conocido
+Tip: verifica que el servicio exista o agrega un nuevo patron a AZURE_FALLBACK_PATTERNS
+```
+
+**Causa**: el user escribio `76` en vez de `0076`. Los patterns estaban
+correctos (`ws-{svc}-was` incluido) pero el CLI probaba con `ws-wsclientes76-was`
+literal que no existe. Convencion del banco: todos los servicios terminan en
+**4 digitos zero-padded** (`wsclientes0076`, `wstecnicos0008`, `orq0027`, etc.).
+
+**Fix**: nueva funcion `normalize_service_name` en `commands/clone.py` que:
+- Auto-padea sufijos numericos de 1-3 digitos a 4 (zero-left-padding).
+- Respeta 4+ digitos (caso raro pero no se rompe).
+- Lowercase + strip whitespace.
+- No toca nombres que no terminan en digitos.
+- Imprime tip claro al usuario: `wsclientes76 -> wsclientes0076 (auto-padded)`.
+
+Integrada en `clone_service()` y `init_project()` (para consistencia).
+
+### Ejemplos
+
+| Input | Normalizado | was_padded |
+|---|---|---|
+| `wsclientes76` | `wsclientes0076` | True |
+| `wstecnicos8` | `wstecnicos0008` | True |
+| `orq27` | `orq0027` | True |
+| `WsClientes76` | `wsclientes0076` | True |
+| `wsclientes0076` | `wsclientes0076` | False |
+| `wstecnicos12345` | `wstecnicos12345` | False (>4 se respeta) |
+| `foo` | `foo` | False (no digitos) |
+
+### Tests nuevos (13)
+
+`test_normalize_service_name.py`:
+- Padding 1/2/3 digitos
+- No padding para 4+
+- Case-insensitive
+- Strip whitespace
+- Nombres sin digitos
+- UMPs (umptecnicos23), ORQs, variantes ms*
+
+Total: 436 tests passing.
+
 ## [0.20.0] - 2026-04-22
 
 ### Changed - `capamedia review` ahora autodetecta paths y deja `destino/` limpio

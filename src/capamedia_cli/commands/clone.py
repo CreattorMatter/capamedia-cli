@@ -60,6 +60,40 @@ def _azure_url(project_key: str, repo_name: str) -> str:
     return f"https://dev.azure.com/{AZURE_ORG}/{project}/_git/{repo_name}"
 
 
+# Regex para normalizar nombres de servicios con padding de 4 digitos.
+# Convencion Banco Pichincha: todos los servicios terminan en 4 digitos
+# (wsclientes0076, wstecnicos0008, orq0027, umpclientes0023, etc.).
+# Si el user tipea menos digitos (ej wsclientes76), se auto-padea a 4.
+import re as _clone_re
+
+_SERVICE_NAME_PADDING_RE = _clone_re.compile(r"^([a-z][a-z]*?)(\d{1,3})$", _clone_re.IGNORECASE)
+
+
+def normalize_service_name(name: str) -> tuple[str, bool]:
+    """Auto-padea el sufijo numerico a 4 digitos.
+
+    Ejemplos:
+      wsclientes76     -> wsclientes0076  (padded)
+      wstecnicos8      -> wstecnicos0008  (padded)
+      orq27            -> orq0027         (padded)
+      wsclientes0076   -> wsclientes0076  (no padded, ya tiene 4)
+      wstecnicos12345  -> wstecnicos12345 (no padded, >4 se respeta)
+      foo              -> foo             (no termina en digitos)
+
+    Returns:
+      (normalized, was_padded)
+    """
+    clean = name.strip().lower()
+    m = _SERVICE_NAME_PADDING_RE.match(clean)
+    if not m:
+        return clean, False
+    prefix, digits = m.group(1), m.group(2)
+    if len(digits) >= 4:
+        return clean, False
+    padded = f"{prefix}{digits.zfill(4)}"
+    return padded, True
+
+
 # Combinaciones (proyecto, patron) probadas en orden cuando un servicio no esta local.
 # Patron usa {svc} como placeholder para el nombre lowercase del servicio.
 AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
@@ -425,6 +459,16 @@ def clone_service(
     """Clona el legacy + UMPs + TX repos y analiza complejidad del servicio."""
     ws = workspace or Path.cwd()
     ws.mkdir(parents=True, exist_ok=True)
+
+    # v0.20.1: auto-padding a 4 digitos segun convencion del banco
+    original_name = service_name
+    service_name, was_padded = normalize_service_name(service_name)
+    if was_padded:
+        console.print(
+            f"[yellow]Tip:[/yellow] [cyan]{original_name}[/cyan] -> "
+            f"[cyan]{service_name}[/cyan] (auto-padded a 4 digitos; "
+            "convencion Banco Pichincha)"
+        )
 
     console.print(
         Panel.fit(
