@@ -4,6 +4,80 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.11] - 2026-04-23
+
+### Added - `capamedia adopt` — adoptar workspaces migrados fuera del CLI
+
+Feedback Julian: un usuario tiene su migracion en disco con layout plano
+(sin `destino/` + `legacy/`), por ejemplo:
+
+```
+D:\Smart\Capa Media\Pichincha\0026\
+  csg-msa-sp-wsclientes0026\    <- proyecto migrado
+  ws-wsclientes0026-was\         <- legacy
+  MIGRATION_REPORT.md
+  ANALISIS_*.md
+  ...
+```
+
+Como lo adoptamos al layout del CLI?
+
+**Solucion: `capamedia adopt`**. Nuevo comando que:
+
+1. Escanea el CWD detectando subdirectorios por patterns:
+   - **Legacy**: `ws-*-was`, `ms-*-was`, `ump-*-was`, `sqb-msa-*`
+   - **Destino**: `csg-msa-sp-*`, `tnd-msa-sp-*`, `tpr-msa-sp-*`, `tmp-msa-sp-*`,
+     `tia-msa-sp-*`, `tct-msa-sp-*`
+2. Muestra el plan (que se movera donde) en una tabla.
+3. Pide confirmacion (skipeable con `--yes`).
+4. Mueve los subdirs a `legacy/` + `destino/` respectivamente.
+5. Opcionalmente corre `init` con `--init` (default harness: claude).
+
+### Uso tipico
+
+```bash
+cd D:\Smart\Capa Media\Pichincha\0026
+capamedia adopt wsclientes0026 --init
+# -> mueve csg-msa-sp-* a destino/
+# -> mueve ws-*-was a legacy/
+# -> corre capamedia init wsclientes0026 --ai claude
+
+capamedia review
+# autodetect funciona, Block 19 auto-genera reports del legacy local
+```
+
+### Flags
+
+- `<service_name>` opcional — si no se pasa, se infiere del CWD o de los
+  subdirs detectados.
+- `--init` — corre `scaffold_project` despues de los moves.
+- `--init-ai <harness>` — default `claude`, acepta CSV.
+- `--yes / -y` — no pide confirmacion.
+- `--dry-run` — muestra el plan sin ejecutar.
+- `--workspace / -w` — path alternativo al CWD.
+
+### Idempotencia
+
+- Si `legacy/` y `destino/` ya existen con los subdirs adentro, no intenta
+  mover de nuevo (ni da error).
+- Archivos sueltos en la raiz (ej. `MIGRATION_REPORT.md`) NO se tocan.
+- Auto-padding del `service_name` a 4 digitos (v0.20.1).
+
+### Tests nuevos (11)
+
+`test_adopt.py`:
+- Comando wireado en CLI + `--help`
+- Clasificacion por pattern (legacy, destino, unknown, hidden)
+- `--dry-run` no mueve nada
+- `--yes` mueve sin prompt
+- Archivos sueltos se preservan
+- Sin patterns -> exit 0 sin error
+- `--init` dispara scaffold + deja `.claude/` + `.capamedia/`
+- Inferencia de service_name de subdirs
+- Idempotencia cuando ya estan reubicados
+
+Total: 589 tests passing.
+
 ## [0.23.10] - 2026-04-23
 
 ### Added - Formato helm `container.secret:` en `bank-secrets.md`
