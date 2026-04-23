@@ -601,9 +601,37 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
         return (False, str(e))
 
 
+def _autodetect_service_name_from_config(ws: Path) -> str | None:
+    """Lee <ws>/.capamedia/config.yaml y devuelve service_name si existe.
+
+    Tolera YAML malformado, archivo ausente o campos faltantes sin crashear.
+    """
+    config_path = ws / ".capamedia" / "config.yaml"
+    if not config_path.is_file():
+        return None
+    try:
+        import yaml as _yaml
+
+        data = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, _yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = data.get("service_name")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    return None
+
+
 @app.command("generate")
 def generate(
-    service_name: str = typer.Argument(..., help="Nombre del servicio (ej: wsclientes0008)"),
+    service_name: str | None = typer.Argument(
+        None,
+        help=(
+            "Nombre del servicio (ej: wsclientes0076). Si se omite, "
+            "autodetecta desde ./.capamedia/config.yaml del workspace."
+        ),
+    ),
     workspace: Path | None = typer.Option(
         None,
         "--workspace",
@@ -637,6 +665,36 @@ def generate(
     from capamedia_cli.core.mcp_launcher import locate as locate_mcp
 
     ws = (workspace or Path.cwd()).resolve()
+
+    # v0.20.4: autodetectar service_name desde .capamedia/config.yaml si se omite
+    if service_name is None:
+        service_name = _autodetect_service_name_from_config(ws)
+        if service_name is None:
+            console.print(
+                "[red]Error:[/red] falta el argumento SERVICE_NAME y no se pudo "
+                "autodetectar.\n"
+                "[yellow]Opciones:[/yellow]\n"
+                f"  1) Correr desde el workspace root (donde vive "
+                f"[cyan].capamedia/config.yaml[/cyan]).\n"
+                "  2) Pasar el nombre explicito: "
+                "[cyan]capamedia fabrics generate <service_name>[/cyan]"
+            )
+            raise typer.Exit(2)
+        console.print(
+            f"[dim]Autodetectado[/dim] servicio=[cyan]{service_name}[/cyan] "
+            f"desde [cyan].capamedia/config.yaml[/cyan]"
+        )
+
+    # Auto-padding a 4 digitos (convencion del banco, ver v0.20.1)
+    from capamedia_cli.commands.clone import normalize_service_name
+
+    normalized, was_padded = normalize_service_name(service_name)
+    if was_padded:
+        console.print(
+            f"[yellow]Tip:[/yellow] [cyan]{service_name}[/cyan] -> "
+            f"[cyan]{normalized}[/cyan] (auto-padded a 4 digitos)"
+        )
+        service_name = normalized
 
     console.print(
         Panel.fit(

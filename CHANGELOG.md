@@ -4,6 +4,37 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.4] - 2026-04-22
+
+### Changed - `fabrics generate` autodetecta service_name desde `.capamedia/config.yaml`
+
+**Feedback Julian**: corrio `capamedia fabrics generate` sin argumentos
+esperando la misma UX que `capamedia review` (v0.20.0), y el comando fallo
+con "Missing argument 'SERVICE_NAME'". Tambien probo `--here` que no existe.
+
+**Fix**: `service_name` pasa a ser argumento opcional. Si se omite, lee
+`.capamedia/config.yaml` del workspace y toma el valor de ahi.
+
+```bash
+# Antes (v0.20.3):
+capamedia fabrics generate wsclientes0076
+
+# Ahora (v0.20.4), parado en el workspace:
+capamedia fabrics generate
+```
+
+Ademas se aplica el mismo **auto-padding a 4 digitos** (v0.20.1) por
+coherencia con `clone` y `init`.
+
+### Tests nuevos (7)
+
+- `_autodetect_service_name_from_config`: lee config, devuelve None cuando
+  falta archivo / campo / YAML malformado, strip whitespace (5 tests)
+- Integracion CLI: sin config falla con exit 2 y mensaje claro; con config
+  autodetecta y continua hasta preflight (2 tests)
+
+Total: 460 tests passing.
+
 ## [0.20.3] - 2026-04-22
 
 ### Fixed - `analyze_legacy` resuelve UMPs WAS (antes solo buscaba pattern IIB)
