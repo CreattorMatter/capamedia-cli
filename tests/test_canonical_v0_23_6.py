@@ -168,6 +168,40 @@ def test_bank_official_rules_mandatory_spring_header_v0_23_9() -> None:
     assert "MANDATORIO" in content or "MUST" in content
 
 
+def test_bank_secrets_has_helm_secret_block_format_v0_23_10() -> None:
+    """v0.23.10: bank-secrets.md incluye el formato helm container.secret.
+
+    Ejemplo que pidio Julian:
+      secret:
+        - name: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+          location: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+    """
+    path = CANONICAL_ROOT / "context" / "bank-secrets.md"
+    content = path.read_text(encoding="utf-8")
+    # Bloque secret: del helm debe estar documentado
+    assert "container:" in content
+    assert "secret:" in content
+    # El patron name/location matchea el KV
+    assert "- name:" in content
+    assert "location:" in content
+    # Regla name == location
+    assert "name == location" in content or "name: \"CCC-" in content
+    # Ejemplo concreto con MOTOR_HOMOLOGACION (el que mostro Julian)
+    assert "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER" in content
+
+
+def test_bank_secrets_has_end_to_end_example_v0_23_10() -> None:
+    """v0.23.10: ejemplo completo legacy -> application.yml -> helm values."""
+    path = CANONICAL_ROOT / "context" / "bank-secrets.md"
+    content = path.read_text(encoding="utf-8")
+    # Las 3 etapas del flujo deben estar documentadas
+    assert "Paso 1" in content or "jndi.tecnicos.cataloga" in content
+    assert "application.yml" in content
+    assert "helm/values" in content
+    # Regla critica: los 3 helms mismos nombres, distintos KV
+    assert "dev" in content.lower() and "prod" in content.lower()
+
+
 def test_bank_official_rules_has_configurables_csv_reference() -> None:
     """v0.23.7: Regla 11 - referencia al CSV ConfigurablesBusOmniTest."""
     path = CANONICAL_ROOT / "context" / "bank-official-rules.md"

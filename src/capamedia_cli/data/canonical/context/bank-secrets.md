@@ -96,6 +96,84 @@ spring:
   variables CCC del ConfigMap (los ConfigMap usan `${CCC_...}` con
   underscore).
 
+## Formato helm para montar los secretos del KV (MANDATORIO)
+
+Ademas de referenciar los secretos en `application.yml` con `${CCC-...}`,
+los secretos deben declararse en el bloque `secret:` del helm values para
+que Azure Key Vault los monte como variables de entorno en el pod.
+
+**Formato canonico** (`name == location`, ambos son el nombre literal del
+secreto en el KV):
+
+```yaml
+# helm/values-dev.yml  (y test.yml, prod.yml — mismo nombre, distinto KV por env)
+container:
+  secret:
+    - name: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+      location: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+    - name: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-PASSWORD"
+      location: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-PASSWORD"
+```
+
+### Reglas del bloque `secret:`
+
+- **`name`**: el nombre como se expone al contenedor (debe matchear exacto
+  con la referencia `${CCC-XXX}` en `application.yml`).
+- **`location`**: el nombre del secreto en Azure Key Vault. **Siempre igual
+  a `name`** (convencion del banco — el secreto del KV tiene el mismo
+  nombre que la env var expuesta).
+- **Siempre `name == location`** — si difieren, es error de copia.
+- **Orden del bloque**: USER primero, PASSWORD despues (por convencion).
+- **Nombre literal del catalogo BPTPSRE**: NO inventar variantes
+  (`sqlserver_motor_homologacion_user` en lowercase seria INCORRECTO).
+
+### Ejemplo completo end-to-end (WAS con BD Oracle Omnicanal Cataloga)
+
+**Paso 1** — legacy usa `jndi.tecnicos.cataloga` (detectado por el CLI):
+
+```java
+// legacy/ws-xxx-was/.../Propiedad.java
+private static final String RUTA_ESPECIFICA = "jndi.tecnicos.cataloga";
+```
+
+**Paso 2** — mapeo al catalogo (tabla arriba):
+
+```
+jndi.tecnicos.cataloga  ->  CCC-ORACLE-OMNI-CATALOGA-USER  + CCC-ORACLE-OMNI-CATALOGA-PASSWORD
+```
+
+**Paso 3** — `application.yml` del servicio migrado:
+
+```yaml
+spring:
+  datasource:
+    url: ${CCC_ORACLE_OMNI_CATALOGA_URL}        # URL del config (no es secreto)
+    username: ${CCC-ORACLE-OMNI-CATALOGA-USER}   # secreto KV (literal del catalogo)
+    password: ${CCC-ORACLE-OMNI-CATALOGA-PASSWORD}
+```
+
+**Paso 4** — `helm/values-dev.yml` (y `test.yml`, `prod.yml`):
+
+```yaml
+container:
+  secret:
+    - name: "CCC-ORACLE-OMNI-CATALOGA-USER"
+      location: "CCC-ORACLE-OMNI-CATALOGA-USER"
+    - name: "CCC-ORACLE-OMNI-CATALOGA-PASSWORD"
+      location: "CCC-ORACLE-OMNI-CATALOGA-PASSWORD"
+```
+
+Los 3 helms (dev/test/prod) tienen **los mismos nombres**, pero cada env
+apunta a un KV distinto (el pod lo resuelve via annotations del namespace).
+
+### NEVER
+
+- `name != location` en el bloque `secret:`.
+- Traducir a snake_case o camelCase (`sqlserver_motor_homologacion_user`).
+- Declarar secretos huerfanos (en helm sin uso en `application.yml`).
+- Omitir secretos que `application.yml` referencia con `${CCC-XXX}` —
+  rompe al levantar el pod.
+
 ## Reporte del CLI
 
 Cuando `capamedia clone <svc>` detecta un WAS con BD, genera

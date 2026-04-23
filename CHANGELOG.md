@@ -4,6 +4,49 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.10] - 2026-04-23
+
+### Added - Formato helm `container.secret:` en `bank-secrets.md`
+
+Feedback Julian: el canonical listaba los nombres de secretos en tabla +
+ejemplo de uso en `application.yml`, pero **faltaba el formato helm** que
+materializa los secretos del Azure Key Vault al pod.
+
+Nueva seccion "Formato helm para montar los secretos del KV (MANDATORIO)"
+en `context/bank-secrets.md`:
+
+```yaml
+# helm/values-dev.yml (y test.yml, prod.yml)
+container:
+  secret:
+    - name: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+      location: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-USER"
+    - name: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-PASSWORD"
+      location: "CCC-SQLSERVER-MOTOR-HOMOLOGACION-PASSWORD"
+```
+
+Reglas documentadas:
+- `name` = nombre que se expone al contenedor (debe matchear `${CCC-XXX}`
+  del `application.yml`).
+- `location` = nombre en el KV (siempre **igual a `name`** — convencion del banco).
+- Los 3 helms (dev/test/prod) tienen **los mismos nombres**, distinto KV por
+  env via annotations del namespace.
+- Orden: USER primero, PASSWORD despues.
+
+### Ejemplo end-to-end
+
+Nueva seccion con el flujo completo desde deteccion del JNDI en legacy
+hasta el bloque `secret:` en los 3 helms, usando `jndi.tecnicos.cataloga`
+como ejemplo concreto.
+
+### Tests nuevos (2)
+
+- `bank-secrets.md` tiene el bloque helm `container.secret` con formato
+  name/location
+- `bank-secrets.md` tiene el ejemplo end-to-end (legacy → yml → helm)
+
+Total: 578 tests passing.
+
 ## [0.23.9] - 2026-04-23
 
 ### Changed - Alineacion con commit `104addb` del PromptCapaMedia: NEVER inline defaults, spring.header mandatorios
