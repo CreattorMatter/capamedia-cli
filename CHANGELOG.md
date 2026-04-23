@@ -4,6 +4,59 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.0] - 2026-04-22
+
+### Added - 5 features consolidadas del feedback de Julian
+
+1. **Clone + init juntos** — nuevo flag `--init` en `capamedia clone`:
+   ```bash
+   capamedia clone wsclientes0076 --init
+   # equivale a: capamedia clone + capamedia init --ai claude
+   ```
+   Default harness: **Claude Code** (consistente con el flujo principal).
+   `--init-ai` permite cambiar (acepta `claude/codex/copilot/cursor/windsurf/opencode/all` o CSV).
+
+2. **Catalogo de secretos Azure Key Vault embebido** — para WAS con BD:
+   - Nuevo canonical `context/bank-secrets.md` con las 6 entradas del PDF
+     oficial BPTPSRE-Secretos (DTST, TPOMN×3, CREDITO_TARJETAS, MOTOR_HOMOLOGACION).
+   - Nuevo modulo `core/secrets_detector.py` que escanea legacy + UMPs
+     buscando JNDI en 5 formatos distintos (persistence.xml, ibm-web-bnd.xml,
+     @Resource, InitialContext.lookup, *.properties) y los mapea al catalogo.
+   - `capamedia clone` genera `.capamedia/secrets-report.yaml` con los
+     secretos requeridos (solo si `source_kind=was AND has_database=true`).
+   - JNDI detectados pero fuera del catalogo se reportan en
+     `jndi_references_unknown` con hint de consultar con SRE.
+
+3. **Comando `capamedia checklist`** — doble check en una linea:
+   - Alias de `check --auto-fix --bank-fix` que aplica TODO lo autofixeable
+     de nuestras reglas + las 4 deterministas del banco (4/7/8/9) en una
+     sola invocacion.
+   - Lo que queda FAIL despues del checklist es handoff al owner
+     (sonarcloud project-key, URL Confluence, etc.) — no bugs del codigo.
+
+4. **Block 20 — ORQ invoca servicio MIGRADO, no legacy**:
+   - Nueva regla 10.5 en `bank-official-rules.md` canonical.
+   - `run_block_20` detecta en proyectos `source_type=orq` referencias a
+     `sqb-msa-<target>` o `ws-<target>-was` en YAML/Java/properties → FAIL
+     HIGH con suggested_fix claro (usar `<namespace>-msa-sp-<target>` del
+     servicio migrado).
+   - Excluye auto-referencias al propio ORQ (`sqb-msa-orq*` es OK cuando
+     aparece en su propio artifactId).
+
+5. **Review valida todo** (confirmacion) — ya lo hacia desde v0.20.0 via
+   `_autodetect_review_paths`. Funciona igual para WAS/BUS/ORQ.
+
+### Tests nuevos (24)
+
+- `test_secrets_detector.py` (13): catalogo, scan XML/Java/properties,
+  dedup, audit WAS-con-BD, mapping JNDI→secret, desconocidos, UMPs
+- `test_block_20_orq_migrated.py` (6): skip si no-ORQ, PASS limpio, FAIL
+  con sqb-msa-*, FAIL con ws-*-was, auto-referencia OK, multiple offenders
+- `test_clone_init_flag.py` (4): firma de clone_service, default claude,
+  `checklist` wireado en CLI, help menciona `--init`
+
+Total: 538 tests passing.
+
 ## [0.22.0] - 2026-04-22
 
 ### Changed - Sincronizacion con repo canonico `PromptCapaMedia` + canonical sin servicios-gold

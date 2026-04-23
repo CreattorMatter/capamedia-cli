@@ -1403,6 +1403,83 @@ def run_block_19(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+def run_block_20(ctx: CheckContext) -> list[CheckResult]:
+    """Block 20 (v0.23.0): ORQ invoca al servicio MIGRADO, no al legacy.
+
+    Solo aplica a servicios con `source_type=orq`. Busca en el codigo Java
+    y YAML del migrado referencias a `sqb-msa-<svc>` o `ws-<svc>-was` como
+    endpoint/URL/base-path, que indicarian que el ORQ esta apuntando al
+    servicio legacy del target en vez del migrado.
+    """
+    results: list[CheckResult] = []
+    if ctx.source_type != "orq":
+        return results  # solo aplica a ORQ
+
+    src_dir = ctx.migrated_path / "src" / "main"
+    if not src_dir.is_dir():
+        return results
+
+    # Patrones de referencias INCORRECTAS al legacy del target
+    bad_patterns = [
+        (re.compile(r'["\'`](?:/|https?://[^"\'`]*/)?sqb-msa-([a-z]+\d{4})[^"\'`]*["\'`]'),
+         "sqb-msa-<svc>"),
+        (re.compile(r'["\'`](?:/|https?://[^"\'`]*/)?ws-([a-z]+\d{4})-was[^"\'`]*["\'`]'),
+         "ws-<svc>-was"),
+    ]
+
+    offenders: list[tuple[Path, str, str]] = []
+    for f in src_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        if f.suffix not in (".java", ".yml", ".yaml", ".properties", ".xml"):
+            continue
+        if "build" in f.parts or "target" in f.parts:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for regex, label in bad_patterns:
+            for m in regex.finditer(text):
+                svc_name = m.group(1)
+                # Excluir si el svc_name es el propio ORQ (ej. "orqclientes0027"
+                # referenciado en su propio artifactId).
+                if svc_name.startswith("orq"):
+                    continue
+                offenders.append((f, label, svc_name))
+
+    if not offenders:
+        results.append(CheckResult(
+            "20.1", "Block 20",
+            "ORQ no referencia legacy del servicio target",
+            "pass",
+            detail="no se encontraron referencias a sqb-msa-<svc>/ws-<svc>-was en src/main/",
+        ))
+        return results
+
+    # Un FAIL HIGH por cada ocurrencia
+    for f, pattern_label, svc_name in offenders:
+        try:
+            rel = f.relative_to(ctx.migrated_path)
+        except ValueError:
+            rel = f
+        results.append(CheckResult(
+            f"20.1.{svc_name}", "Block 20",
+            f"ORQ referencia legacy del target `{svc_name}`",
+            "fail",
+            severity="high",
+            detail=f"{rel}: contiene referencia a `{pattern_label}` del servicio `{svc_name}`",
+            suggested_fix=(
+                f"El ORQ debe invocar al servicio MIGRADO `<namespace>-msa-sp-{svc_name}` "
+                "en tpl-middleware, NO al legacy. Cambiar el endpoint/URL a la version "
+                "deployada del servicio migrado (configurable via ${CCC_<SVC>_URL} o similar)."
+            ),
+        ))
+
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
@@ -1417,6 +1494,7 @@ ALL_BLOCKS = [
     ("Block 17", run_block_17),
     ("Block 18", run_block_18),
     ("Block 19", run_block_19),
+    ("Block 20", run_block_20),  # v0.23.0: ORQ -> migrado, no legacy
 ]
 
 

@@ -318,3 +318,44 @@ def check_project(
 
     if total_high > 0 or (fail_on_medium and total_medium > 0):
         raise typer.Exit(1)
+
+
+def checklist_project(
+    migrated: Annotated[
+        Path | None,
+        typer.Argument(help="Path al proyecto migrado (default: CWD)"),
+    ] = None,
+    legacy: Annotated[
+        Path | None,
+        typer.Option("--legacy", "-l", help="Path al legacy para cross-check del BLOQUE 0"),
+    ] = None,
+    bank_description: Annotated[
+        str | None,
+        typer.Option("--bank-description", help="Descripcion para catalog-info.yaml (regla 9)"),
+    ] = None,
+    bank_owner: Annotated[
+        str | None,
+        typer.Option("--bank-owner", help="Email @pichincha.com para spec.owner (regla 9)"),
+    ] = None,
+    fail_on_medium: Annotated[
+        bool,
+        typer.Option("--fail-on-medium", help="Exit 1 tambien si hay findings MEDIUM residuales"),
+    ] = False,
+) -> None:
+    """Checklist (doble check): `check` + autofixes completos en una linea (v0.23.0).
+
+    Equivale a `capamedia check --auto-fix --bank-fix`. Aplica TODO lo
+    autofixeable de nuestras reglas + las 4 reglas deterministas del banco
+    (4, 7, 8, 9). Lo que queda como FAIL es lo que NO se puede resolver
+    automaticamente (ej. sonarcloud project-key, URLs Confluence, etc) —
+    eso queda marcado como blocker de handoff al owner, no bug del codigo.
+    """
+    check_project(
+        migrated=migrated,
+        legacy=legacy,
+        fail_on_medium=fail_on_medium,
+        auto_fix=True,
+        bank_fix=True,
+        bank_description=bank_description,
+        bank_owner=bank_owner,
+    )

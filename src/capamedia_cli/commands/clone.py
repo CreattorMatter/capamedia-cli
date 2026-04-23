@@ -455,6 +455,24 @@ def clone_service(
             "variables CE_*/CCC_*) y genera DOSSIER_<svc>.md para inyectar al FABRICS_PROMPT.",
         ),
     ] = False,
+    init: Annotated[
+        bool,
+        typer.Option(
+            "--init",
+            help="v0.23.0: al terminar el clone, ejecutar capamedia init automaticamente. "
+            "Por defecto usa Claude Code como harness. Equivale a "
+            "`capamedia clone <svc>` + `capamedia init <svc> --ai claude` en una sola linea.",
+        ),
+    ] = False,
+    init_ai: Annotated[
+        str,
+        typer.Option(
+            "--init-ai",
+            help="Harness AI para el init automatico. Default: `claude` (Claude Code). "
+            "Otras opciones: `codex`, `copilot`, `cursor`, `windsurf`, `opencode`, `all`. "
+            "CSV permitido (ej. `claude,codex`). Solo se usa si --init esta activado.",
+        ),
+    ] = "claude",
 ) -> None:
     """Clona el legacy + UMPs + TX repos y analiza complejidad del servicio."""
     ws = workspace or Path.cwd()
@@ -592,6 +610,10 @@ def clone_service(
     _write_properties_report(analysis, ws)
     _show_properties_table(analysis)
 
+    # --- Step 9: Secrets audit (v0.23.0) — solo WAS con BD ---
+    _write_secrets_report(analysis, ws, legacy_dest)
+    _show_secrets_table(analysis, ws, legacy_dest)
+
     # --- Final summary table ---
     console.print()
     table = Table(title=f"Resumen: {service_name}", title_style="bold green")
@@ -624,9 +646,38 @@ def clone_service(
             f"  Detalle: [cyan].capamedia/properties-report.yaml[/cyan]"
         )
 
+    # --- Step 10: Init automatico si --init fue pasado (v0.23.0) ---
+    if init:
+        console.print("\n[bold]9. Init automatico (--init)[/bold]")
+        try:
+            from capamedia_cli.commands.init import scaffold_project
+            from capamedia_cli.harnesses import resolve_harnesses
+
+            harnesses = resolve_harnesses(init_ai)
+            total, warnings = scaffold_project(
+                target_dir=ws,
+                service_name=service_name,
+                harnesses=harnesses,
+            )
+            console.print(
+                f"  [green]OK[/green] init completado: {total} archivos "
+                f"({', '.join(harnesses)})"
+            )
+            for w in warnings[:5]:
+                console.print(f"  [yellow]warn[/yellow] {w}")
+        except Exception as exc:
+            console.print(
+                f"  [red]FAIL[/red] init automatico fallo: {exc}\n"
+                "  Ejecutalo manualmente: "
+                f"[cyan]capamedia init {service_name} --ai {init_ai}[/cyan]"
+            )
+
     console.print("\n[bold]Siguiente paso:[/bold]")
-    console.print("  Abri el workspace en tu IDE (Claude Code, Cursor, Windsurf)")
-    console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabrics generate[/cyan] en shell")
+    if init:
+        console.print("  [cyan]capamedia fabrics generate[/cyan]  (desde este mismo workspace)")
+    else:
+        console.print("  Abri el workspace en tu IDE (Claude Code, Cursor, Windsurf)")
+        console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabrics generate[/cyan] en shell")
 
 
 # ---------------------------------------------------------------------------
@@ -728,3 +779,104 @@ def _action_for_status(status: str) -> str:
     if status == "SHARED_CATALOG":
         return "No action - valores literales embebidos en bank-shared-properties.md"
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Secrets audit (v0.23.0) - WAS con BD
+# ---------------------------------------------------------------------------
+
+
+def _show_secrets_table(analysis, ws: Path, legacy_dest: Path) -> None:
+    """Muestra tabla con secretos KV requeridos (si el servicio los necesita)."""
+    from capamedia_cli.core.secrets_detector import audit_secrets
+
+    umps_roots = []
+    umps_base = ws / "umps"
+    if umps_base.is_dir():
+        for u in analysis.umps:
+            if u.repo_path and u.repo_path.exists():
+                umps_roots.append(u.repo_path)
+
+    audit = audit_secrets(
+        legacy_dest,
+        umps_roots=umps_roots,
+        service_kind=analysis.source_kind,
+        has_database=analysis.has_database,
+    )
+
+    if not audit.applies:
+        return  # BUS / ORQ / WAS-sin-BD no generan tabla
+
+    console.print("\n[bold]8. Secretos Azure Key Vault (WAS con BD)[/bold]")
+    table = Table(title="Secretos requeridos (BPTPSRE-Secretos)", title_style="bold cyan")
+    table.add_column("JNDI legacy", style="cyan", no_wrap=True)
+    table.add_column("BD", style="dim")
+    table.add_column("Secreto USER")
+    table.add_column("Secreto PASSWORD")
+
+    for sr in audit.secrets_required:
+        table.add_row(
+            sr.jndi, sr.db_label, sr.user_secret, sr.password_secret,
+        )
+    console.print(table)
+
+    if audit.jndi_references_unknown:
+        unique = sorted({h.jndi for h in audit.jndi_references_unknown})
+        console.print(
+            f"\n[yellow]Aviso:[/yellow] {len(unique)} JNDI detectado(s) pero "
+            "NO estan en el catalogo oficial: "
+            f"[dim]{', '.join(unique)}[/dim]\n"
+            "  Consultar con SRE y/o agregar al catalogo en "
+            "[cyan]bank-secrets.md[/cyan] si es un JNDI nuevo."
+        )
+
+
+def _write_secrets_report(analysis, ws: Path, legacy_dest: Path) -> Path | None:
+    """Persiste el reporte de secretos KV en .capamedia/secrets-report.yaml."""
+    from capamedia_cli.core.secrets_detector import audit_secrets
+
+    umps_roots = []
+    umps_base = ws / "umps"
+    if umps_base.is_dir():
+        for u in analysis.umps:
+            if u.repo_path and u.repo_path.exists():
+                umps_roots.append(u.repo_path)
+
+    audit = audit_secrets(
+        legacy_dest,
+        umps_roots=umps_roots,
+        service_kind=analysis.source_kind,
+        has_database=analysis.has_database,
+    )
+
+    if not audit.applies:
+        return None  # no genera archivo si no aplica
+
+    capamedia_dir = ws / ".capamedia"
+    capamedia_dir.mkdir(exist_ok=True)
+    out = capamedia_dir / "secrets-report.yaml"
+
+    data = {
+        "generated_by": "capamedia clone",
+        "service_kind": audit.service_kind,
+        "has_database": audit.has_database,
+        "secrets_required": [
+            {
+                "base_de_datos": sr.db_label,
+                "jndi": sr.jndi,
+                "user_secret": sr.user_secret,
+                "password_secret": sr.password_secret,
+                "detected_from": sr.detected_from[:10],
+            }
+            for sr in audit.secrets_required
+        ],
+        "jndi_references_unknown": [
+            {"jndi": h.jndi, "source_file": h.source_file, "source_kind": h.source_kind}
+            for h in audit.jndi_references_unknown[:20]
+        ],
+    }
+
+    with out.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True, width=100)
+
+    return out

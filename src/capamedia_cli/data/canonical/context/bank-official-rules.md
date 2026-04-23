@@ -404,6 +404,53 @@ spec:
 
 ---
 
+## Regla 10.5 - ORQ llama al servicio MIGRADO, no al legacy
+
+**MUST**: un orquestador (ORQ) invoca al servicio target en su version
+**migrada** (proyecto Java Spring Boot hexagonal en `tpl-middleware`), NO
+al servicio legacy (`sqb-msa-<svc>` o `ws-<svc>-was`).
+
+**NEVER**: buscar el proyecto target como "legacy" en el workspace del ORQ.
+El unico legacy del workspace ORQ es el **del propio orquestador**.
+
+### Como se identifica esto
+
+- En el workspace del ORQ, `legacy/` contiene el codigo del orquestador
+  legacy (ej. `sqb-msa-orqclientes0027`).
+- Los servicios invocados (ej. `wsclientes0023`, `wsclientes0076`) se
+  resuelven desde el catalogo de `tpl-middleware` en su version migrada:
+  `<namespace>-msa-sp-<svc>`.
+- Si el ORQ migrado tiene un `WebClient` apuntando a `sqb-msa-wsclientes*`
+  o `ws-wsclientes*-was`, es **mal-clasificado** — debe apuntar al
+  servicio migrado.
+
+### Ejemplo del contrato correcto
+
+```yaml
+# application.yml del ORQ migrado
+services:
+  wsclientes0076:
+    url: ${CCC_WSCLIENTES0076_URL}  # apunta al <ns>-msa-sp-wsclientes0076 desplegado
+```
+
+```java
+// Adapter del ORQ que invoca al target
+@Component
+public class Wsclientes0076OutputAdapter implements ConsultarClienteOutputPort {
+    private final WebClient webClient;  // configurado con la URL del servicio MIGRADO
+    ...
+}
+```
+
+### Blocker del check
+
+- Si `capamedia check` detecta en un proyecto `source_kind=orq` una
+  referencia a `sqb-msa-<target>` o `ws-<target>-was` como path/URL en
+  configuracion, **FAIL HIGH** con hint de cambiar al endpoint del
+  servicio migrado.
+
+---
+
 ## Regla 10 - Properties compartidas del banco
 
 **MUST**: `generalservices.properties` y `catalogoaplicaciones.properties` son
