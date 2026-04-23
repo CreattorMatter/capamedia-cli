@@ -143,6 +143,56 @@ def _resolve_workspace_root(project_path: Path) -> Path:
     return project_path
 
 
+def _auto_generate_reports_from_local_legacy(
+    workspace_root: Path,
+    legacy_path: Path | None,
+    service_name: str,
+) -> tuple[bool, str]:
+    """Genera `.capamedia/properties-report.yaml` y `.capamedia/secrets-report.yaml`
+    desde el legacy local (sin necesidad de `capamedia clone` ni Azure PAT).
+
+    v0.23.8: util para escenarios donde alguien trae el proyecto ya migrado y
+    solo tiene el legacy local (clonado manualmente). Sin esto, el Block 19
+    (properties delivery) y el detector de secretos no tienen input y se
+    saltean silenciosamente.
+
+    Returns (generated: bool, reason: str). No genera nada si:
+      - Ya existe `properties-report.yaml` (respeta el del clone).
+      - No hay legacy_path o no existe.
+    """
+    report_path = workspace_root / ".capamedia" / "properties-report.yaml"
+    if report_path.exists():
+        return (False, "properties-report.yaml ya existe")
+
+    if not legacy_path or not legacy_path.is_dir():
+        return (False, "sin legacy local para analizar")
+
+    try:
+        from capamedia_cli.commands.clone import (
+            _write_properties_report,
+            _write_secrets_report,
+        )
+        from capamedia_cli.core.legacy_analyzer import analyze_legacy
+    except ImportError as exc:
+        return (False, f"import error: {exc}")
+
+    umps_root = workspace_root / "umps" if (workspace_root / "umps").is_dir() else None
+    try:
+        analysis = analyze_legacy(
+            legacy_path,
+            service_name=service_name,
+            umps_root=umps_root,
+        )
+    except Exception as exc:
+        return (False, f"analyze_legacy fallo: {type(exc).__name__}: {exc}")
+
+    # Escribir reportes (helpers de clone.py que ya manejan el caso "no aplica")
+    _write_properties_report(analysis, workspace_root)
+    _write_secrets_report(analysis, workspace_root, legacy_path)
+
+    return (True, f"generado desde {legacy_path}")
+
+
 def _relocate_generated_reports(
     project_path: Path,
     workspace_root: Path,
@@ -417,6 +467,19 @@ def review(
     )
 
     phases_log: list[dict[str, Any]] = []
+
+    # v0.23.8: si el usuario trajo el proyecto migrado sin pasar por `clone`,
+    # los reportes de Block 19 (properties) + secrets no existen. Los
+    # generamos on-the-fly desde el legacy local si esta disponible.
+    generated, reason = _auto_generate_reports_from_local_legacy(
+        workspace_root, legacy_path, project_path.name,
+    )
+    if generated:
+        console.print(
+            f"\n[dim]Reportes auto-generados desde legacy local: {reason}[/dim]\n"
+            "[dim]  -> .capamedia/properties-report.yaml[/dim]\n"
+            "[dim]  -> .capamedia/secrets-report.yaml (si aplica)[/dim]"
+        )
 
     # ── Fase 1: Nuestro checklist con autofix loop ──────────────────────────
     console.print("\n[bold cyan]Fase 1[/bold cyan] Nuestro checklist + autofix loop")

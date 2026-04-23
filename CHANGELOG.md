@@ -4,6 +4,68 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.8] - 2026-04-23
+
+### Added - `review` auto-genera reportes desde legacy local (sin `clone`)
+
+Feedback Julian: "si alguien trae su proyecto migrado y quiere hacer review,
+¿tiene que correr el init antes? Imagino que el init trae todo lo necesario."
+
+Respuesta: **`init` trae todo lo del workspace** (`.claude/`, `CLAUDE.md`,
+`.mcp.json`, `.sonarlint/`, `.capamedia/config.yaml`) pero **NO genera los
+reportes de analisis del legacy** (`properties-report.yaml`,
+`secrets-report.yaml`, `COMPLEXITY_<svc>.md`) — esos los produce `clone`.
+
+**Problema**: alguien que trae el proyecto migrado + legacy local (sin
+`clone`) corre `review` y el Block 19 (properties delivery) + los secrets
+checks se saltean silenciosamente porque no tienen input.
+
+**Fix**: nueva funcion `_auto_generate_reports_from_local_legacy` en
+`commands/review.py` que:
+
+1. Al inicio de `review()`, chequea si `.capamedia/properties-report.yaml`
+   existe.
+2. Si NO existe pero hay `./legacy/<svc>/` local, corre `analyze_legacy` al
+   vuelo y genera tanto `properties-report.yaml` como `secrets-report.yaml`
+   (reusando los helpers de `clone.py`).
+3. Idempotente: si el archivo ya existe (del clone), NO lo pisa.
+
+Mensaje claro al usuario:
+```
+Reportes auto-generados desde legacy local: generado desde .../legacy/ws-xxx-was
+  -> .capamedia/properties-report.yaml
+  -> .capamedia/secrets-report.yaml (si aplica)
+```
+
+### Flujo esperado para alguien que trae su proyecto migrado externamente
+
+```bash
+# 1. Workspace con legacy + destino (traido manualmente)
+cd mi-servicio/
+ls   # legacy/  destino/
+
+# 2. Init - trae .claude, .mcp.json, CLAUDE.md, .sonarlint, etc
+capamedia init <svc> --ai claude
+
+# 3. Review - autodetecta + auto-genera reportes si faltan
+capamedia review
+#    -> Si no hay properties-report.yaml pero hay legacy/, lo genera.
+#    -> Corre checklist + autofix + bank-fix + validator oficial.
+```
+
+Sin necesidad de `capamedia clone` (que requiere PAT de Azure DevOps).
+
+### Tests nuevos (6)
+
+- Skip si report ya existe (idempotencia)
+- Skip si no hay legacy
+- Skip si legacy dir no existe
+- Genera properties-report.yaml desde WAS local con Propiedad.get()
+- Genera secrets-report.yaml si WAS tiene BD (jndi del catalogo)
+- No sobreescribe un report existente (del clone)
+
+Total: 574 tests passing.
+
 ## [0.23.7] - 2026-04-23
 
 ### Added - Ultimos 2 gaps cerrados del PromptCapaMedia (sync completo)
