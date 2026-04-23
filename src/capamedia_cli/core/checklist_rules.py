@@ -1376,9 +1376,11 @@ def run_block_19(ctx: CheckContext) -> list[CheckResult]:
                         f"{len(pf.keys_missing)} keys: {', '.join(pf.keys_missing)}"
                     ),
                     suggested_fix=(
-                        "Pedir al owner las keys faltantes o agregarlas al archivo en "
-                        ".capamedia/inputs/. Mientras tanto, `application.yml` "
-                        "va a mantener placeholders ${CCC_*} para esas keys."
+                        "Pedir al owner las keys faltantes o agregarlas al archivo. "
+                        "Luego re-correr `capamedia checklist` (o `/doublecheck` en "
+                        "Claude Code) para re-detectar e inyectar. Mientras tanto, "
+                        "`application.yml` mantiene placeholders ${CCC_*} para las "
+                        "keys que faltan."
                     ),
                 )
             )
@@ -1394,8 +1396,14 @@ def run_block_19(ctx: CheckContext) -> list[CheckResult]:
                     ),
                     suggested_fix=(
                         f"Pedir al owner el archivo {pf.file_name} y pegarlo en "
-                        f".capamedia/inputs/{pf.file_name} del workspace. Luego "
-                        "`capamedia review` lo inyecta automaticamente en application.yml."
+                        f"CUALQUIERA de estas ubicaciones (orden de prioridad): "
+                        f"(1) `<workspace>/.capamedia/inputs/{pf.file_name}` (recomendado, "
+                        f"gitignored); "
+                        f"(2) `<workspace>/inputs/{pf.file_name}`; "
+                        f"(3) `<workspace>/{pf.file_name}` (directo en la raiz). "
+                        f"Luego re-correr `capamedia checklist` (o `/doublecheck` en "
+                        f"Claude Code) para que lo autodetecte e inyecte los valores "
+                        f"en `application.yml`."
                     ),
                 )
             )

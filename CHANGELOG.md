@@ -4,6 +4,41 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.3] - 2026-04-23
+
+### Improved - Mensaje del Block 19 menciona las 3 ubicaciones validas para `.properties`
+
+Feedback Julian: pegó los `.properties` en la **raíz** del workspace
+(`wsclientes0076/umpclientes0025.properties` y
+`wsclientes0076/wsclientes0076.properties`) esperando que el CLI los leyera.
+El cascade YA los busca ahí (ubicacion #3 de la cascada), pero el mensaje
+de FAIL del Block 19 solo sugeria `.capamedia/inputs/`.
+
+Ahora el `suggested_fix` lista las 3 ubicaciones validas en orden de
+prioridad:
+
+1. `<workspace>/.capamedia/inputs/<file>` (recomendado, gitignored)
+2. `<workspace>/inputs/<file>`
+3. `<workspace>/<file>` (directo en la raiz)
+
+Tambien menciona explicitamente que hay que re-correr `capamedia checklist`
+o `/doublecheck` en Claude Code para que autodetecte e inyecte los valores
+en `application.yml`.
+
+### Contexto
+
+El caso real: Julian corrio `/check` antes de pegar los archivos, vio FAIL
+"NO ENTREGADO", pegó los `.properties` en la raiz, pero no volvio a correr
+el check. El reporte seguia mostrando el estado viejo. El nuevo mensaje
+lo deja explicito: "Luego re-correr `capamedia checklist` (o `/doublecheck`)".
+
+### Sin cambio de comportamiento
+
+El cascade search ya lee desde la raíz (desde v0.21.0). Ningun bug;
+solo mejor guia al usuario.
+
+Total: 549 tests passing.
+
 ## [0.23.2] - 2026-04-22
 
 ### Added - `capamedia review {orq,bus,was}` con subcomandos que fuerzan el tipo
