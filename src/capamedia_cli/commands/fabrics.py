@@ -11,6 +11,7 @@ import base64
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -601,6 +602,56 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
         return (False, str(e))
 
 
+def _write_wsdl_placeholder(
+    ws: Path,
+    service_name: str,
+    target_namespace: str = "",
+) -> Path:
+    """Escribe un WSDL placeholder minimo valido para que el MCP Fabrics pueda
+    hacer copyfile sin fallar (cuando el WAS legacy solo tiene anotaciones
+    JAX-WS y no hay `.wsdl` fisico).
+
+    El agente `/migrate` despues reconstruye el WSDL real desde las anotaciones
+    @WebService del legacy o lo regenera via Gradle `generateFromWsdl`.
+
+    Returns el path absoluto al placeholder escrito.
+    """
+    tmp_dir = ws / ".capamedia" / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    placeholder = tmp_dir / f"{service_name}-placeholder.wsdl"
+
+    ns = target_namespace or f"http://pichincha.com/{service_name}"
+    service_pascal = "".join(p.capitalize() for p in re.split(r"[^a-zA-Z0-9]+", service_name) if p)
+    content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WSDL PLACEHOLDER generado por capamedia-cli.
+
+  Este archivo existe unicamente para satisfacer al MCP Fabrics que
+  requiere un `wsdlFilePath` valido en el payload. El WAS legacy
+  `{service_name}` NO tiene un `.wsdl` fisico (usa anotaciones JAX-WS
+  @WebService / @WebMethod).
+
+  Durante `/migrate`, el agente reconstruye el contrato SOAP real desde
+  las anotaciones Java del legacy, o lo regenera con Gradle
+  `generateFromWsdl`. Despues de `/migrate` este placeholder se puede
+  reemplazar/eliminar.
+-->
+<wsdl:definitions
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:tns="{ns}"
+    targetNamespace="{ns}"
+    name="{service_pascal}Service">
+  <wsdl:types>
+    <xsd:schema targetNamespace="{ns}"/>
+  </wsdl:types>
+  <wsdl:portType name="{service_pascal}PortType"/>
+</wsdl:definitions>
+"""
+    placeholder.write_text(content, encoding="utf-8")
+    return placeholder
+
+
 def _autodetect_service_name_from_config(ws: Path) -> str | None:
     """Lee <ws>/.capamedia/config.yaml y devuelve service_name si existe.
 
@@ -744,21 +795,28 @@ def generate(
     # tecnologia: mismo mapping que antes
     tecnologia = "was" if analysis.source_kind == "was" else "bus"
 
-    # v0.20.5: detectar WSDL sintetico (WAS sin .wsdl fisico, solo anotaciones
+    # v0.20.5-6: detectar WSDL sintetico (WAS sin .wsdl fisico, solo anotaciones
     # JAX-WS). analyze_legacy sintetiza Path("<inferred-from-java>") como
-    # marcador. El MCP Fabrics no sabe manejar eso y falla con ENOENT.
+    # marcador. v0.20.6: el MCP Fabrics requiere wsdlFilePath como string valido
+    # (si lo omitimos tira "path argument must be of type string. Received
+    # undefined"). Solucion: generar un WSDL placeholder minimo que el MCP
+    # pueda copyfile, y durante /migrate el agente reconstruye el real.
     wsdl_is_synthetic = (
         analysis.wsdl is not None
         and str(analysis.wsdl.path).startswith("<inferred")
     )
     if wsdl_is_synthetic:
-        wsdl_abs = ""  # Se omite del payload al MCP
+        target_ns = analysis.wsdl.target_namespace if analysis.wsdl else ""
+        placeholder = _write_wsdl_placeholder(ws, service_name, target_ns)
+        wsdl_abs = str(placeholder.resolve())
         console.print(
             "\n[yellow]Aviso:[/yellow] el WAS legacy no tiene un `*.wsdl` fisico "
-            "(usa anotaciones JAX-WS @WebService). El MCP Fabrics va a generar "
-            "el scaffold igual, pero NO va a copiar un WSDL a "
-            "[cyan]src/main/resources/legacy/[/cyan]. Durante [cyan]/migrate[/cyan] "
-            "el agente reconstruye el contrato desde las anotaciones Java."
+            "(usa anotaciones JAX-WS @WebService). Se genero un "
+            "[cyan]WSDL placeholder[/cyan] temporal para satisfacer al MCP "
+            "Fabrics:\n"
+            f"  [dim]{placeholder}[/dim]\n"
+            "Durante [cyan]/migrate[/cyan] el agente reconstruye el contrato "
+            "real desde las anotaciones Java del legacy."
         )
     else:
         wsdl_abs = str(analysis.wsdl.path.resolve())
@@ -789,8 +847,8 @@ def generate(
     table.add_row("projectPath", project_path, "ws/destino")
     table.add_row(
         "wsdlFilePath",
-        wsdl_abs if wsdl_abs else "[dim](omitido - WAS sin WSDL fisico)[/dim]",
-        "legacy WSDL",
+        wsdl_abs,
+        "placeholder generado" if wsdl_is_synthetic else "legacy WSDL",
     )
     table.add_row("groupId", group_id, "--group-id")
     table.add_row("namespace", namespace, "interactivo / --namespace")
@@ -803,6 +861,7 @@ def generate(
     mcp_args = {
         "projectName": project_name,
         "projectPath": project_path,
+        "wsdlFilePath": wsdl_abs,
         "groupId": group_id,
         "namespace": namespace,
         "tecnologia": tecnologia,
@@ -810,11 +869,6 @@ def generate(
         "webFramework": web_framework,
         "invocaBancs": invoca_bancs,
     }
-    # v0.20.5: omitir wsdlFilePath del payload si es sintetico (WAS sin
-    # .wsdl fisico). Si lo enviaramos, el MCP intenta copyfile y explota
-    # con ENOENT.
-    if wsdl_abs:
-        mcp_args["wsdlFilePath"] = wsdl_abs
 
     if dry_run:
         console.print("\n[yellow]--dry-run: no invoco el MCP.[/yellow]")

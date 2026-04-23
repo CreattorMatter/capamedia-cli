@@ -4,6 +4,54 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.6] - 2026-04-22
+
+### Fixed - `fabrics generate` con WAS sin WSDL fisico genera placeholder en vez de omitir
+
+**Bug descubierto post-v0.20.5**: la solucion anterior (omitir `wsdlFilePath`
+del payload cuando el WSDL era sintetico) hacia que el MCP tirara:
+
+```
+"error": "The \"path\" argument must be of type string. Received undefined",
+"message": "? Error: The \"path\" argument must be of type string. Received undefined"
+```
+
+El MCP Fabrics (Node.js) requiere que `wsdlFilePath` este presente SI o SI
+como string valido — no acepta omitido ni null.
+
+**Fix v0.20.6**: nueva funcion `_write_wsdl_placeholder(ws, service_name,
+target_namespace)` que genera un WSDL minimo valido en
+`<ws>/.capamedia/tmp/<svc>-placeholder.wsdl`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WSDL PLACEHOLDER generado por capamedia-cli. -->
+<wsdl:definitions
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:tns="http://pichincha.com/wsclientes0076"
+    targetNamespace="http://pichincha.com/wsclientes0076"
+    name="Wsclientes0076Service">
+  <wsdl:types>
+    <xsd:schema targetNamespace="http://pichincha.com/wsclientes0076"/>
+  </wsdl:types>
+  <wsdl:portType name="Wsclientes0076PortType"/>
+</wsdl:definitions>
+```
+
+El MCP puede hacer `copyfile` sin problemas, el scaffold queda completo con
+un WSDL placeholder en `src/main/resources/legacy/`. Durante `/migrate`,
+el agente reconstruye el WSDL real desde las anotaciones JAX-WS del legacy.
+
+### Tests nuevos (4)
+
+- `_write_wsdl_placeholder` crea XML valido con WSDL minimo
+- Usa el service_name en PascalCase
+- Incluye marker "PLACEHOLDER" para que sea obvio
+- Respeta target_namespace custom o genera un default razonable
+
+Total: 465 tests passing.
+
 ## [0.20.5] - 2026-04-22
 
 ### Fixed - 2 bugs del `fabrics generate` (reportados por Julian en wsclientes0076)

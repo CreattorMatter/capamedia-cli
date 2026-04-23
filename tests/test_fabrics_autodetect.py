@@ -126,18 +126,65 @@ def test_project_name_uses_selected_namespace_not_hardcoded_tnd() -> None:
     )
 
 
-def test_synthetic_wsdl_is_omitted_from_mcp_payload() -> None:
-    """Bug v0.20.4: cuando analyze_legacy sintetiza Path('<inferred-from-java>')
-    porque el WAS no tiene .wsdl fisico, el CLI enviaba esa ruta literal al MCP
-    que fallaba con ENOENT. v0.20.5: detecta el placeholder y omite wsdlFilePath
-    del payload."""
+def test_synthetic_wsdl_generates_placeholder_for_mcp() -> None:
+    """Bug v0.20.4-5 fixeado en v0.20.6: cuando analyze_legacy sintetiza
+    Path('<inferred-from-java>') porque el WAS no tiene .wsdl fisico, el CLI
+    debe generar un WSDL placeholder minimo para pasar al MCP.
+
+    Intentar omitir wsdlFilePath (v0.20.5) hacia que el MCP fallara con
+    "path argument must be of type string. Received undefined" porque espera
+    el campo siempre presente.
+    """
     import capamedia_cli.commands.fabrics as fabrics_module
 
     source = Path(fabrics_module.__file__).read_text(encoding="utf-8")
 
     # Debe aparecer el check por el prefix "<inferred"
-    assert "<inferred" in source, "fabrics.py debe detectar el WSDL sintetico"
-    # wsdl_is_synthetic debe condicionar el payload del MCP
-    assert "wsdl_is_synthetic" in source, (
-        "fabrics.py debe usar flag wsdl_is_synthetic para omitir el wsdlFilePath"
+    assert "<inferred" in source
+    # Debe aparecer la funcion que genera el placeholder
+    assert "_write_wsdl_placeholder" in source
+    # Debe aparecer wsdl_is_synthetic
+    assert "wsdl_is_synthetic" in source
+
+
+def test_write_wsdl_placeholder_creates_valid_file(tmp_path: Path) -> None:
+    """_write_wsdl_placeholder escribe un XML valido en .capamedia/tmp/."""
+    from capamedia_cli.commands.fabrics import _write_wsdl_placeholder
+
+    out = _write_wsdl_placeholder(tmp_path, "wsclientes0076")
+    assert out.exists()
+    assert out.parent == tmp_path / ".capamedia" / "tmp"
+    assert out.name == "wsclientes0076-placeholder.wsdl"
+
+    content = out.read_text(encoding="utf-8")
+    # Valido XML + WSDL minimo
+    assert content.startswith('<?xml version="1.0"')
+    assert "<wsdl:definitions" in content
+    assert "<wsdl:portType" in content
+    # Usa el service_name en el naming
+    assert "Wsclientes0076" in content  # PascalCase del service name
+    # Explica que es un placeholder
+    assert "PLACEHOLDER" in content.upper()
+
+
+def test_write_wsdl_placeholder_honors_target_namespace(tmp_path: Path) -> None:
+    """Si se pasa target_namespace, el placeholder lo usa."""
+    from capamedia_cli.commands.fabrics import _write_wsdl_placeholder
+
+    out = _write_wsdl_placeholder(
+        tmp_path,
+        "wsclientes0076",
+        target_namespace="http://custom.pichincha.com/svc",
     )
+    content = out.read_text(encoding="utf-8")
+    assert 'targetNamespace="http://custom.pichincha.com/svc"' in content
+
+
+def test_write_wsdl_placeholder_default_namespace(tmp_path: Path) -> None:
+    """Sin target_namespace, usa un default razonable."""
+    from capamedia_cli.commands.fabrics import _write_wsdl_placeholder
+
+    out = _write_wsdl_placeholder(tmp_path, "wsclientes0076")
+    content = out.read_text(encoding="utf-8")
+    assert "pichincha.com" in content
+    assert "wsclientes0076" in content
