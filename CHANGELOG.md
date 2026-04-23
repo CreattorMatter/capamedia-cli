@@ -4,6 +4,86 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.6] - 2026-04-23
+
+### Added - Sincronizacion con ultimos 12 commits de `PromptCapaMedia`
+
+Feedback Julian: revisar ultimos commits del repo canonico y cerrar gaps.
+Identifique 6 gaps — este release cierra los 4 mas importantes.
+
+#### Gap 1 — Prompts QA nuevos (commit 368a5c9)
+
+Dos prompts del equipo QA:
+
+**a) `/qa-review` (slash command)** — nuevo canonical `prompts/qa-review.md`:
+- Review migrated vs legacy con 14 acceptance criteria (AC-01..AC-14).
+- Genera evidencia en `docs/acceptance-criteria/<svc>_<op>_AcceptanceCriteria.md`.
+- Criterios funcionales (AC-01..AC-05), no-funcionales (AC-06..AC-10),
+  calidad de codigo (AC-11..AC-14 con coverage 85%, duplicacion 0%).
+
+**b) Unit test guidelines** — nuevo canonical `context/unit-test-guidelines.md`:
+- Idioma: ingles (excepto mensajes de produccion validados).
+- Patron obligatorio `given[Context]_when[Action]_then[ExpectedResult]`.
+- Estructura `// Given / // When / // Then` explicita por test.
+- Coverage line/branch/method > 85% (JaCoCo).
+- Duplicacion codigo = 0% (SonarQube/PMD-CPD/jscpd).
+- Sin `@DisplayName`.
+
+#### Gap 2 — Catalogo de error codes del banco (commit 3dbf23f)
+
+Nuevo canonical `context/bank-error-codes.md`:
+- Codes del `sqb-cfg-errores-errors/errores.xml`: `9999/9929/9922/9927/9991`.
+- Regla estricta: **NUNCA** inventar `"999"` / `"404"` como fallback.
+- Patron de constantes `CatalogExceptionConstants` con comentarios.
+- Tabla mapping exception type → code (BancsClientException → 9929, null body
+  → 9922, HeaderValidator → 9927, timeout → 9991, catch-all → 9999).
+
+#### Gap 3 — Service Purity fortalecida (commit 56d2771)
+
+`bank-official-rules.md` Regla 6 actualizada:
+- **CERO metodos privados** en clases `@Service`.
+- Helpers van a `application/util/<Domain>*Helper.java` con nombres
+  especificos: `ValidationHelper`, `NormalizationHelper`, `FormatHelper`,
+  `BuilderHelper`.
+- Service = **orquestador puro** que solo tiene `@Override` methods.
+- Rationale: SRP + testeabilidad aislada + menos merge conflicts.
+
+#### Gap 4 — Preserve MCP scaffold + all-vars-in-yml (commits 898d25f + a91bda8)
+
+Dos reglas nuevas en `bank-official-rules.md`:
+
+**a) Regla 9f — Preservar el `application.yml` del MCP scaffold:**
+- MERGE, no replace. El MCP genera properties que la infra del banco espera
+  (`spring.header.*`, `spring.application.name`, `optimus.*`, `web-filter.*`).
+- **UNICA** propiedad a REMOVER: `spring.main.lazy-initialization` (causa
+  issues con WebFlux y Spring WS).
+
+**b) Regla 9g — Todas las variables legacy en `application.yml`:**
+- TODA variable del ANALYSIS (Section 15) debe aparecer en el yml.
+- Funcionales → literal o `${CCC_VAR:default}`.
+- Secrets/env-dependent → `${CCC_*}` sin default, entrada en los 3 helms.
+- Nunca inventar valores; si no disponible → `${CCC_*}` + comentario.
+- Cross-check ya implementado en Block 19 del checklist.
+
+### Tests nuevos (11)
+
+`test_canonical_v0_23_6.py`:
+- `/qa-review` cargado + menciona AC-01..AC-14 + path de evidencia
+- `unit-test-guidelines` cargado + menciona given_when_then, 85%, 0%, ingles
+- `bank-error-codes` cargado + codes `9999/9929/9922/9927/9991` + mapping
+- Service Purity fortalecida en `bank-official-rules.md`
+- Regla 9f preserve scaffold + Regla 9g all-vars-in-yml
+- init con Claude scaffoldea `.claude/commands/qa-review.md`
+
+Total: 566 tests passing.
+
+### Gaps no integrados (fuera de scope para esta version)
+
+- CSV `ConfigurablesBusOmniTest_Transfor.csv` (7879 lineas) — muy grande
+  para embeber, se puede referenciar via path.
+- `helm/dev.yml` bloque `pdb:` para SOAP — regla muy especifica, se agrega
+  en proximo release si hace falta.
+
 ## [0.23.5] - 2026-04-23
 
 ### Fixed - Block 17.3 catastrophic backtracking en regex de `kafka: OFF`
