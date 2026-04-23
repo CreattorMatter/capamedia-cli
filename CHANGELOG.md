@@ -4,6 +4,80 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.21.0] - 2026-04-22
+
+### Added - Properties delivery audit + autofix inject (feedback Julian)
+
+**Feedback Julian**: "Cuando tenemos los puntos properties, hay que hacer
+el fix o que salga en el review. Seria el check nuestro, que diga que no
+tenemos las properties puestas, que haga un estudio, que busque en la
+carpeta raiz si estan todas las properties, que haga un check si nos falta
+una, y que si encuentra properties ya, que las meta en todo caso si no
+estan puestas."
+
+**Implementacion**:
+
+**1. Convencion oficial** — carpeta `.capamedia/inputs/<archivo>.properties`
+
+El owner del servicio te manda los `.properties` pendientes y vos los pegas
+en esa carpeta. Como `.capamedia/` esta gitignored, no se filtran al repo
+del banco. El cascade tolera variantes (raiz del workspace, `inputs/` sin
+`.capamedia/`, samples inline en `legacy/`).
+
+**2. Nuevo modulo** `core/properties_delivery.py`:
+
+- `audit_properties_delivery(workspace)` — lee `properties-report.yaml`,
+  busca cada archivo en ubicaciones cascade, clasifica:
+  - `DELIVERED` — entregado con todas las keys declaradas
+  - `PARTIAL` — entregado pero faltan keys
+  - `STILL_PENDING` — no se encontro en ningun lado
+  - `NOT_PENDING` — ya resuelto desde clone (SHARED_CATALOG / SAMPLE_IN_REPO)
+
+- `inject_delivered_properties(audit, project_path)` — autofix que reemplaza
+  `${CCC_*}` del `application.yml` (y `application-*.yml`) del destino por
+  los valores literales. Solo toca archivos DELIVERED (saltea PARTIAL para
+  evitar mezcla con placeholders residuales). Mapping CCC_key -> legacy_key
+  conocido (URL_XML, RECURSO_XX, COMPONENTE_XX, GRUPO_CENTRALIZADA, etc.).
+
+**3. Nuevo Block 19** en `checklist_rules.py`:
+- PASS por cada archivo DELIVERED
+- FAIL MEDIUM por cada PARTIAL (con lista de keys faltantes)
+- FAIL MEDIUM por cada STILL_PENDING (con hint al path exacto donde pegar)
+- Skip si no hay `properties-report.yaml` (proyecto pre-v0.19)
+
+Integrado en `capamedia check` y en la Fase 3 (re-check) del `capamedia review`.
+
+**4. Nueva Fase 2.5 en `capamedia review`**: "Properties delivery audit".
+Corre el audit, muestra resumen DELIVERED/PARTIAL/STILL_PENDING, y si hay
+DELIVERED ejecuta el autofix automaticamente. Log: "inject N placeholder(s)
+${CCC_*} reemplazado(s) en M yml(s)".
+
+### Flujo tipico end-to-end
+
+```bash
+# 1. clone detecta .properties pendientes
+capamedia clone wsclientes0076
+#   -> .capamedia/properties-report.yaml: wsclientes0076.properties + umpclientes0025.properties PENDING
+
+# 2. pedir archivos al owner y pegarlos
+cp <from-bank>/wsclientes0076.properties  ws/.capamedia/inputs/
+cp <from-bank>/umpclientes0025.properties ws/.capamedia/inputs/
+
+# 3. review auto-detecta y auto-inyecta
+capamedia review
+#   Fase 2.5: 2 DELIVERED, 0 PARTIAL, 0 STILL_PENDING
+#   Inject: 8 placeholders ${CCC_*} reemplazados en application.yml
+```
+
+### Tests nuevos (23)
+
+- `test_properties_delivery.py` (16): audit + inject con cascade, partial,
+  delivered, fallback legacy inline, YAML malformado, multiple yml files
+- `test_block_19_properties.py` (7): block results con DELIVERED/PARTIAL/
+  STILL_PENDING, skip cuando no hay report, 3 files mixed status
+
+Total: 489 tests passing.
+
 ## [0.20.7] - 2026-04-22
 
 ### Fixed - Mensaje de "Proximos pasos" del `fabrics generate` no mas induce a error

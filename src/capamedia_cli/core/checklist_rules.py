@@ -1171,6 +1171,108 @@ def run_block_18(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+def run_block_19(ctx: CheckContext) -> list[CheckResult]:
+    """Block 19 (v0.21.0): Properties delivery audit.
+
+    Chequea que los `.properties` que `capamedia clone` marco como
+    PENDING_FROM_BANK hayan sido entregados por el owner del servicio. Busca
+    en `.capamedia/inputs/` (convencion oficial) y fallbacks.
+
+    - PASS por archivo DELIVERED (todas las keys presentes)
+    - FAIL MEDIUM por archivo PARTIAL (faltan keys)
+    - FAIL MEDIUM por archivo STILL_PENDING
+    - Skip si no hay properties-report.yaml (proyecto no paso por clone v0.19+)
+    """
+    from capamedia_cli.core.properties_delivery import audit_properties_delivery
+
+    results: list[CheckResult] = []
+
+    # El workspace es el parent de destino/<proj>/ o el project mismo si no
+    # esta bajo destino/.
+    if ctx.migrated_path.parent.name == "destino":
+        workspace = ctx.migrated_path.parent.parent
+    else:
+        workspace = ctx.migrated_path
+
+    audit = audit_properties_delivery(workspace)
+
+    if audit.report_missing:
+        # Proyecto pre-v0.19 sin properties-report.yaml. Skip silencioso:
+        # el check solo aplica cuando clone detecto properties pendientes.
+        return results
+
+    pending_entries = [
+        f for f in audit.files
+        if f.status in ("DELIVERED", "PARTIAL", "STILL_PENDING")
+    ]
+
+    if not pending_entries:
+        # No hay archivos pending en el reporte (todo era SHARED_CATALOG)
+        results.append(
+            CheckResult(
+                "19.0", "Block 19", "Properties delivery audit",
+                "pass",
+                detail=(
+                    "properties-report.yaml no lista archivos pendientes del "
+                    "banco (todo resuelto por catalogo embebido)"
+                ),
+            )
+        )
+        return results
+
+    for pf in pending_entries:
+        check_id = f"19.{pf.file_name}"
+        title = f"`{pf.file_name}` entregado por el owner"
+
+        if pf.status == "DELIVERED":
+            results.append(
+                CheckResult(
+                    check_id, "Block 19", title,
+                    "pass",
+                    detail=(
+                        f"entregado en {pf.delivered_path} con "
+                        f"{len(pf.keys_delivered)} keys ({len(pf.keys_declared)} requeridas)"
+                    ),
+                )
+            )
+        elif pf.status == "PARTIAL":
+            results.append(
+                CheckResult(
+                    check_id, "Block 19", title,
+                    "fail",
+                    severity="medium",
+                    detail=(
+                        f"archivo encontrado en {pf.delivered_path} pero faltan "
+                        f"{len(pf.keys_missing)} keys: {', '.join(pf.keys_missing)}"
+                    ),
+                    suggested_fix=(
+                        "Pedir al owner las keys faltantes o agregarlas al archivo en "
+                        ".capamedia/inputs/. Mientras tanto, `application.yml` "
+                        "va a mantener placeholders ${CCC_*} para esas keys."
+                    ),
+                )
+            )
+        else:  # STILL_PENDING
+            results.append(
+                CheckResult(
+                    check_id, "Block 19", title,
+                    "fail",
+                    severity="medium",
+                    detail=(
+                        f"NO ENTREGADO. Requiere {len(pf.keys_declared)} keys: "
+                        f"{', '.join(pf.keys_declared)}. Source: {pf.source_hint}"
+                    ),
+                    suggested_fix=(
+                        f"Pedir al owner el archivo {pf.file_name} y pegarlo en "
+                        f".capamedia/inputs/{pf.file_name} del workspace. Luego "
+                        "`capamedia review` lo inyecta automaticamente en application.yml."
+                    ),
+                )
+            )
+
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
@@ -1183,6 +1285,7 @@ ALL_BLOCKS = [
     ("Block 16", run_block_16),
     ("Block 17", run_block_17),
     ("Block 18", run_block_18),
+    ("Block 19", run_block_19),
 ]
 
 

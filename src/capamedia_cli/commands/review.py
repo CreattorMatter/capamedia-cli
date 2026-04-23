@@ -483,6 +483,70 @@ def review(
         }
         phases_log.append({"phase": "2-bank-autofix", **bank_summary})
 
+    # ── Fase 2.5: Properties delivery audit + inject (v0.21.0) ─────────────
+    console.print(
+        "\n[bold cyan]Fase 2.5[/bold cyan] Properties delivery audit"
+    )
+    from capamedia_cli.core.properties_delivery import (
+        audit_properties_delivery,
+        inject_delivered_properties,
+    )
+
+    delivery_audit = audit_properties_delivery(workspace_root)
+    if delivery_audit.report_missing:
+        console.print(
+            "  [dim]sin properties-report.yaml (proyecto pre-v0.19). Skip.[/dim]"
+        )
+        phases_log.append({"phase": "2.5-properties-delivery", "skipped": True})
+    else:
+        pending = [
+            f for f in delivery_audit.files
+            if f.status in ("DELIVERED", "PARTIAL", "STILL_PENDING")
+        ]
+        delivered_count = sum(1 for f in pending if f.status == "DELIVERED")
+        partial_count = sum(1 for f in pending if f.status == "PARTIAL")
+        still_pending_count = sum(1 for f in pending if f.status == "STILL_PENDING")
+        console.print(
+            f"  Archivos: [green]{delivered_count} DELIVERED[/green], "
+            f"[yellow]{partial_count} PARTIAL[/yellow], "
+            f"[red]{still_pending_count} STILL_PENDING[/red]"
+        )
+        for f in pending:
+            if f.status == "STILL_PENDING":
+                console.print(
+                    f"    [red]✗[/red] {f.file_name} "
+                    f"(pegar en [cyan].capamedia/inputs/{f.file_name}[/cyan])"
+                )
+            elif f.status == "PARTIAL":
+                console.print(
+                    f"    [yellow]~[/yellow] {f.file_name} "
+                    f"faltan keys: {', '.join(f.keys_missing)}"
+                )
+            else:  # DELIVERED
+                console.print(
+                    f"    [green]✓[/green] {f.file_name} "
+                    f"({len(f.keys_delivered)} keys)"
+                )
+
+        # Autofix: inyectar valores DELIVERED al application.yml del destino
+        if not dry_run and delivery_audit.has_delivered:
+            inject_report = inject_delivered_properties(delivery_audit, project_path)
+            if inject_report.total_replacements > 0:
+                console.print(
+                    f"  [green]Inject:[/green] {inject_report.total_replacements} "
+                    f"placeholder(s) ${{CCC_*}} reemplazado(s) en "
+                    f"{len(inject_report.files_modified)} yml(s)"
+                )
+                for r in inject_report.replacements[:10]:
+                    console.print(f"    - [dim]{r}[/dim]")
+        phases_log.append({
+            "phase": "2.5-properties-delivery",
+            "delivered": delivered_count,
+            "partial": partial_count,
+            "still_pending": still_pending_count,
+            "pending_files": [f.file_name for f in pending if f.status != "DELIVERED"],
+        })
+
     # ── Fase 3: Re-corrida de nuestro checklist tras bank autofix ──────────
     console.print(
         "\n[bold cyan]Fase 3[/bold cyan] Re-corrida del checklist tras bank autofix"
