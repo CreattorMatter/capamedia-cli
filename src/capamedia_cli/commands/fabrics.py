@@ -1005,16 +1005,19 @@ def generate(
     elif generated_ok:
         fabrics_status = "ok"
         fabrics_detail = "arquetipo generado por Fabrics"
-        recovery_line = "  0. (Auto) Clases JAXB generadas ya por gradlew generateFromWsdl.\n" if recovered else ""
+        recovery_line = "  0. (Auto) Clases JAXB generadas por gradlew generateFromWsdl.\n" if recovered else ""
         console.print()
         console.print(
             Panel(
                 f"Arquetipo generado en [cyan]{proj_dir}[/cyan]\n\n"
                 f"Proximos pasos:\n"
                 f"{recovery_line}"
-                f"  1. Revisa `{proj_dir.name}/build.gradle` y aplica workarounds conocidos.\n"
-                f"  2. Corre `capamedia init --here` dentro de destino/{project_name}/ para sumar .claude/ y CLAUDE.md.\n"
-                f"  3. Abri en Claude Code y corre `/migrate` en el chat.",
+                f"  1. Abri Claude Code desde el workspace (NO desde destino/):\n"
+                f"     [cyan]cd {ws}[/cyan]\n"
+                f"     [cyan]claude .[/cyan]\n"
+                f"  2. En el chat de Claude Code, corre: [cyan]/migrate[/cyan]\n"
+                f"  3. Cuando termine, audita con: [cyan]capamedia review[/cyan]\n"
+                f"     (autodetecta destino/ y legacy/ desde el workspace)",
                 border_style="green",
                 title="OK",
             )

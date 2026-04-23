@@ -4,6 +4,42 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.7] - 2026-04-22
+
+### Fixed - Mensaje de "Proximos pasos" del `fabrics generate` no mas induce a error
+
+El mensaje de exito de v0.20.6 decia:
+
+> 2. Corre `capamedia init --here` dentro de `destino/<project>/` para sumar
+>    `.claude/` y `CLAUDE.md`.
+
+Pero eso es **al reves**: el `init` va en el **workspace root** (al lado de
+`legacy/`, `destino/`, `umps/`), NO adentro de `destino/<project>/`. Si el
+user seguia ese consejo, terminaba con `.claude/`, `CLAUDE.md`, `.capamedia/`
+duplicados dentro del repo Java del banco, que luego contaminaban el
+`git push` del servicio migrado.
+
+**Fix**: mensaje reescrito con el flujo correcto:
+
+```
+1. Abri Claude Code desde el workspace (NO desde destino/):
+     cd <workspace>
+     claude .
+2. En el chat de Claude Code, corre: /migrate
+3. Cuando termine, audita con: capamedia review
+     (autodetecta destino/ y legacy/ desde el workspace)
+```
+
+Queda alineado con el nuevo flujo autodetectado de `review` (v0.20.0) y
+`fabrics generate` (v0.20.4).
+
+### Tests
+
+- Guard contra regresion: `init --here` dentro de `destino/` NO debe
+  aparecer mas en el source de `fabrics.py`.
+
+Total: 466 tests passing.
+
 ## [0.20.6] - 2026-04-22
 
 ### Fixed - `fabrics generate` con WAS sin WSDL fisico genera placeholder en vez de omitir

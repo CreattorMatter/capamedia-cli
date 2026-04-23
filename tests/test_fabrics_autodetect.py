@@ -188,3 +188,22 @@ def test_write_wsdl_placeholder_default_namespace(tmp_path: Path) -> None:
     content = out.read_text(encoding="utf-8")
     assert "pichincha.com" in content
     assert "wsclientes0076" in content
+
+
+def test_success_message_does_not_suggest_init_inside_destino() -> None:
+    """v0.20.7: el mensaje de exito de fabrics NO debe sugerir correr
+    `init --here dentro de destino/` (bug UX: eso ensuciaria el repo Java
+    del banco con assets de Claude).
+
+    En lugar, debe mandar al usuario al workspace root para claude + /migrate.
+    """
+    import capamedia_cli.commands.fabrics as fabrics_module
+
+    source = Path(fabrics_module.__file__).read_text(encoding="utf-8")
+    # El mensaje erroneo anterior NO debe aparecer
+    assert "init --here` dentro de destino" not in source, (
+        "El mensaje de exito no debe sugerir init --here dentro de destino/ - "
+        "eso duplicaria configs de Claude dentro del repo Java del banco"
+    )
+    # Y debe mandar a correr claude desde el workspace
+    assert "claude ." in source or "claude `." in source
