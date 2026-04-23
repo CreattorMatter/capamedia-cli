@@ -590,6 +590,92 @@ presentes en `application.yml` del destino.
 
 ---
 
+## Regla 9h - Helm values-dev SOAP requiere `pdb: minAvailable: 1`
+
+**Commit 9b670da del PromptCapaMedia (2026-04-23)**.
+
+**MUST**: para servicios **SOAP**, el archivo `helm/values-dev.yml` debe
+tener el bloque `pdb` con `minAvailable: 1`:
+
+```yaml
+container:
+  extraVolumeMounts:
+    - name: init-volume
+      mountPath: /opt/build/init.sh
+      subPath: init.sh
+
+pdb:
+  minAvailable: 1    # ← MANDATORIO para SOAP dev
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 1
+```
+
+**NEVER**: omitir el `pdb:` block en `values-dev.yml` para SOAP. Es
+requerido por la infra del banco para PodDisruptionBudget.
+
+**NO aplica a REST WebFlux** (el scaffold del MCP ya lo incluye cuando
+aplica).
+
+### Nota operativa
+
+Si el scaffold del MCP Fabrics no lo genera automaticamente, agregarlo
+manualmente al `helm/values-dev.yml`. Es parte del checklist oficial del
+banco (Block 16 — Helm & Kubernetes).
+
+---
+
+## Regla 11 - CSV `ConfigurablesBusOmniTest_Transfor` para IIB
+
+**Commit b55a794 del PromptCapaMedia (2026-04-21)**.
+
+**Contexto**: servicios IIB (BUS) que usan `GestionarRecursoConfigurable`
+leen sus configurables de un CSV operativo del banco:
+
+```
+PromptCapaMedia/prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv
+```
+
+Tiene ~7879 filas con las configurables oficiales de produccion (CMRCTEATR,
+CMRDATRFN, etc. mapeadas a valores por ambiente).
+
+### Por que no esta embebido en el CLI
+
+El CSV es **demasiado grande** (~500 KB, 7879 filas) para distribuir en el
+paquete Python. Ademas se actualiza con regularidad desde operaciones.
+
+### Como consumirlo
+
+**Cuando el ANALYSIS detecta `GestionarRecursoConfigurable`**, el agente
+migrador DEBE:
+
+1. Abrir el CSV desde el repo local `PromptCapaMedia` (path arriba).
+2. Buscar las rows cuyo campo `ConfigName` matchee las configurables
+   usadas por el servicio legacy.
+3. Mapear cada row a una entrada en `application.yml`:
+
+```yaml
+# Ejemplo: legacy usa Environment.cache.CMRCTEATR.REG_MAX
+cache:
+  CMRCTEATR:
+    REG_MAX: "10"                     # valor del CSV (row CMRCTEATR.REG_MAX)
+    CODIGO_VACIO: "0001"              # valor del CSV
+    # ... demas campos del CSV para este ConfigName
+```
+
+4. **NUNCA** dejar como `TBD` si el CSV tiene el valor. **NUNCA** inventar
+   si el CSV no tiene el row — documentar como pendiente del SRE.
+
+### Cross-check con Block 19
+
+El Block 19 del checklist (via `properties-report.yaml`) tambien cubre
+configurables `.properties`. Los de `GestionarRecursoConfigurable` (CSV) son
+un mecanismo paralelo; la regla es la misma: **todo configurable legacy
+referenciado tiene su entrada en `application.yml`**.
+
+---
+
 ## Regla 10 - Properties compartidas del banco
 
 **MUST**: `generalservices.properties` y `catalogoaplicaciones.properties` son

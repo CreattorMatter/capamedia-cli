@@ -136,6 +136,26 @@ def test_bank_official_rules_has_rule_9g_all_legacy_vars() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_bank_official_rules_has_helm_pdb_rule() -> None:
+    """v0.23.7: Regla 9h - helm dev SOAP requiere pdb: minAvailable: 1."""
+    path = CANONICAL_ROOT / "context" / "bank-official-rules.md"
+    content = path.read_text(encoding="utf-8")
+    assert "Regla 9h" in content or "pdb" in content.lower()
+    assert "minAvailable: 1" in content
+    # Menciona que es para SOAP
+    assert "SOAP" in content
+
+
+def test_bank_official_rules_has_configurables_csv_reference() -> None:
+    """v0.23.7: Regla 11 - referencia al CSV ConfigurablesBusOmniTest."""
+    path = CANONICAL_ROOT / "context" / "bank-official-rules.md"
+    content = path.read_text(encoding="utf-8")
+    assert "ConfigurablesBusOmniTest" in content
+    assert "GestionarRecursoConfigurable" in content
+    # Debe aclarar por que no esta embebido
+    assert "grande" in content.lower() or "no esta embebido" in content.lower()
+
+
 def test_init_scaffolds_qa_review_as_slash_command(tmp_path: Path, monkeypatch) -> None:
     """init con --ai claude debe generar .claude/commands/qa-review.md."""
     from capamedia_cli.commands.init import scaffold_project

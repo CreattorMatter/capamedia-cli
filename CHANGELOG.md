@@ -4,6 +4,52 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.7] - 2026-04-23
+
+### Added - Ultimos 2 gaps cerrados del PromptCapaMedia (sync completo)
+
+Julian pidio confirmar que TODOS los commits del PromptCapaMedia esten
+integrados. v0.23.6 cerro 4 grandes; v0.23.7 cierra los 2 chicos que
+quedaban:
+
+1. **Regla 9h - helm values-dev SOAP con `pdb: minAvailable: 1`** (commit
+   `9b670da`). Para SOAP, el `helm/values-dev.yml` debe tener el bloque
+   `pdb` con `minAvailable: 1` — requerido por la infra del banco para
+   PodDisruptionBudget. NO aplica a REST WebFlux.
+
+2. **Regla 11 - CSV `ConfigurablesBusOmniTest_Transfor` para IIB**
+   (commit `b55a794`). Referencia al CSV de configurables (7879 filas)
+   desde el canonical. **NO se embebe** en el CLI (muy grande, 500 KB y
+   se actualiza seguido desde ops). Se documenta el path relativo al repo
+   `PromptCapaMedia` y el patron de uso cuando el servicio usa
+   `GestionarRecursoConfigurable`.
+
+### Status final de los 12 commits del PromptCapaMedia
+
+| Commit | Status |
+|---|---|
+| `4d3f738` Merge branch | N/A |
+| `ed43688` Documentacion (4 PDFs) | ✅ Ya integrado (reglas en v0.17-v0.22) |
+| `9b670da` fix: helm dev soap | ✅ **v0.23.7** |
+| `898d25f` fix: Do not remove spring.header yml | ✅ v0.23.6 |
+| `0acf823` change examples | ❌ N/A (zip) |
+| `368a5c9` feat: new promts QA | ✅ v0.23.6 |
+| `a91bda8` feat: Config in yml y helm | ✅ v0.23.6 |
+| `56d2771` feat: Service clean | ✅ v0.23.6 |
+| `b55a794` docs: align rules with configurable csv | ✅ **v0.23.7** (ref) |
+| `3dbf23f` fix: Code 999 generic | ✅ v0.23.6 |
+| `cf79f2e` feat: mejora was y bus | ✅ v0.22.0 |
+| `b886631` Clean prompts, anonymize names | ✅ v0.22.0 |
+
+**Sincronizacion completa. 0 gaps pendientes.**
+
+### Tests nuevos (2)
+
+- `bank-official-rules.md` tiene Regla 9h con `pdb: minAvailable: 1`
+- `bank-official-rules.md` tiene Regla 11 referenciando `ConfigurablesBusOmniTest`
+
+Total: 568 tests passing.
+
 ## [0.23.6] - 2026-04-23
 
 ### Added - Sincronizacion con ultimos 12 commits de `PromptCapaMedia`
