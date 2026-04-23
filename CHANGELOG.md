@@ -4,6 +4,85 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.14] - 2026-04-23
+
+### Changed - Matriz MCP oficial completa (PDF BPTPSRE-Modos de uso)
+
+Feedback Julian: la tabla del screenshot anterior tenia **ORQ con
+invocaBancs=true**. El PDF oficial `BPTPSRE-Modos de uso` confirma que
+**ORQ es invocaBancs=false + deploymentType=orquestador**. Ademas el PDF
+introduce 2 parametros que no tenia integrados: `deploymentType` y la
+matriz de 3 reglas de override priorizadas.
+
+### 5 items implementados
+
+**1. Nuevo canonical `context/bank-mcp-matrix.md`**
+
+Espejo del PDF con:
+- Los 5 parametros MCP (`tecnologia`, `projectType`, `framework`,
+  `invocaBancs`, `deploymentType`)
+- Las 3 reglas de override en orden de prioridad
+- Los 8 casos canonicos (WAS BD 1/2+ ops, WAS procesamiento 1/2+ ops,
+  BUS BANCS, BUS Apis 1 op, BUS sin BANCS 2+ ops, ORQ)
+- Mapeo interno `source_type` → parametros MCP
+
+**2. `_expected_framework` actualizado** (`checklist_rules.py`)
+
+Cada return ahora menciona la Regla N aplicada para debugging:
+- Regla 1: `invocaBancs=true fuerza webflux+rest (override total)`
+- Regla 2: `deploymentType=orquestador -> webflux+rest + lib-event-logs`
+- Regla 3: `mvc+soap + spring-web-service`
+
+Ademas cubre el caso **BUS sin BANCS 2+ ops → soap+mvc (Regla 3)** que
+antes caia al fallback.
+
+**3. `fabrics generate` pasa `deploymentType` al MCP**
+
+Gap critico cerrado: antes no se mandaba → MCP trataba ORQ como
+microservicio y NO incluia `lib-event-logs`. Ahora:
+
+```python
+deployment_type = "orquestador" if analysis.source_kind == "orq" else "microservicio"
+mcp_args["deploymentType"] = deployment_type
+```
+
+La tabla de parametros del `fabrics generate` tambien muestra la Regla
+aplicable cuando el deployment_type es orquestador.
+
+**4. `bank-official-rules.md` actualizada**
+
+Regla 2 (WSDL determina framework) reemplazada con la matriz oficial del
+PDF + tabla de 8 casos + referencia al nuevo canonical
+`bank-mcp-matrix.md`. Los mensajes de FAIL HIGH del Block 0.2c ahora
+mencionan la Regla N violada.
+
+**5. Tests (11 nuevos)**
+
+`test_block_0_mcp_matrix.py`:
+- Caso 1: WAS BD 1 metodo (rest+mvc base)
+- Caso 2: WAS BD 2+ metodos (Regla 3)
+- Caso 5: BUS con BANCS (Regla 1 override, con 1 y 5 ops)
+- Caso 6: BUS Apis 1 metodo
+- **Caso 7 NUEVO**: BUS sin BANCS 2+ ops (Regla 3)
+- Caso 8: ORQ (Regla 2 + lib-event-logs mencionado)
+- Reasons mencionan Regla N
+- Alias `iib` matchea como `bus`
+- `fabrics.py` tiene `deploymentType` en mcp_args
+- Canonical `bank-mcp-matrix.md` existe con las 3 reglas
+- `bank-official-rules.md` referencia el nuevo canonical
+
+Total: 614 tests passing.
+
+### Correccion respecto a la tabla anterior
+
+| Fila | Antes (cuadro erroneo) | Ahora (PDF oficial) |
+|---|---|---|
+| ORQ | `invocaBancs: true` | `invocaBancs: false` |
+| ORQ | (sin deploymentType) | `deploymentType: orquestador` |
+| ORQ | (sin extras) | Incluye `lib-event-logs` |
+| WAS 2+ ops | (sin extras) | Incluye `spring-web-service` |
+| BUS sin BANCS 2+ ops | (no contemplado) | `soap/mvc/microservicio` + `spring-web-service` |
+
 ## [0.23.13] - 2026-04-23
 
 ### Added - `/info` detecta UMPs referenciadas pero NO clonadas

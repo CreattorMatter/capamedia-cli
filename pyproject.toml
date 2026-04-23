@@ -1,6 +1,6 @@
 [project]
 name = "capamedia-cli"
-version = "0.23.13"
+version = "0.23.14"
 description = "CLI multi-harness para la migración de servicios legacy (IIB/WAS/ORQ) a Java 21 + Spring Boot hexagonal OLA1 en Banco Pichincha"
 readme = "README.md"
 requires-python = ">=3.11"

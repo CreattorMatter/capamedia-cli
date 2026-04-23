@@ -34,23 +34,58 @@ src/main/java/com/pichincha/sp/
 
 ---
 
-## Regla 2 - WSDL determina framework
+## Regla 2 - Matriz MCP oficial (reemplaza la regla simple de ops count)
 
-**MUST**: si WSDL tiene **1 operacion** → REST + Spring WebFlux. Si tiene **2+ operaciones** → SOAP + Spring MVC.
+**v0.23.14**: la matriz oficial es mas rica que "1 op → REST / 2+ ops → SOAP".
+El banco usa 5 parametros MCP con 3 reglas de override priorizadas.
 
-**NEVER**: mezclar. Un proyecto con `@Endpoint` (SOAP) y `@RestController` (REST) falla. Un `build.gradle` con `spring-boot-starter-webflux` **y** `spring-boot-starter-web` falla.
+**Fuente**: [`bank-mcp-matrix.md`](bank-mcp-matrix.md) canonical (espejo del
+PDF BPTPSRE-Modos de uso).
+
+### Las 3 reglas de override (en orden de prioridad)
+
+| # | Si el usuario pasa... | El MCP genera... |
+|---|---|---|
+| **1** | `invocaBancs: true` | `webflux + rest` (override total, ignora projectType/framework) |
+| **2** | `deploymentType: orquestador` + `invocaBancs: false` | `webflux + rest` + **`lib-event-logs`** |
+| **3** | `projectType: soap` + `deploymentType: microservicio` + `invocaBancs: false` | `mvc + soap` + **`spring-web-service`** |
+
+### Los 8 casos canonicos
+
+| # | Servicio | tecnologia | projectType | framework | invocaBancs | deploymentType |
+|---|---|---|---|---|---|---|
+| 1 | WAS base de datos, 1 metodo | `was` | `rest` | `mvc` | `false` | `microservicio` |
+| 2 | WAS base de datos, 2+ metodos | `was` | `soap` | `mvc` | `false` | `microservicio` |
+| 3 | WAS procesamiento, 1 metodo | `was` | `rest` | `mvc` | `false` | `microservicio` |
+| 4 | WAS procesamiento, 2+ metodos | `was` | `soap` | `mvc` | `false` | `microservicio` |
+| 5 | BUS con BANCS | `bus` | `rest` | `webflux` | **`true`** | `microservicio` |
+| 6 | BUS Apis sin BANCS, 1 metodo | `bus` | `rest` | `webflux` | `false` | `microservicio` |
+| 7 | BUS sin BANCS, 2+ metodos | `bus` | `soap` | `mvc` | `false` | `microservicio` |
+| 8 | **ORQ** | `bus` | `rest` | `webflux` | `false` | **`orquestador`** |
+
+**NEVER**: mezclar starters de web y webflux. Un proyecto con `@Endpoint` (SOAP)
+y `@RestController` (REST) falla. Un `build.gradle` con
+`spring-boot-starter-webflux` **y** `spring-boot-starter-web` falla.
 
 ```gradle
-// WSDL con 1 op: SOLO webflux
-implementation 'org.springframework.boot:spring-boot-starter-webflux'   // ✔ OK
-
-// WSDL con 2+ ops: SOLO mvc
+// WAS con BD 1 metodo: SOLO web (MVC)
 implementation 'org.springframework.boot:spring-boot-starter-web'       // ✔ OK
 
-// NUNCA ambos
-implementation 'org.springframework.boot:spring-boot-starter-web'       // ✘ NO
-implementation 'org.springframework.boot:spring-boot-starter-webflux'   // ✘ NO
+// BUS con BANCS / ORQ / BUS Apis 1 op: SOLO webflux
+implementation 'org.springframework.boot:spring-boot-starter-webflux'   // ✔ OK
+
+// BUS/WAS con 2+ ops SOAP: MVC + spring-web-services
+implementation 'org.springframework.boot:spring-boot-starter-web'       // ✔ OK
+implementation 'org.springframework.boot:spring-boot-starter-web-services'  // ✔ Regla 3
 ```
+
+### Lo que el CLI valida (Block 0.2c)
+
+El Check 0.2c de `run_block_0` compara el framework **detectado en el
+codigo migrado** con el framework **esperado segun la matriz MCP** y flagea
+como **FAIL HIGH** si no coincide, mencionando la **regla especifica
+violada** (ej. "Regla 1 MCP: invocaBancs=true fuerza webflux+rest, pero
+se migro como SOAP").
 
 ---
 

@@ -45,14 +45,14 @@ def test_orq_always_rest() -> None:
 def test_was_one_op_rest() -> None:
     fw, reason = _expected_framework("was", has_bancs=False, ops_count=1)
     assert fw == "rest"
-    assert "MVC" in reason
+    assert "mvc" in reason.lower()
 
 
 def test_was_multi_op_soap() -> None:
     for ops in (2, 3, 7):
         fw, reason = _expected_framework("was", has_bancs=False, ops_count=ops)
         assert fw == "soap", f"WAS con {ops} ops debe ser SOAP"
-        assert "MVC" in reason
+        assert "mvc" in reason.lower()
 
 
 def test_was_with_bancs_still_uses_ops_count() -> None:
@@ -217,3 +217,130 @@ def test_run_block_0_was_1op_soap_fails(tmp_path: Path) -> None:
     r = _find_0_2c(results)
     assert r.status == "fail"
     assert r.severity == "high"
+
+
+# ---------------------------------------------------------------------------
+# v0.23.14 - 8 casos canonicos de bank-mcp-matrix.md (PDF BPTPSRE)
+# ---------------------------------------------------------------------------
+
+
+def test_matrix_case_1_was_db_1_method() -> None:
+    """Caso 1: WAS base de datos 1 metodo → rest + mvc (caso base)."""
+    fw, reason = _expected_framework("was", has_bancs=False, ops_count=1)
+    assert fw == "rest"
+    assert "mvc" in reason.lower()
+
+
+def test_matrix_case_2_was_db_2_plus_methods() -> None:
+    """Caso 2: WAS base de datos 2+ metodos → Regla 3 (mvc+soap + spring-web-service)."""
+    fw, reason = _expected_framework("was", has_bancs=False, ops_count=3)
+    assert fw == "soap"
+    assert "Regla 3" in reason
+
+
+def test_matrix_case_5_bus_with_bancs() -> None:
+    """Caso 5: BUS con BANCS → Regla 1 (webflux+rest override total)."""
+    fw, reason = _expected_framework("bus", has_bancs=True, ops_count=1)
+    assert fw == "rest"
+    assert "Regla 1" in reason
+    assert "override" in reason.lower()
+
+    # Aun con 5 ops, Regla 1 override a rest
+    fw, reason = _expected_framework("bus", has_bancs=True, ops_count=5)
+    assert fw == "rest"
+    assert "Regla 1" in reason
+
+
+def test_matrix_case_6_bus_apis_1_method() -> None:
+    """Caso 6: BUS Apis sin BANCS, 1 metodo → webflux + rest."""
+    fw, reason = _expected_framework("bus", has_bancs=False, ops_count=1)
+    assert fw == "rest"
+    assert "Apis" in reason or "caso base" in reason.lower()
+
+
+def test_matrix_case_7_bus_without_bancs_2_plus_ops() -> None:
+    """Caso 7 (NUEVO v0.23.14): BUS sin BANCS 2+ ops → Regla 3 (mvc+soap)."""
+    fw, reason = _expected_framework("bus", has_bancs=False, ops_count=2)
+    assert fw == "soap", "BUS sin BANCS con 2+ ops debe ser SOAP por Regla 3"
+    assert "Regla 3" in reason
+
+
+def test_matrix_case_8_orq_deployment_type_orquestador() -> None:
+    """Caso 8: ORQ → Regla 2 (webflux+rest + lib-event-logs, invocaBancs=false)."""
+    fw, reason = _expected_framework("orq", has_bancs=False, ops_count=1)
+    assert fw == "rest"
+    assert "Regla 2" in reason
+    assert "orquestador" in reason.lower()
+    # Importante: lib-event-logs mencionado (disparador del Block 17)
+    assert "lib-event-logs" in reason or "log" in reason.lower()
+
+
+def test_matrix_reason_includes_rule_number_for_debugging() -> None:
+    """Los reasons deben mencionar la Regla N aplicada para facilitar debugging."""
+    # Regla 1
+    _, r1 = _expected_framework("bus", True, 2)
+    assert "Regla 1" in r1
+    # Regla 2
+    _, r2 = _expected_framework("orq", False, 1)
+    assert "Regla 2" in r2
+    # Regla 3
+    _, r3 = _expected_framework("was", False, 2)
+    assert "Regla 3" in r3
+
+
+def test_matrix_iib_alias_for_bus_still_works() -> None:
+    """El source_type 'iib' (legacy alias) debe matchear como 'bus'."""
+    fw_bus, _ = _expected_framework("bus", True, 1)
+    fw_iib, _ = _expected_framework("iib", True, 1)
+    assert fw_bus == fw_iib == "rest"
+
+
+# ---------------------------------------------------------------------------
+# v0.23.14 - fabrics passes deploymentType to MCP
+# ---------------------------------------------------------------------------
+
+
+def test_fabrics_includes_deployment_type_for_orq() -> None:
+    """fabrics generate DEBE pasar deploymentType=orquestador cuando es ORQ."""
+    import capamedia_cli.commands.fabrics as fabrics_module
+
+    source = Path(fabrics_module.__file__).read_text(encoding="utf-8")
+    # deployment_type debe estar en el source con la logica correcta
+    assert "orquestador" in source
+    assert "microservicio" in source
+    # deploymentType debe ir en el mcp_args enviado al MCP
+    assert '"deploymentType": deployment_type' in source or "'deploymentType': deployment_type" in source
+    # Referencia a la Regla 2 en el comentario
+    assert "Regla 2 MCP" in source or "lib-event-logs" in source
+
+
+def test_bank_mcp_matrix_canonical_exists() -> None:
+    """Canonical bank-mcp-matrix.md debe existir y tener las 3 reglas."""
+    from capamedia_cli.core.canonical import CANONICAL_ROOT, load_canonical_assets
+
+    assets = load_canonical_assets()
+    names = {a.name for a in assets["context"]}
+    assert "bank-mcp-matrix" in names
+
+    content = (CANONICAL_ROOT / "context" / "bank-mcp-matrix.md").read_text(encoding="utf-8")
+    # Las 3 reglas mencionadas
+    assert "Regla 1" in content
+    assert "Regla 2" in content
+    assert "Regla 3" in content
+    # Casos criticos
+    assert "invocaBancs" in content
+    assert "deploymentType: orquestador" in content
+    assert "lib-event-logs" in content
+    assert "spring-web-service" in content
+
+
+def test_bank_official_rules_references_mcp_matrix() -> None:
+    """bank-official-rules.md debe referenciar bank-mcp-matrix.md."""
+    from capamedia_cli.core.canonical import CANONICAL_ROOT
+
+    content = (CANONICAL_ROOT / "context" / "bank-official-rules.md").read_text(encoding="utf-8")
+    assert "bank-mcp-matrix" in content
+    # Menciona las 3 reglas del MCP
+    assert "Regla 1" in content
+    assert "Regla 2" in content
+    assert "Regla 3" in content

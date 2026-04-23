@@ -795,6 +795,11 @@ def generate(
     # tecnologia: mismo mapping que antes
     tecnologia = "was" if analysis.source_kind == "was" else "bus"
 
+    # v0.23.14: deploymentType segun matriz MCP oficial (bank-mcp-matrix.md)
+    # - orq          -> "orquestador" (Regla 2: incluye lib-event-logs)
+    # - was/iib/bus  -> "microservicio" (caso base)
+    deployment_type = "orquestador" if analysis.source_kind == "orq" else "microservicio"
+
     # v0.20.5-6: detectar WSDL sintetico (WAS sin .wsdl fisico, solo anotaciones
     # JAX-WS). analyze_legacy sintetiza Path("<inferred-from-java>") como
     # marcador. v0.20.6: el MCP Fabrics requiere wsdlFilePath como string valido
@@ -856,6 +861,12 @@ def generate(
     table.add_row("projectType", project_type, f"{analysis.wsdl.operation_count} ops")
     table.add_row("webFramework", web_framework, "matriz oficial")
     table.add_row("invocaBancs", str(invoca_bancs).lower(), f"{len(analysis.umps)} UMPs")
+    deployment_origin = (
+        "Regla 2 MCP (ORQ): dispara lib-event-logs"
+        if deployment_type == "orquestador"
+        else f"source_kind={analysis.source_kind}"
+    )
+    table.add_row("deploymentType", deployment_type, deployment_origin)
     console.print(table)
 
     mcp_args = {
@@ -868,6 +879,7 @@ def generate(
         "projectType": project_type,
         "webFramework": web_framework,
         "invocaBancs": invoca_bancs,
+        "deploymentType": deployment_type,    # v0.23.14: Regla 2 MCP
     }
 
     if dry_run:

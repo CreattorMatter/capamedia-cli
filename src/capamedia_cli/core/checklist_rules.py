@@ -77,32 +77,68 @@ def _read_or_empty(path: Path) -> str:
 def _expected_framework(
     source_type: str, has_bancs: bool, ops_count: int
 ) -> tuple[str, str]:
-    """Matriz MCP-driven oficial del banco (v0.22.0).
+    """Matriz MCP-driven oficial del banco (v0.23.14).
+
+    Fuente: `bank-mcp-matrix.md` canonical + PDF `BPTPSRE-Modos de uso`.
 
     Returns (expected_framework, reason) donde framework es "rest" | "soap".
 
-    Reglas (prioridad de arriba abajo):
-      1. BUS (IIB) + invocaBancs=true -> REST+WebFlux (override MCP)
-      2. ORQ                          -> REST+WebFlux (deploymentType=orquestador)
-      3. WAS + 1 op                   -> REST + MVC
-      4. WAS + 2+ ops                 -> SOAP + MVC
-      5. Unknown/sin datos            -> fallback a ops count (1 -> rest, sino soap)
+    Reglas del MCP oficial (en orden de prioridad):
+      Regla 1 — invocaBancs=true (override total) -> webflux + rest
+      Regla 2 — deploymentType=orquestador       -> webflux + rest + lib-event-logs
+      Regla 3 — projectType=soap + microservicio -> mvc + soap + spring-web-service
+      (sin regla) caso base WAS 1 op / BUS sin BANCS 1 op -> rest
+
+    Mapeo source_type interno -> parametros MCP del banco:
+      orq                  -> deploymentType=orquestador (Regla 2)
+      iib/bus + has_bancs  -> invocaBancs=true (Regla 1)
+      iib/bus sin bancs    -> deploymentType=microservicio (Regla 3 si 2+ ops)
+      was                  -> deploymentType=microservicio, framework=mvc siempre
     """
     src = (source_type or "").lower()
 
-    if src == "bus" and has_bancs:
-        return ("rest", "BUS + invocaBancs=true fuerza WebFlux")
+    # Regla 1 — invocaBancs=true (override total, prioridad maxima)
+    if src in ("bus", "iib") and has_bancs:
+        return (
+            "rest",
+            "Regla 1 MCP: invocaBancs=true fuerza webflux+rest (override total)",
+        )
+
+    # Regla 2 — deploymentType=orquestador
     if src == "orq":
-        return ("rest", "ORQ siempre WebFlux (deploymentType=orquestador)")
+        return (
+            "rest",
+            "Regla 2 MCP: deploymentType=orquestador -> webflux+rest + lib-event-logs",
+        )
+
+    # WAS — siempre framework=mvc, projectType decide por ops
     if src == "was":
         if ops_count == 1:
-            return ("rest", "WAS 1 op -> REST + MVC")
-        return ("soap", f"WAS {ops_count} ops -> SOAP + MVC")
+            return ("rest", "WAS 1 op -> mvc+rest (microservicio, caso base)")
+        return (
+            "soap",
+            f"WAS {ops_count} ops -> Regla 3 MCP: mvc+soap + spring-web-service",
+        )
+
+    # BUS sin BANCS — por ops_count (Regla 3 si 2+ ops)
+    if src in ("bus", "iib"):
+        if ops_count == 1:
+            return (
+                "rest",
+                "BUS sin BANCS 1 op (Apis) -> webflux+rest (caso base)",
+            )
+        return (
+            "soap",
+            f"BUS sin BANCS {ops_count} ops -> Regla 3 MCP: mvc+soap + spring-web-service",
+        )
 
     # Fallback: sin source_type detectable, usar conteo de ops
     if ops_count == 1:
-        return ("rest", "1 op -> REST (sin source_type, fallback a conteo)")
-    return ("soap", f"{ops_count} ops -> SOAP (sin source_type, fallback a conteo)")
+        return ("rest", "1 op -> rest (sin source_type, fallback a conteo)")
+    return (
+        "soap",
+        f"{ops_count} ops -> soap (sin source_type, fallback a conteo)",
+    )
 
 
 # -- Block 0: Pre-check con analisis cruzado legacy vs migrado ---------------
