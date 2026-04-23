@@ -4,6 +4,102 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.4] - 2026-04-23
+
+### Added - Masividad: `batch clone --init` + `batch review`
+
+Feedback Julian: "necesito saber si acepta masividad... capamedia init con
+el clone y init juntos para 7 servicios a la vez. Y el review tambien
+masivo, parándote en la carpeta raíz donde estan todos los servicios."
+
+Ya existia la familia `batch *` (clone/init/check/migrate/pipeline/watch).
+Esta version suma:
+
+**1. Flag `--init` en `batch clone`** (fusion consistente con single v0.23.0):
+
+```bash
+# Archivo de servicios (uno por linea o CSV/XLSX)
+cat > services.txt <<EOF
+wsclientes0023
+wsclientes0076
+wstecnicos0008
+orqclientes0027
+...
+EOF
+
+# Clone + init (default Claude) para los 7 en paralelo
+capamedia batch clone --from services.txt --init --workers 4
+```
+
+Para cada servicio:
+1. Crea subcarpeta `<root>/<service>/`
+2. Corre `clone_service` (legacy + UMPs + TX + reportes)
+3. Si `--init`: corre `scaffold_project` (Claude Code + CLAUDE.md + .mcp.json)
+4. Reporta OK / fail / partial (clone OK pero init fallo) en la tabla
+   consolidada.
+
+Flag `--init-ai` acepta otros harnesses (claude/codex/copilot/cursor/
+windsurf/opencode/all, o CSV).
+
+**2. Nuevo `batch review`** (auditoria masiva):
+
+```bash
+# Parado en la carpeta raiz donde estan los 7 workspaces:
+capamedia batch review
+
+# Autodetecta subcarpetas que tengan destino/ + legacy/
+# Corre el checklist completo en cada una, veredicto consolidado en tabla
+```
+
+O con lista explicita:
+```bash
+capamedia batch review --from services.txt --workers 2
+```
+
+Para cada workspace:
+1. Localiza `destino/<unico-subdir>` y `legacy/<unico-subdir>`
+2. Auto-detecta `source_type` + `has_bancs` desde el legacy
+3. Corre `run_all_blocks(ctx)` con la matriz MCP completa
+4. Calcula veredicto: `READY_TO_MERGE` | `READY_WITH_FOLLOW_UP` | `BLOCKED_BY_HIGH`
+5. Tabla consolidada: `| svc | verdict | source | PASS | HIGH | MEDIUM | LOW |`
+6. Reporte `.md` en el root con los detalles
+
+**3. Caso de uso completo que Julian describio**:
+
+```bash
+# Estas parado en C:\Dev\BancoPichincha\ (la carpeta raiz)
+cd C:\Dev\BancoPichincha
+
+# Preparar lista de 7 servicios a migrar
+notepad services.txt    # wsclientes0023, wsclientes0076, ...
+
+# Paso 1: clone + init masivo (paralelo, ~5 min para 7 servicios)
+capamedia batch clone --from services.txt --init --workers 4
+
+# Paso 2: fabrics + migrate - esto SIGUE SIENDO manual por servicio
+#   (cada uno requiere su sesion de Claude Code)
+cd wsclientes0023
+claude .
+> /migrate
+# repetir para cada servicio
+
+# Paso 3: review masivo de vuelta en la raiz
+cd C:\Dev\BancoPichincha
+capamedia batch review
+# tabla consolidada de los 7 veredictos
+```
+
+### Tests nuevos (6)
+
+- `batch clone --help` muestra `--init` y `--init-ai`
+- `batch review` esta registrado como subcomando
+- `batch review <empty>` falla con exit 2 y mensaje claro
+- `batch review` autodetecta subcarpetas con `destino/`
+- `batch review --from services.txt` lee nombres explicitos
+- `batch review` escribe reporte `batch-review-*.md`
+
+Total: 555 tests passing.
+
 ## [0.23.3] - 2026-04-23
 
 ### Improved - Mensaje del Block 19 menciona las 3 ubicaciones validas para `.properties`

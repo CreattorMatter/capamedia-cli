@@ -1258,15 +1258,38 @@ def batch_clone(
     workers: Annotated[int, typer.Option("--workers", "-w")] = 4,
     root: Annotated[Path | None, typer.Option("--root")] = None,
     shallow: Annotated[bool, typer.Option("--shallow")] = False,
+    init: Annotated[
+        bool,
+        typer.Option(
+            "--init",
+            help="v0.23.4: al terminar cada clone, correr `capamedia init` automaticamente. "
+            "Default harness: claude (configurable con --init-ai). Equivale a correr "
+            "`batch clone --from <f>` + `batch init --from <f>` en una sola linea.",
+        ),
+    ] = False,
+    init_ai: Annotated[
+        str,
+        typer.Option(
+            "--init-ai",
+            help="Harness AI para el init automatico. Default: claude. "
+            "CSV permitido (ej. claude,codex). Solo aplica si --init esta activado.",
+        ),
+    ] = "claude",
 ) -> None:
-    """Clone masivo (legacy + UMPs + TX) en paralelo."""
+    """Clone masivo (legacy + UMPs + TX) en paralelo.
+
+    Con `--init`: tambien corre init del harness (default Claude) al finalizar
+    cada clone. Equivale al flujo single `capamedia clone <svc> --init` de v0.23.0
+    pero para N servicios.
+    """
     from capamedia_cli.commands.clone import clone_service
 
     services = _read_services_file(file, sheet=sheet)
     ws = (root or Path.cwd()).resolve()
+    header_suffix = f" + init ({init_ai})" if init else ""
     console.print(
         Panel.fit(
-            f"[bold]batch clone[/bold]\n"
+            f"[bold]batch clone{header_suffix}[/bold]\n"
             f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}",
             border_style="cyan",
         )
@@ -1274,19 +1297,42 @@ def batch_clone(
 
     rows: list[BatchRow] = []
 
+    # Resolver harnesses UNA vez antes del pool (validar que el nombre sea bueno)
+    harnesses: list[str] = []
+    if init:
+        from capamedia_cli.adapters import resolve_harnesses
+
+        harnesses = resolve_harnesses(init_ai)
+
     def process(service: str) -> BatchRow:
         svc_ws = ws / service
         svc_ws.mkdir(parents=True, exist_ok=True)
         try:
-            # Invocamos el clone_service directo pasando workspace=svc_ws
-            # (no imprime por stdout en modo batch — los logs individuales se pierden;
-            # solo nos interesa el resultado agregado)
             clone_service(service, workspace=svc_ws, shallow=shallow, skip_tx=False)
-            return BatchRow(service, "ok", str(svc_ws), {"workspace": str(svc_ws.name)})
         except typer.Exit:
             return BatchRow(service, "fail", "clone failed (typer.Exit)", {})
         except Exception as e:
             return BatchRow(service, "fail", f"{type(e).__name__}: {e}", {})
+
+        extra: dict[str, str] = {"workspace": str(svc_ws.name)}
+        if init:
+            try:
+                from capamedia_cli.commands.init import scaffold_project
+
+                scaffold_project(
+                    target_dir=svc_ws,
+                    service_name=service,
+                    harnesses=harnesses,
+                    artifact_token=None,
+                )
+                extra["init"] = "ok"
+                extra["harness"] = init_ai
+            except Exception as e:
+                # clone OK pero init fallo: reportar mixed success
+                extra["init"] = f"fail: {type(e).__name__}"
+                return BatchRow(service, "partial", str(svc_ws), extra)
+
+        return BatchRow(service, "ok", str(svc_ws), extra)
 
     with Progress(
         TextColumn("[bold cyan]{task.description}"),
@@ -1295,15 +1341,17 @@ def batch_clone(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Clonando", total=len(services))
+        label = "Clone + init" if init else "Clonando"
+        task = progress.add_task(label, total=len(services))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for future in as_completed(pool.submit(process, s) for s in services):
                 rows.append(future.result())
                 progress.advance(task)
 
     rows.sort(key=lambda r: r.service)
-    _render_table("clone", rows, ["workspace"])
-    md = _write_markdown_report("clone", rows, ws, ["workspace"])
+    cols = ["workspace", "init", "harness"] if init else ["workspace"]
+    _render_table("clone", rows, cols)
+    md = _write_markdown_report("clone", rows, ws, cols)
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
 
 
@@ -1393,6 +1441,179 @@ def batch_check(
     field_order = ["verdict", "pass", "HIGH", "MEDIUM", "LOW"]
     _render_table("check", rows, field_order)
     md = _write_markdown_report("check", rows, root, field_order)
+    console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+
+
+@app.command("review")
+def batch_review(
+    root: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Carpeta raiz donde viven los workspaces de servicios. Default: CWD.",
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None,
+        typer.Option(
+            "--from", "-f",
+            help="Archivo .txt/.csv/.xlsx con nombres de servicios. Si se omite, "
+            "autodetecta subcarpetas de root que tengan destino/ + legacy/.",
+        ),
+    ] = None,
+    sheet: Annotated[
+        str | None, typer.Option("--sheet", help="Hoja del .xlsx")
+    ] = None,
+    workers: Annotated[int, typer.Option("--workers", "-w")] = 2,
+    skip_official: Annotated[
+        bool,
+        typer.Option(
+            "--skip-official",
+            help="Saltear fase 4 (validador oficial). Util si no tenes venv Python ok.",
+        ),
+    ] = False,
+) -> None:
+    """Review masivo sobre N workspaces (v0.23.4).
+
+    Parado en una carpeta que contiene varios workspaces (cada uno con
+    `destino/` + `legacy/`), corre `capamedia review` para todos en paralelo
+    y produce una tabla consolidada de veredictos.
+
+    Input (cualquiera):
+      - `--from <file>` para especificar nombres explicitos
+      - Sin argumentos: autodetecta subcarpetas de CWD con `destino/` + `legacy/`
+
+    Ideal para:
+      - Cerrar un sprint donde migraste varios servicios — revisarlos de una
+      - Validar que los N migrados del equipo esten listos para PR
+    """
+    from capamedia_cli.commands.review import review as review_single
+    from capamedia_cli.core.checklist_rules import CheckContext, run_all_blocks
+
+    root_path = (root or Path.cwd()).resolve()
+
+    # 1. Resolver lista de workspaces
+    if file:
+        service_names = _read_services_file(file, sheet=sheet)
+        workspaces = [root_path / svc for svc in service_names]
+    else:
+        # Autodetect: buscar subcarpetas con destino/ + legacy/ o solo destino/
+        workspaces = []
+        for subdir in sorted(root_path.iterdir()):
+            if not subdir.is_dir() or subdir.name.startswith("."):
+                continue
+            if (subdir / "destino").is_dir():
+                workspaces.append(subdir)
+        if not workspaces:
+            console.print(
+                f"[red]Error:[/red] no se encontraron workspaces bajo {root_path}. "
+                "Pasa `--from <archivo>` con nombres explicitos, o parate en una "
+                "carpeta que contenga subcarpetas de servicios con `destino/`."
+            )
+            raise typer.Exit(code=2)
+
+    console.print(
+        Panel.fit(
+            f"[bold]batch review[/bold]\n"
+            f"Workspaces: {len(workspaces)} · Workers: {workers} · Root: {root_path}\n"
+            f"Validator oficial: {'SKIP' if skip_official else 'ON'}",
+            border_style="cyan",
+        )
+    )
+
+    rows: list[BatchRow] = []
+
+    def process(svc_ws: Path) -> BatchRow:
+        svc_name = svc_ws.name
+        # Localizar el project_path (destino/<unico-subdir>) y legacy_path
+        destino = svc_ws / "destino"
+        if not destino.is_dir():
+            return BatchRow(svc_name, "fail", "sin carpeta destino/", {})
+        destino_subs = [p for p in destino.iterdir() if p.is_dir() and not p.name.startswith(".")]
+        if len(destino_subs) != 1:
+            return BatchRow(
+                svc_name, "fail",
+                f"destino/ tiene {len(destino_subs)} subdirs (esperaba 1)",
+                {},
+            )
+        project_path = destino_subs[0]
+
+        legacy_root = svc_ws / "legacy"
+        legacy_path = None
+        if legacy_root.is_dir():
+            legacy_subs = [p for p in legacy_root.iterdir() if p.is_dir() and not p.name.startswith(".")]
+            if len(legacy_subs) == 1:
+                legacy_path = legacy_subs[0]
+
+        # Popular source_type / has_bancs via detector
+        source_type = ""
+        has_bancs = False
+        if legacy_path and legacy_path.is_dir():
+            try:
+                from capamedia_cli.core.legacy_analyzer import (
+                    detect_bancs_connection,
+                    detect_source_kind,
+                )
+                source_type = detect_source_kind(legacy_path, svc_name)
+                has_bancs, _ = detect_bancs_connection(legacy_path)
+            except Exception:
+                pass
+
+        ctx = CheckContext(
+            migrated_path=project_path,
+            legacy_path=legacy_path,
+            source_type=source_type,
+            has_bancs=has_bancs,
+        )
+
+        try:
+            results = run_all_blocks(ctx)
+        except Exception as e:
+            return BatchRow(svc_name, "fail", f"checklist error: {e}", {})
+
+        high = sum(1 for r in results if r.status == "fail" and r.severity == "high")
+        medium = sum(1 for r in results if r.status == "fail" and r.severity == "medium")
+        low = sum(1 for r in results if r.status == "fail" and r.severity == "low")
+        pass_ = sum(1 for r in results if r.status == "pass")
+
+        if high > 0:
+            verdict = "BLOCKED_BY_HIGH"
+            status = "fail"
+        elif medium > 0:
+            verdict = "READY_WITH_FOLLOW_UP"
+            status = "ok"
+        else:
+            verdict = "READY_TO_MERGE"
+            status = "ok"
+
+        return BatchRow(
+            svc_name, status, verdict,
+            {
+                "verdict": verdict,
+                "source": source_type.upper() or "?",
+                "pass": str(pass_),
+                "HIGH": str(high),
+                "MEDIUM": str(medium),
+                "LOW": str(low),
+            },
+        )
+
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Review", total=len(workspaces))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for future in as_completed(pool.submit(process, w) for w in workspaces):
+                rows.append(future.result())
+                progress.advance(task)
+
+    rows.sort(key=lambda r: r.service)
+    field_order = ["verdict", "source", "pass", "HIGH", "MEDIUM", "LOW"]
+    _render_table("review", rows, field_order)
+    md = _write_markdown_report("review", rows, root_path, field_order)
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
 
 
