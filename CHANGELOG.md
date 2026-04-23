@@ -4,6 +4,85 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.12] - 2026-04-23
+
+### Added - `capamedia info` / `/info` — dashboard de pendientes del workspace
+
+Feedback Julian: "necesito un /info que me diga los archivos faltantes como
+en el caso de los WAS los .properties, pero que contemple ORQ, WAS y BUS".
+
+Nuevo comando CLI + slash command que muestra un resumen consolidado de
+**que tiene y que le falta** al workspace. Contempla los 3 tipos de servicio.
+
+### Secciones del dashboard
+
+```
+╔═ capamedia info ══════════════════════════════════╗
+║ Servicio: wsclientes0076                          ║
+║ Tipo: WAS · invocaBancs: NO                       ║
+║ Workspace: C:\Dev\BancoPichincha\wsclientes0076   ║
+╚════════════════════════════════════════════════════╝
+
+Properties del banco
+  Catalogo compartido (embebido, no requiere accion):
+    ✓ generalServices.properties (3 keys)
+    ✓ CatalogoAplicaciones.properties (4 keys)
+  Pendientes del banco (1):
+    ✗ umpclientes0025.properties (6 keys - source: ump:umpclientes0025)
+      keys: GRUPO_CENTRALIZADA, RECURSO_01, COMPONENTE_01, ...
+    -> pegar en `.capamedia/inputs/` o en la raiz del workspace
+
+Secretos Azure Key Vault
+  (no aplica a WAS sin BD - solo WAS con BD requiere KV)
+
+Downstream / Integraciones
+  UMPs clonadas: 1 (ump-umpclientes0025-was)
+
+Handoffs pendientes (NO son bugs del codigo)
+  ~ catalog-info.yaml: completar spec.owner + URL Confluence
+  ~ .sonarlint/connectedMode.json: reemplazar placeholder con project_key
+
+Siguiente paso
+  1) Pedir los .properties pendientes al owner
+  2) Pegar en .capamedia/inputs/<file>.properties
+  3) capamedia checklist (o /doublecheck en Claude Code)
+```
+
+### Contempla los 3 tipos
+
+- **WAS**: properties del legacy + UMPs + secretos KV si tiene BD +
+  handoffs (catalog-info, sonar).
+- **BUS (IIB)**: UMPs + TX repos + configurables CSV + handoffs.
+- **ORQ**: confirma que referencia servicios migrados (no legacy del
+  target), handoffs.
+
+Auto-detecta `source_type` desde el legacy clonado. Lee los reports:
+- `.capamedia/config.yaml`
+- `.capamedia/properties-report.yaml`
+- `.capamedia/secrets-report.yaml`
+
+### Read-only
+
+A diferencia de `check`/`doublecheck`, `info` NO modifica archivos ni corre
+el checklist. Solo muestra estado. Ideal como primer comando al abrir un
+workspace.
+
+### Tests nuevos (11)
+
+- `capamedia info --help` funciona
+- Workspace vacio no crashea (placeholders claros)
+- PENDING_FROM_BANK se muestra con keys
+- Secretos KV solo para WAS con BD
+- Skip de secrets para BUS/ORQ
+- Detecta sonarlint placeholder
+- Siguiente paso recomienda checklist + owner si hay pending
+- Cuenta UMPs desde legacy
+- `/info` cargado como prompt canonical
+- Prompt menciona `capamedia info` + los 3 tipos
+- `init --ai claude` scaffoldea `.claude/commands/info.md`
+
+Total: 600 tests passing.
+
 ## [0.23.11] - 2026-04-23
 
 ### Added - `capamedia adopt` — adoptar workspaces migrados fuera del CLI

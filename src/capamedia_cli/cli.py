@@ -40,6 +40,7 @@ from capamedia_cli.commands import (
     clone,
     doctor,
     fabrics,
+    info as info_cmd,
     init,
     install,
     review,
@@ -94,6 +95,7 @@ app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("adopt")(adopt_cmd.adopt)  # v0.23.11: adopt workspaces no-canonicos
+app.command("info")(info_cmd.info)    # v0.23.12: dashboard de pendientes
 app.command("check")(check.check_project)
 app.command("checklist")(check.checklist_project)  # v0.23.0: alias doble-check
 # v0.23.2: review con subcomandos `review orq|bus|was` para forzar el source_type
