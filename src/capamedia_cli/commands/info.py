@@ -193,6 +193,125 @@ def _render_secrets_section(workspace: Path, source_type: str, has_bancs: bool) 
         )
 
 
+def _detect_ump_gap(
+    workspace: Path, source_type: str,
+) -> tuple[list[str], set[str], set[str]]:
+    """Devuelve (referenced, cloned, missing) — UMPs que el legacy importa.
+
+    v0.23.13: distingue UMPs **referenciadas por el legacy** de las
+    **efectivamente clonadas** en `umps/`. Las faltantes son las que el
+    usuario tiene que traer antes de poder migrar / auditar bien.
+    """
+    legacy_root = workspace / "legacy"
+    if not legacy_root.is_dir():
+        return ([], set(), set())
+
+    subs = [p for p in legacy_root.iterdir() if p.is_dir() and not p.name.startswith(".")]
+    if len(subs) != 1:
+        return ([], set(), set())
+    legacy_path = subs[0]
+
+    try:
+        from capamedia_cli.core.legacy_analyzer import (
+            detect_ump_references,
+            detect_ump_references_was,
+        )
+        if source_type == "was":
+            referenced = detect_ump_references_was(legacy_path)
+        else:
+            referenced = detect_ump_references(legacy_path)
+    except Exception:
+        referenced = []
+
+    # UMPs clonadas en umps/ - extraer el "<ump>" del nombre de la carpeta
+    import re as _re
+    umps_root = workspace / "umps"
+    cloned: set[str] = set()
+    if umps_root.is_dir():
+        for p in umps_root.iterdir():
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            m = _re.search(r"(ump[a-z]+\d{4})", p.name, _re.IGNORECASE)
+            if m:
+                cloned.add(m.group(1).lower())
+
+    referenced_lower = {u.lower() for u in referenced}
+    missing = referenced_lower - cloned
+    return (referenced, cloned, missing)
+
+
+def _render_umps_section(
+    workspace: Path, source_type: str, missing_umps: set[str],
+) -> None:
+    """Muestra UMPs referenciadas vs clonadas + comandos para traer las faltantes."""
+    legacy_root = workspace / "legacy"
+    umps_root = workspace / "umps"
+
+    console.print("\n[bold cyan]UMPs (dependencias del servicio)[/bold cyan]")
+
+    if not legacy_root.is_dir():
+        console.print("  [dim]sin legacy local para analizar UMPs referenciadas[/dim]")
+        return
+
+    referenced, cloned, _ = _detect_ump_gap(workspace, source_type)
+
+    console.print(
+        f"  Referenciadas por el legacy: [bold]{len(referenced)}[/bold] "
+        f"{'(' + ', '.join(sorted(referenced)[:5]) + ')' if referenced else ''}"
+    )
+    console.print(
+        f"  Clonadas en `umps/`:         [bold]{len(cloned)}[/bold]"
+    )
+
+    if missing_umps:
+        console.print(
+            f"  [red]Faltantes:[/red]                  [bold red]{len(missing_umps)}[/bold red]"
+        )
+        console.print(
+            "\n  [yellow]IMPACTO:[/yellow] las UMPs faltantes tienen sus propios "
+            "`.properties` y posiblemente sus propias dependencias a BANCS / BD. "
+            "Sin ellas, la migracion queda incompleta."
+        )
+        console.print("\n  [bold]UMPs faltantes + `.properties` esperado:[/bold]")
+        for ump in sorted(missing_umps):
+            console.print(
+                f"    [red]✗[/red] [bold cyan]{ump}[/bold cyan]  "
+                f"(falta repo + archivo `{ump}.properties`)"
+            )
+
+        console.print("\n  [yellow]Como traerlas:[/yellow]")
+        console.print(
+            "  [cyan]Opcion A[/cyan] (recomendado) - re-correr el clone completo, "
+            "baja el legacy + UMPs + TX de una:"
+        )
+        service_name = workspace.name if workspace.name else "<svc>"
+        console.print(
+            f"    [cyan]capamedia clone {service_name}[/cyan]  "
+            "[dim](requiere PAT Azure DevOps)[/dim]"
+        )
+        console.print(
+            "\n  [cyan]Opcion B[/cyan] - git clone manual una por una "
+            "(si solo faltan UMPs, no quieres re-clonar todo):"
+        )
+        for ump in sorted(missing_umps):
+            if source_type == "was":
+                console.print(
+                    f"    [dim]git clone https://dev.azure.com/BancoPichinchaEC/"
+                    f"tpl-integration-services-was/_git/ump-{ump}-was "
+                    f"umps/ump-{ump}-was[/dim]"
+                )
+            else:
+                console.print(
+                    f"    [dim]git clone https://dev.azure.com/BancoPichinchaEC/"
+                    f"tpl-bus-omnicanal/_git/sqb-msa-{ump} "
+                    f"umps/sqb-msa-{ump}[/dim]"
+                )
+        console.print(
+            "\n  [dim]Despues de traerlas, re-correr [cyan]capamedia info[/cyan] "
+            "para ver las properties que cada UMP requiere del banco.[/dim]"
+        )
+
+
 def _render_downstream_section(
     workspace: Path, source_type: str, has_bancs: bool,
 ) -> None:
@@ -222,10 +341,6 @@ def _render_downstream_section(
 
     if source_type == "bus":
         console.print(
-            f"  UMPs clonadas: [bold]{len(ump_dirs)}[/bold] "
-            f"({', '.join(ump_dirs[:5])}{'...' if len(ump_dirs) > 5 else ''})"
-        )
-        console.print(
             f"  TX repos clonados: [bold]{len(tx_dirs)}[/bold] "
             f"({', '.join(tx_dirs[:5])}{'...' if len(tx_dirs) > 5 else ''})"
         )
@@ -235,22 +350,11 @@ def _render_downstream_section(
             )
         return
 
-    if source_type == "was":
+    if source_type == "was" and tx_dirs:
         console.print(
-            f"  UMPs clonadas: [bold]{len(ump_dirs)}[/bold] "
-            f"({', '.join(ump_dirs[:5])}{'...' if len(ump_dirs) > 5 else ''})"
+            f"  TX repos: [bold]{len(tx_dirs)}[/bold] "
+            f"(poco comun en WAS - verificar si realmente aplican)"
         )
-        if tx_dirs:
-            console.print(
-                f"  TX repos: [bold]{len(tx_dirs)}[/bold] "
-                f"(poco comun en WAS - verificar si realmente aplican)"
-            )
-        return
-
-    # Desconocido
-    console.print(
-        f"  UMPs: {len(ump_dirs)}, TX repos: {len(tx_dirs)}"
-    )
 
 
 def _render_handoffs_section(workspace: Path) -> None:
@@ -297,10 +401,35 @@ def _render_handoffs_section(workspace: Path) -> None:
 
 
 def _render_next_step(
-    workspace: Path, source_type: str, has_pending_properties: bool,
+    workspace: Path,
+    source_type: str,
+    has_pending_properties: bool,
+    has_missing_umps: bool = False,
 ) -> None:
-    """Sugiere el siguiente paso concreto segun el estado."""
+    """Sugiere el siguiente paso concreto segun el estado.
+
+    Prioridad (alto -> bajo):
+    1. UMPs faltantes: hay que traerlas primero (sin eso las properties del
+       UMP no se detectan).
+    2. Properties pendientes: pedir al owner + pegar + checklist.
+    3. Sin nada pendiente: review directo.
+    """
     console.print("\n[bold]Siguiente paso[/bold]")
+
+    if has_missing_umps:
+        service_name = workspace.name or "<svc>"
+        console.print(
+            "  [yellow]1) PRIMERO:[/yellow] traer las UMPs faltantes (sin eso el "
+            "detector de properties no puede ver las keys que cada UMP requiere)\n"
+            f"     [cyan]capamedia clone {service_name}[/cyan]  [dim](baja todo)[/dim]\n"
+            "     o git clone manual de cada `ump-<ump>-was` (ver seccion UMPs arriba)\n"
+            "  2) Despues re-correr [cyan]capamedia info[/cyan] para ver las properties "
+            "completas\n"
+            "  3) Pedir los .properties pendientes al owner y pegar en "
+            "[cyan].capamedia/inputs/[/cyan]\n"
+            "  4) [cyan]capamedia checklist[/cyan] (o `/doublecheck` en Claude Code)"
+        )
+        return
 
     if has_pending_properties:
         console.print(
@@ -311,7 +440,7 @@ def _render_next_step(
         )
         return
 
-    # Si no hay pending properties, siguiente paso depende de si ya hay reports
+    # Sin nada pendiente
     if (workspace / ".capamedia" / "reports").is_dir():
         console.print(
             "  [cyan]capamedia review[/cyan]  (completo, incluye validator oficial)"
@@ -360,9 +489,13 @@ def info(
         )
     )
 
+    # v0.23.13: detectar UMPs faltantes (referenciadas pero no clonadas)
+    _, _, missing_umps = _detect_ump_gap(ws, source_type)
+
     # Secciones
     _render_properties_section(ws)
     _render_secrets_section(ws, source_type, has_bancs)
+    _render_umps_section(ws, source_type, missing_umps)
     _render_downstream_section(ws, source_type, has_bancs)
     _render_handoffs_section(ws)
 
@@ -374,4 +507,4 @@ def info(
         has_pending_props = any(
             p.get("status") == "PENDING_FROM_BANK" for p in specific
         )
-    _render_next_step(ws, source_type, has_pending_props)
+    _render_next_step(ws, source_type, has_pending_props, bool(missing_umps))

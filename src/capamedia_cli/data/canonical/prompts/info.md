@@ -43,6 +43,21 @@ Ejecutar:
 capamedia info
 ```
 
+### UMPs faltantes (v0.23.13)
+
+Si el usuario migro un servicio pero no trajo sus UMPs, el CLI detecta las
+UMPs **referenciadas** por el legacy (en `pom.xml` + `import`s Java) y las
+compara con las carpetas `umps/*`. Las **referenciadas pero NO clonadas**
+se marcan explicitamente como faltantes, con:
+
+- El codigo de la UMP (ej. `umpclientes0025`).
+- El archivo `.properties` esperado (ej. `umpclientes0025.properties`).
+- El comando `git clone` exacto para traerla.
+
+Sin las UMPs clonadas, el detector de properties **no ve las keys** que
+cada UMP requiere del banco — y la migracion queda incompleta. `/info` lo
+flagea como prioridad maxima en el "siguiente paso".
+
 Si el usuario esta parado en:
 - La raiz del workspace (con `destino/` + `legacy/` hermanos) → autodetecta OK.
 - Adentro de `destino/<svc>/` → sube 2 niveles automaticamente.

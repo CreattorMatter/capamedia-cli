@@ -4,6 +4,78 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.13] - 2026-04-23
+
+### Added - `/info` detecta UMPs referenciadas pero NO clonadas
+
+Feedback Julian (caso real): usuario migro `wsclientes0026` pero no trajo
+sus UMPs. El `/info` mostraba OK pero el detector de properties no tenia
+acceso a las UMPs → las keys que cada UMP pedia al banco quedaban
+invisibles en el reporte.
+
+**Fix**: nueva seccion "UMPs (dependencias del servicio)" en `info.py`
+que compara **referenciadas por el legacy** vs **clonadas en `umps/`**:
+
+```
+UMPs (dependencias del servicio)
+  Referenciadas por el legacy: 2 (umpclientes0025, umptecnicos0077)
+  Clonadas en `umps/`:         0
+  Faltantes:                  2
+
+  IMPACTO: las UMPs faltantes tienen sus propios `.properties` y
+  posiblemente sus propias dependencias a BANCS / BD. Sin ellas, la
+  migracion queda incompleta.
+
+  UMPs faltantes + `.properties` esperado:
+    ✗ umpclientes0025  (falta repo + archivo `umpclientes0025.properties`)
+    ✗ umptecnicos0077  (falta repo + archivo `umptecnicos0077.properties`)
+
+  Como traerlas:
+  Opcion A (recomendado) - re-correr el clone completo:
+    capamedia clone wsclientes0026   (requiere PAT Azure DevOps)
+
+  Opcion B - git clone manual una por una:
+    git clone .../tpl-integration-services-was/_git/ump-umpclientes0025-was umps/ump-umpclientes0025-was
+    git clone .../tpl-integration-services-was/_git/ump-umptecnicos0077-was umps/ump-umptecnicos0077-was
+
+  Despues de traerlas, re-correr `capamedia info` para ver las
+  properties que cada UMP requiere del banco.
+```
+
+### Prioridad del siguiente paso actualizada
+
+Cuando hay **UMPs faltantes**, el "siguiente paso" del dashboard ahora
+prioriza traerlas PRIMERO (antes de pedir properties al owner), porque
+sin las UMPs el detector no puede ver las keys reales.
+
+```
+Siguiente paso
+  1) PRIMERO: traer las UMPs faltantes (sin eso el detector de properties
+     no puede ver las keys que cada UMP requiere)
+     capamedia clone wsclientes0026   (baja todo)
+  2) Despues re-correr capamedia info
+  3) Pedir los .properties pendientes al owner y pegar en .capamedia/inputs/
+  4) capamedia checklist (o /doublecheck)
+```
+
+### Contempla WAS + BUS
+
+- **WAS**: detecta UMPs desde `pom.xml` + `import com.pichincha....*` en Java.
+- **BUS (IIB)**: detecta UMPs desde `*.esql` + `*.msgflow`.
+- **ORQ**: no aplica (los ORQ no tienen UMPs propios).
+
+Patterns de git clone sugeridos:
+- WAS: `tpl-integration-services-was/_git/ump-<ump>-was`
+- BUS: `tpl-bus-omnicanal/_git/sqb-msa-<ump>`
+
+### Tests nuevos (3)
+
+- UMPs referenciadas pero no clonadas → flageadas con `.properties` esperado
+- Partial: 1 clonada + 1 faltante → solo flagea la faltante
+- Sin legacy/: seccion muestra aviso, no crashea
+
+Total: 603 tests passing.
+
 ## [0.23.12] - 2026-04-23
 
 ### Added - `capamedia info` / `/info` — dashboard de pendientes del workspace

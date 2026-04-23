@@ -157,20 +157,21 @@ def test_info_next_step_when_properties_pending(tmp_path: Path) -> None:
 
 
 def test_info_counts_umps_from_legacy(tmp_path: Path) -> None:
-    """Seccion Downstream cuenta UMPs clonadas."""
+    """Seccion UMPs cuenta clonadas + muestra 'sin legacy' si no hay legacy/."""
     (tmp_path / ".capamedia").mkdir()
     (tmp_path / ".capamedia" / "config.yaml").write_text(
         "service_name: wsclientes0076\n", encoding="utf-8",
     )
-    # Simular 2 UMPs clonados
+    # Simular 2 UMPs clonados (pero SIN legacy/)
     (tmp_path / "umps" / "ump-umpclientes0025-was").mkdir(parents=True)
     (tmp_path / "umps" / "ump-umpotro0099-was").mkdir(parents=True)
 
     result = runner.invoke(app, ["info", "--workspace", str(tmp_path)])
     assert result.exit_code == 0
+    # La seccion UMPs se renderiza
     assert "UMPs" in result.output
-    # El conteo "2" debe aparecer
-    assert "2" in result.output
+    # Sin legacy/ no puede detectar "referenciadas", avisa
+    assert "sin legacy" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,119 @@ def test_info_slash_invokes_capamedia_info() -> None:
     assert "WAS" in content
     assert "BUS" in content or "IIB" in content
     assert "ORQ" in content
+
+
+def test_info_detects_missing_umps_referenced_by_legacy(tmp_path: Path) -> None:
+    """v0.23.13: si el legacy referencia un UMP que NO esta clonado, se flagea.
+
+    Caso real de Julian: el usuario migro wsclientes0026 pero no trajo sus
+    UMPs. El /info debe decir "falta umpXXXX + umpXXXX.properties".
+    """
+    (tmp_path / ".capamedia").mkdir()
+    (tmp_path / ".capamedia" / "config.yaml").write_text(
+        "service_name: wsclientes0026\n", encoding="utf-8",
+    )
+
+    # Simular WAS legacy con pom.xml referenciando 2 UMPs
+    legacy = tmp_path / "legacy" / "ws-wsclientes0026-was"
+    legacy.mkdir(parents=True)
+    # web.xml para que detect_source_kind reconozca como WAS
+    (legacy / "src" / "main" / "webapp" / "WEB-INF").mkdir(parents=True)
+    (legacy / "src" / "main" / "webapp" / "WEB-INF" / "web.xml").write_text(
+        "<web-app/>", encoding="utf-8",
+    )
+    (legacy / "src" / "main" / "java").mkdir(parents=True)
+    (legacy / "src" / "main" / "java" / "X.java").write_text(
+        "public class X {}", encoding="utf-8",
+    )
+    # pom.xml referencia 2 UMPs
+    (legacy / "pom.xml").write_text(
+        """<?xml version="1.0"?>
+<project>
+  <dependencies>
+    <dependency><artifactId>umpclientes0025-core-dominio</artifactId></dependency>
+    <dependency><artifactId>umpclientes0099-core-dominio</artifactId></dependency>
+  </dependencies>
+</project>
+""",
+        encoding="utf-8",
+    )
+
+    # NO clonar ningun UMP — umps/ vacio
+    # (simular el caso del usuario: solo tiene el servicio migrado + legacy)
+
+    result = runner.invoke(app, ["info", "--workspace", str(tmp_path)])
+    assert result.exit_code == 0
+    # Ambos UMPs aparecen como faltantes
+    assert "umpclientes0025" in result.output
+    assert "umpclientes0099" in result.output
+    # El .properties esperado se menciona
+    assert "umpclientes0025.properties" in result.output
+    # Comando de git clone sugerido
+    assert "ump-umpclientes0025-was" in result.output or "git clone" in result.output
+    # Siguiente paso prioriza traer las UMPs
+    assert "UMPs faltantes" in result.output or "PRIMERO" in result.output
+
+
+def test_info_detects_partial_umps(tmp_path: Path) -> None:
+    """Si 1 UMP esta clonada y otra no, solo flagea la faltante."""
+    (tmp_path / ".capamedia").mkdir()
+    (tmp_path / ".capamedia" / "config.yaml").write_text(
+        "service_name: wsclientes0076\n", encoding="utf-8",
+    )
+
+    legacy = tmp_path / "legacy" / "ws-wsclientes0076-was"
+    legacy.mkdir(parents=True)
+    (legacy / "src" / "main" / "webapp" / "WEB-INF").mkdir(parents=True)
+    (legacy / "src" / "main" / "webapp" / "WEB-INF" / "web.xml").write_text(
+        "<web-app/>", encoding="utf-8",
+    )
+    (legacy / "src" / "main" / "java").mkdir(parents=True)
+    (legacy / "src" / "main" / "java" / "A.java").write_text(
+        "public class A {}", encoding="utf-8",
+    )
+    # pom.xml con 2 UMPs referenciadas
+    (legacy / "pom.xml").write_text(
+        """<?xml version="1.0"?>
+<project>
+  <dependencies>
+    <dependency><artifactId>umpclientes0025-core-dominio</artifactId></dependency>
+    <dependency><artifactId>umptecnicos0077-core-dominio</artifactId></dependency>
+  </dependencies>
+</project>""",
+        encoding="utf-8",
+    )
+
+    # Clonar SOLO umpclientes0025 (falta umptecnicos0077)
+    cloned = tmp_path / "umps" / "ump-umpclientes0025-was"
+    cloned.mkdir(parents=True)
+
+    result = runner.invoke(app, ["info", "--workspace", str(tmp_path)])
+    assert result.exit_code == 0
+    # Solo umptecnicos0077 debe aparecer como faltante
+    assert "umptecnicos0077" in result.output
+    # umpclientes0025 clonada -> no debe aparecer en la seccion faltantes
+    # (puede aparecer en "clonadas" pero no como faltante)
+    output = result.output
+    # Buscar la seccion "Faltantes:" y verificar que umpclientes0025 no este ahi
+    if "Faltantes:" in output:
+        faltantes_idx = output.find("Faltantes:")
+        siguiente_idx = output.find("Como traerlas:") if "Como traerlas:" in output else len(output)
+        faltantes_section = output[faltantes_idx:siguiente_idx]
+        assert "umpclientes0025" not in faltantes_section
+
+
+def test_info_no_umps_section_if_no_legacy(tmp_path: Path) -> None:
+    """Sin legacy/, la seccion UMPs muestra aviso pero no crashea."""
+    (tmp_path / ".capamedia").mkdir()
+    (tmp_path / ".capamedia" / "config.yaml").write_text(
+        "service_name: wsfoo0001\n", encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["info", "--workspace", str(tmp_path)])
+    assert result.exit_code == 0
+    # La seccion UMPs debe aparecer pero con aviso
+    assert "UMPs" in result.output
 
 
 def test_init_scaffolds_info_slash_in_claude_commands(tmp_path: Path, monkeypatch) -> None:
