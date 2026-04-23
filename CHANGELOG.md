@@ -4,6 +4,74 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.20.3] - 2026-04-22
+
+### Fixed - `analyze_legacy` resuelve UMPs WAS (antes solo buscaba pattern IIB)
+
+**Bug reportado por Julian en wsclientes0076 + umpclientes0025**: el UMP se
+clona correctamente a `umps/ump-umpclientes0025-was/` (patron WAS), pero en
+el reporte solo aparecia `wsclientes0076.properties` como pendiente. El UMP
+no se escaneaba y sus keys unicas (`GRUPO_CENTRALIZADA`, `COD_DATOS_VACIOS`,
+`UNIDAD_PERSISTENCIA`, etc.) quedaban sin detectar.
+
+**Causa raiz en `analyze_legacy`**: la busqueda del repo UMP ya clonado en
+disco estaba hardcodeada al pattern IIB:
+
+```python
+repo = umps_root / f"sqb-msa-{ump_lower}"   # <-- solo IIB
+if repo.exists():
+    ...
+else:
+    umps.append(UmpInfo(name=ump))           # <-- repo_path queda None
+```
+
+Entonces cuando `detect_properties_references` recorria los roots:
+```python
+for ump in umps:
+    if ump.repo_path and ump.repo_path.exists():   # <-- False, se saltea
+        roots_to_scan.append(ump.repo_path)
+```
+
+El UMP nunca se escaneaba. El detector v0.19.0/0.20.2 funcionaba bien en
+teoria pero le llegaba lista vacia de umps para WAS.
+
+**Fix**: nueva funcion `_find_ump_repo(umps_root, ump, source_kind)` que
+prueba los 3 patterns conocidos en orden segun el tipo del servicio:
+
+```python
+_UMP_REPO_PATTERNS_WAS = [
+    "ump-{ump}-was",    # prioritario para WAS
+    "ms-{ump}-was",
+    "sqb-msa-{ump}",    # fallback
+]
+_UMP_REPO_PATTERNS_NON_WAS = [
+    "sqb-msa-{ump}",    # prioritario para IIB/ORQ
+    "ump-{ump}-was",
+    "ms-{ump}-was",
+]
+```
+
+### Comportamiento despues del fix
+
+Con `wsclientes0076` (WAS) + `umpclientes0025` (clonado como `ump-umpclientes0025-was`):
+
+```
+.properties detectados:
+  ✓ generalServices.properties       [resuelto por catalogo embebido]   (3 keys)
+  ✓ CatalogoAplicaciones.properties  [resuelto por catalogo embebido]   (4 keys)
+  ✗ wsclientes0076.properties        [PENDIENTE - pedir al owner]       (2 keys)
+  ✗ umpclientes0025.properties       [PENDIENTE - pedir al owner]       (6 keys) ← ESTABA FALTANDO
+```
+
+### Tests nuevos (6)
+
+- `_find_ump_repo`: WAS prioriza `ump-<ump>-was`, IIB prioriza `sqb-msa-<ump>`,
+  fallback cross-pattern, ms-variant, ausente devuelve None (5 tests)
+- `analyze_legacy` integracion: WAS con UMP clonado como `ump-<ump>-was`
+  resuelve repo_path y propaga al detector de properties (1 test)
+
+Total: 453 tests passing.
+
 ## [0.20.2] - 2026-04-22
 
 ### Fixed - El detector de `.properties` ahora tambien cubre el WAS principal (no solo UMPs)

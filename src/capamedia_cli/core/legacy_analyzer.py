@@ -488,6 +488,40 @@ _ROOT_PATTERNS = [
     re.compile(r"^sqb-msa-([a-z]+\d{4})$", re.IGNORECASE),
 ]
 
+# Patrones para buscar repos UMP ya clonados en disco. Ordenados segun el
+# source_kind del servicio consumidor:
+#   - WAS:     UMPs suelen estar en ump-<ump>-was (fallback ms-/sqb-msa-)
+#   - IIB/ORQ: UMPs suelen estar en sqb-msa-<ump> (fallback ump-/ms-)
+_UMP_REPO_PATTERNS_WAS = [
+    "ump-{ump}-was",
+    "ms-{ump}-was",
+    "sqb-msa-{ump}",
+]
+_UMP_REPO_PATTERNS_NON_WAS = [
+    "sqb-msa-{ump}",
+    "ump-{ump}-was",
+    "ms-{ump}-was",
+]
+
+
+def _find_ump_repo(umps_root: Path, ump_name: str, source_kind: str) -> Path | None:
+    """Busca el repo de un UMP ya clonado en disco probando los 3 patterns
+    conocidos. Respeta el `source_kind` para priorizar el patron mas probable.
+
+    Returns el Path si existe, None si no.
+    """
+    ump_lower = ump_name.lower()
+    patterns = (
+        _UMP_REPO_PATTERNS_WAS
+        if source_kind == "was"
+        else _UMP_REPO_PATTERNS_NON_WAS
+    )
+    for tmpl in patterns:
+        candidate = umps_root / tmpl.format(ump=ump_lower)
+        if candidate.exists():
+            return candidate
+    return None
+
 
 def _detect_specific_file_from_propiedad_java(root: Path) -> str | None:
     """Busca `Propiedad.java` (clase util del banco) en el root y extrae el
@@ -789,9 +823,12 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
     umps: list[UmpInfo] = []
     if umps_root and umps_root.exists():
         for ump in ump_names:
-            ump_lower = ump.lower()
-            repo = umps_root / f"sqb-msa-{ump_lower}"
-            if repo.exists():
+            # v0.20.3: buscar UMP en los 3 patterns conocidos segun source_kind.
+            # Antes solo probaba sqb-msa-<ump> (IIB), entonces para WAS el
+            # ump.repo_path quedaba None y detect_properties_references no
+            # podia escanear el UMP (bug de wsclientes0076 + umpclientes0025).
+            repo = _find_ump_repo(umps_root, ump, source_kind)
+            if repo is not None:
                 txs = extract_tx_codes(repo)
                 umps.append(UmpInfo(name=ump, tx_codes=txs, repo_path=repo))
             else:

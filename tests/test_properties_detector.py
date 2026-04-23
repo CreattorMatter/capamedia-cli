@@ -7,8 +7,10 @@ from pathlib import Path
 from capamedia_cli.core.legacy_analyzer import (
     PropertiesReference,
     _detect_specific_file_from_propiedad_java,
+    _find_ump_repo,
     _infer_specific_file_from_root_name,
     _resolve_specific_properties_file,
+    analyze_legacy,
     detect_properties_references,
 )
 
@@ -345,3 +347,128 @@ def test_propiedad_java_without_ruta_especifica(tmp_path: Path) -> None:
         'public class Propiedad { /* no RUTA_ESPECIFICA here */ }',
     )
     assert _detect_specific_file_from_propiedad_java(root) is None
+
+
+# ---------------------------------------------------------------------------
+# v0.20.3 - _find_ump_repo resuelve los 3 patterns conocidos
+# ---------------------------------------------------------------------------
+
+
+def test_find_ump_repo_was_pattern_first(tmp_path: Path) -> None:
+    """WAS source_kind: prioriza ump-<ump>-was."""
+    umps_root = tmp_path / "umps"
+    (umps_root / "ump-umpclientes0025-was").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "umpclientes0025", "was")
+    assert found is not None
+    assert found.name == "ump-umpclientes0025-was"
+
+
+def test_find_ump_repo_iib_pattern_first(tmp_path: Path) -> None:
+    """IIB source_kind: prioriza sqb-msa-<ump>."""
+    umps_root = tmp_path / "umps"
+    (umps_root / "sqb-msa-umpclientes0025").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "umpclientes0025", "iib")
+    assert found is not None
+    assert found.name == "sqb-msa-umpclientes0025"
+
+
+def test_find_ump_repo_falls_back_across_patterns(tmp_path: Path) -> None:
+    """Si el source_kind preferido no match, prueba los otros patterns."""
+    umps_root = tmp_path / "umps"
+    # WAS source pero el UMP esta como sqb-msa-* (caso mixto)
+    (umps_root / "sqb-msa-umpclientes0025").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "umpclientes0025", "was")
+    assert found is not None
+    assert found.name == "sqb-msa-umpclientes0025"
+
+
+def test_find_ump_repo_returns_none_when_absent(tmp_path: Path) -> None:
+    umps_root = tmp_path / "umps"
+    umps_root.mkdir()
+    found = _find_ump_repo(umps_root, "umpclientes0025", "was")
+    assert found is None
+
+
+def test_find_ump_repo_ms_pattern_fallback(tmp_path: Path) -> None:
+    """Variante ms-<ump>-was tambien se detecta."""
+    umps_root = tmp_path / "umps"
+    (umps_root / "ms-umpclientes0025-was").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "umpclientes0025", "was")
+    assert found is not None
+    assert found.name == "ms-umpclientes0025-was"
+
+
+def test_analyze_legacy_wires_ump_to_properties_detector(tmp_path: Path) -> None:
+    """Regresion del bug reportado por Julian en wsclientes0076:
+
+    Un WAS principal con un UMP ya clonado (patron ump-<ump>-was) debe
+    resultar en que detect_properties_references escanee el UMP y devuelva
+    una entrada para umpclientes0025.properties. Antes del fix v0.20.3,
+    analyze_legacy buscaba el UMP solo en sqb-msa-<ump> y queda repo_path=None.
+    """
+    ws = tmp_path / "wsclientes0076"
+    legacy_root = ws / "legacy" / "ws-wsclientes0076-was"
+    umps_root = ws / "umps"
+    ump_root = umps_root / "ump-umpclientes0025-was"
+
+    # WSDL minimo + pom.xml + Java src + web.xml (para detect_source_kind=was)
+    (legacy_root / "src" / "main" / "resources").mkdir(parents=True)
+    (legacy_root / "src" / "main" / "resources" / "svc.wsdl").write_text(
+        '<?xml version="1.0"?>\n'
+        '<definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">\n'
+        '<wsdl:portType name="X">\n'
+        '<wsdl:operation name="getClient"/>\n'
+        '</wsdl:portType>\n'
+        '</definitions>\n',
+        encoding="utf-8",
+    )
+    (legacy_root / "src" / "main" / "webapp" / "WEB-INF").mkdir(parents=True)
+    (legacy_root / "src" / "main" / "webapp" / "WEB-INF" / "web.xml").write_text(
+        '<?xml version="1.0"?><web-app/>', encoding="utf-8",
+    )
+    _mk_java(
+        legacy_root / "src" / "main" / "java" / "com" / "pichincha" / "App.java",
+        "package com.pichincha; public class App {}",
+    )
+    (legacy_root / "pom.xml").write_text(
+        '<?xml version="1.0"?>\n'
+        '<project><dependencies>\n'
+        '<dependency><artifactId>umpclientes0025-core-dominio</artifactId></dependency>\n'
+        '</dependencies></project>\n',
+        encoding="utf-8",
+    )
+
+    # UMP clonado con Propiedad.get() keys
+    _mk_java(
+        ump_root / "umpclientes0025-core-dominio" / "Constantes.java",
+        """
+        public static final String GRUPO = Propiedad.get("GRUPO_CENTRALIZADA");
+        public static final String COD = Propiedad.get("COD_DATOS_VACIOS");
+        """,
+    )
+
+    analysis = analyze_legacy(legacy_root, "wsclientes0076", umps_root=umps_root)
+
+    # El UMP se debe haber encontrado en disco
+    ump_info = [u for u in analysis.umps if u.name.lower() == "umpclientes0025"]
+    assert len(ump_info) == 1
+    assert ump_info[0].repo_path is not None, (
+        "analyze_legacy debe resolver el ump.repo_path cuando el UMP esta "
+        "clonado como ump-<ump>-was (antes del fix v0.20.3 solo probaba "
+        "sqb-msa-<ump> y fallaba silenciosamente)"
+    )
+
+    # Y las keys del UMP deben aparecer en properties_refs
+    pending_files = {
+        p.file_name for p in analysis.properties_refs
+        if p.status == "PENDING_FROM_BANK"
+    }
+    assert "umpclientes0025.properties" in pending_files, (
+        f"el UMP debe reportar sus propias keys en properties_refs; "
+        f"encontradas: {pending_files}"
+    )
+    ump_entry = next(
+        p for p in analysis.properties_refs
+        if p.file_name == "umpclientes0025.properties"
+    )
+    assert set(ump_entry.keys_used) >= {"GRUPO_CENTRALIZADA", "COD_DATOS_VACIOS"}
