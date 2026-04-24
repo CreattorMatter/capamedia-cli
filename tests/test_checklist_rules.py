@@ -51,6 +51,66 @@ def test_block_1_fails_if_domain_imports_spring(tmp_path: Path) -> None:
     assert check.severity == "high"
 
 
+def test_block_1_warns_on_legacy_port_layout_for_peer_review(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    legacy_output_port = (
+        root
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "pichincha"
+        / "sp"
+        / "application"
+        / "port"
+        / "output"
+        / "ClienteOutputPort.java"
+    )
+    legacy_output_port.parent.mkdir(parents=True, exist_ok=True)
+    legacy_output_port.write_text(
+        "package com.pichincha.sp.application.port.output;\n"
+        "public interface ClienteOutputPort {}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_1(ctx)
+    check = _by_id(results, "1.3b")
+
+    assert check.status == "fail"
+    assert check.severity == "medium"
+    assert "application/input/port" in check.suggested_fix
+
+
+def test_block_1_accepts_canonical_peer_review_port_layout(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    canonical_output_port = (
+        root
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "pichincha"
+        / "sp"
+        / "application"
+        / "output"
+        / "port"
+        / "ClienteOutputPort.java"
+    )
+    canonical_output_port.parent.mkdir(parents=True, exist_ok=True)
+    canonical_output_port.write_text(
+        "package com.pichincha.sp.application.output.port;\n"
+        "public interface ClienteOutputPort {}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_1(ctx)
+    check = _by_id(results, "1.3b")
+
+    assert check.status == "pass"
+
+
 def test_block_7_detects_hardcoded_password(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     yml = root / "src/main/resources/application.yml"

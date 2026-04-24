@@ -101,6 +101,7 @@ def test_context_are_loaded() -> None:
     assert "security" in names
     assert "code-style" in names
     assert "sonarlint" in names
+    assert "peer-review" in names
 
 
 def test_bank_shared_properties_context_loaded() -> None:
@@ -162,6 +163,7 @@ def test_canonical_migration_assets_align_ports_with_interfaces() -> None:
     targets = [
         CANONICAL_ROOT / "prompts" / "migrate.md",
         CANONICAL_ROOT / "context" / "hexagonal.md",
+        CANONICAL_ROOT / "context" / "code-style.md",
         CANONICAL_ROOT / "agents" / "migrador.md",
         CANONICAL_ROOT / "skills" / "migrar" / "SKILL.md",
     ]

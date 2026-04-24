@@ -599,6 +599,11 @@ def _build_batch_migrate_prompt(
         - Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`;
           las rutas locales de JDK rompen Azure DevOps/Linux. Si necesitas Java 21,
           usa `JAVA_HOME` del entorno del proceso.
+        - Trata `gradle architectureReview` como gate del banco. No reportes
+          `build_status=green` si queda score < 7, `BLOQUEAR PR: SI`, o
+          observaciones de arquitectura/tests. Corrige paquetes
+          `application/input/port` y `application/output/port`, y agrega tests
+          `@SpringBootTest` detectables por peer review cuando falten.
         - No incluyas Markdown ni explicaciones fuera del JSON final.
         - La respuesta final debe ser SOLO el objeto JSON pedido por el schema.
         - Inclui siempre todas las claves del schema: status, summary, framework,

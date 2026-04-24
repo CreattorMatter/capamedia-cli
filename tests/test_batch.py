@@ -200,6 +200,9 @@ def test_build_batch_migrate_prompt_contains_workspace_context(tmp_path: Path) -
     assert str(project) in prompt
     assert "PROMPT BASE" in prompt
     assert "status, summary, framework" in prompt
+    assert "architectureReview" in prompt
+    assert "application/input/port" in prompt
+    assert "@SpringBootTest" in prompt
 
 
 def test_migrate_output_schema_is_codex_strict_compatible() -> None:

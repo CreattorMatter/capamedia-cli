@@ -19,6 +19,13 @@ paths:
 - Services usan @RequiredArgsConstructor, nunca @Autowired
 - Services implementan el input port correspondiente
 
+## Layout de paquetes canonico
+- Entrada: `application/input/port/*InputPort.java`
+- Salida: `application/output/port/*OutputPort.java`
+- Servicios: `application/service/*Service.java` o `*ServiceImpl.java`
+- NO usar `application/port/input` ni `application/port/output`: compila, pero
+  el peer-review del banco penaliza `Paquetes` y genera observaciones.
+
 ## Direccion de dependencias
 - infrastructure -> application (permitido)
 - infrastructure -> domain (permitido)

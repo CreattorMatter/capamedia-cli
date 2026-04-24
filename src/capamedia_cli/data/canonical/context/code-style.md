@@ -19,8 +19,8 @@ paths:
 - Paquetes: lowercase (com.pichincha.sp)
 
 ## Naming por responsabilidad
-- Puerto entrada: *InputPort.java (abstract class)
-- Puerto salida: *OutputPort.java (abstract class)
+- Puerto entrada: *InputPort.java (public interface) en application/input/port
+- Puerto salida: *OutputPort.java (public interface) en application/output/port
 - Service impl: *ServiceImpl.java
 - Adapter: *Adapter.java o *BancsAdapter.java
 - DTO: *Dto.java, *DtoRequest.java, *DtoResponse.java

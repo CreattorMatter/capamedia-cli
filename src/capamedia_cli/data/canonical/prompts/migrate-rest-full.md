@@ -794,6 +794,13 @@ Parameters:
 7. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly.
 8. **Move project files:** If the MCP creates a subfolder, move all contents to the root destination folder.
 
+**Peer review gate:** before closing migration, run or inspect
+`./gradlew architectureReview`. Do not close with `BLOQUEAR PR: SI`, score < 7,
+or observations in architecture/tests. Use ports under `application/input/port`
+and `application/output/port` (not `application/port/input|output`) and include
+`@SpringBootTest` integration tests with MockMvc/WebTestClient plus status
+assertions 200/404/500 where applicable.
+
 #### 1.1 build.gradle — preserve MCP scaffold and apply stack-specific deltas
 
 Do not overwrite the MCP `build.gradle`. Verify the generated stack against

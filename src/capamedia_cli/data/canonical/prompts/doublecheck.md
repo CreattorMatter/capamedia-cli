@@ -76,6 +76,33 @@ Eso dispara internamente:
 
 2. **Fase B** — re-correr el checklist para ver el estado final post-fix.
 
+## Paso 2.5 - Peer review del banco
+
+El doublecheck tambien debe revisar el gate del plugin
+`frm-plugin-peer-review-gradle`, porque Azure ejecuta `gradle build -x test`
+pero el task `architectureReview` sigue corriendo.
+
+```bash
+cd destino/<namespace>-msa-sp-<svc>
+./gradlew architectureReview
+```
+
+Si el comando no existe, leer la salida de `gradle build -x test` o el reporte
+en `build/reports`. No declarar OK si aparece cualquiera de estos sintomas:
+
+- score global < 7
+- `BLOQUEAR PR: SI`
+- `Paquetes: 3 / 4` u observaciones generales por naming/layout
+- observaciones de tests: falta `@SpringBootTest`, falta H2,
+  falta `application-test.yml`, falta status 200/404/500
+
+Fix esperado:
+- mover ports a `application/input/port` y `application/output/port`
+- convertir ports a interfaces si queda algun `abstract class`
+- agregar integration smoke test con `@SpringBootTest` y la herramienta del
+  stack (`MockMvc`, `WebTestClient` o `MockWebServiceClient`)
+- mantener unit tests con Mockito para logica de dominio/aplicacion
+
 ## Paso 3 — Interpretar el resultado
 
 El reporte final muestra 3 tipos de items:
@@ -161,5 +188,8 @@ o abrir el PR si no hay residuales HIGH.
 4. **No correr `capamedia ai migrate`, `batch migrate` ni `/migrate` en el medio.**
    El doublecheck asume que el codigo ya esta migrado y compila; solo pule lo
    determinista.
-5. **Informativo, no destructivo.** Todo cambio del autofix queda en
+5. **No aceptar peer review rojo.** Si `architectureReview` reporta
+   `BLOQUEAR PR: SI`, score bajo, u observaciones de arquitectura/tests,
+   corregirlo o marcar `status=blocked`; nunca reportar PR_READY.
+6. **Informativo, no destructivo.** Todo cambio del autofix queda en
    `.capamedia/autofix/<ts>.log` para trazabilidad.

@@ -89,6 +89,26 @@ Si falla:
 - Aplicar fix
 - Re-intentar (max 5 ciclos)
 
+## Paso 4.5 - Gate peer review del banco
+
+El build de Azure ejecuta `gradle build -x test`, pero `architectureReview`
+sigue corriendo y analiza arquitectura + tests. Despues de compilar, ejecutar o
+leer la salida de:
+
+```bash
+./gradlew architectureReview
+```
+
+Reglas:
+- No cerrar con `build_status=green` si `architectureReview` queda con score < 7,
+  `BLOQUEAR PR: SI`, u observaciones generales/test sin resolver.
+- Objetivo operativo: score >= 9 y sin observaciones accionables.
+- Si aparece `Paquetes: 3 / 4`, mover ports a
+  `application/input/port` y `application/output/port`.
+- Si aparecen observaciones de tests, agregar `application-test.yml`, H2 si hay
+  DB, y al menos un test `@SpringBootTest` con MockMvc/WebTestClient/
+  MockWebServiceClient y asserts 200/404/500 donde aplique.
+
 ## Paso 5 — Generar reporte
 
 Escribir `destino/tnd-msa-sp-<servicio>/MIGRATION_REPORT.md` con:

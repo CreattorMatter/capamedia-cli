@@ -26,6 +26,26 @@ para servicios migrados. Aplica a los tests bajo `src/test/java/`.
 - **Method names** deben seguir el patron `given[Context]_when[Action]_then[ExpectedResult]`.
 - Si hay precondiciones adicionales: `given[Context]_and[AdditionalContext]_when[Action]_then[ExpectedResult]`.
 
+## Peer Review integration gate
+
+El pipeline del banco puede ejecutar `gradle build -x test`, pero el task
+`architectureReview` igual inspecciona `src/test/java` y `src/test/resources`.
+Por eso, ademas de los unit tests con Mockito, cada servicio migrado debe dejar
+evidencia detectable por analisis estatico:
+
+- `src/test/resources/application-test.yml` o `.properties`.
+- H2 configurado en `application-test` cuando el servicio tenga JPA/DB.
+- Al menos un integration smoke test con `@SpringBootTest`.
+- REST/MVC: `@SpringBootTest` + `@AutoConfigureMockMvc` + `MockMvc`.
+- WebFlux: `@SpringBootTest(webEnvironment = RANDOM_PORT)` o `@WebFluxTest`,
+  con `WebTestClient` segun el alcance.
+- SOAP: `@SpringBootTest` + `MockWebServiceClient`.
+- Asserts de status HTTP 200 happy path y 404/500 para rutas/error handling
+  donde aplique.
+
+Si `architectureReview` reporta observaciones de tests, no cerrar la migracion:
+corregir y re-ejecutar hasta que no quede `BLOQUEAR PR: SI` ni score bajo.
+
 ## Cuerpo del test (3 secciones)
 
 Cada test tiene 3 comentarios obligatorios separadores:

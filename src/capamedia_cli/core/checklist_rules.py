@@ -321,7 +321,7 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
         if not app_dir.is_dir():
             continue
         abstract_ports: list[str] = []
-        for f in app_dir.rglob("port/**/*.java"):
+        for f in app_dir.rglob("**/port/**/*.java"):
             text = _read_or_empty(f)
             if re.search(r"public abstract class \w+Port\b", text):
                 abstract_ports.append(f.name)
@@ -341,15 +341,55 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
             results.append(CheckResult("1.3", "Block 1", "Ports son interfaces", "pass"))
         break
 
+    # 1.3b - Layout de ports compatible con peer-review del banco
+    legacy_port_layouts = [
+        p
+        for pattern in ("application/port/input", "application/port/output")
+        for p in src_java.rglob(pattern)
+        if p.exists()
+    ]
+    if legacy_port_layouts:
+        details = ", ".join(
+            str(p.relative_to(ctx.migrated_path)) for p in legacy_port_layouts
+        )
+        results.append(
+            CheckResult(
+                "1.3b",
+                "Block 1",
+                "Layout de ports peer-review compatible",
+                "fail",
+                severity="medium",
+                detail=f"Layout legacy detectado: {details}",
+                suggested_fix=(
+                    "Mover ports a application/input/port y application/output/port "
+                    "para evitar penalizacion de Paquetes en architectureReview."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "1.3b",
+                "Block 1",
+                "Layout de ports peer-review compatible",
+                "pass",
+            )
+        )
+
     # 1.4 - UN output port POR DOMINIO de UMP invocado
     # Regla actualizada (v0.3.2): el numero de output ports debe coincidir con la
     # cantidad de dominios distintos de UMPs invocados por el servicio. Cada UMP
     # de un mismo dominio se consolida en 1 solo port/adapter del dominio.
 
-    # Listar todos los *OutputPort en application/**/port/output/
+    # Listar todos los *OutputPort en layout canonico y legacy.
     actual_ports: list[str] = []
-    for f in src_java.rglob("application/**/port/output/*OutputPort.java"):
-        actual_ports.append(f.stem)
+    output_port_patterns = (
+        "application/output/port/*OutputPort.java",
+        "application/port/output/*OutputPort.java",
+    )
+    for pattern in output_port_patterns:
+        for f in src_java.rglob(pattern):
+            actual_ports.append(f.stem)
 
     # Si tenemos contexto de UMPs (provistos por el orquestador del check), comparamos
     expected_domains = getattr(ctx, "ump_domains", None)

@@ -197,6 +197,9 @@ def test_process_doublecheck_workspace_writes_structured_state(tmp_path: Path) -
     assert "No ejecutes `capamedia ai migrate`" in fake.inputs[0].prompt
     assert "ni `capamedia review`" in fake.inputs[0].prompt
     assert "org.gradle.java.home" in fake.inputs[0].prompt
+    assert "architectureReview" in fake.inputs[0].prompt
+    assert "application/input/port" in fake.inputs[0].prompt
+    assert "@SpringBootTest" in fake.inputs[0].prompt
     props_text = props.read_text(encoding="utf-8")
     assert "org.gradle.java.home" not in props_text
     assert "org.gradle.jvmargs=-Xmx2g" in props_text

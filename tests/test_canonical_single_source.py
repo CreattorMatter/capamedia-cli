@@ -273,6 +273,37 @@ def test_soap_prompt_jpa_hikari_is_conditional_and_no_inline_pool_defaults() -> 
     assert "${CCC_DB_CONN_TIMEOUT:30000}" not in content
 
 
+def test_peer_review_gate_is_present_in_ai_migration_prompts() -> None:
+    peer_review = (CANONICAL_ROOT / "context" / "peer-review.md").read_text(
+        encoding="utf-8"
+    )
+
+    for token in (
+        "architectureReview",
+        "BLOQUEAR PR: SI",
+        "application/input/port",
+        "application/output/port",
+        "@SpringBootTest",
+        "MockMvc",
+        "MockWebServiceClient",
+    ):
+        assert token in peer_review
+
+    prompt_files = [
+        CANONICAL_ROOT / "prompts" / "migrate.md",
+        CANONICAL_ROOT / "prompts" / "migrate-rest-full.md",
+        CANONICAL_ROOT / "prompts" / "migrate-soap-full.md",
+        CANONICAL_ROOT / "prompts" / "doublecheck.md",
+    ]
+
+    for path in prompt_files:
+        content = path.read_text(encoding="utf-8")
+        assert "architectureReview" in content, f"{path.name} omite peer review gate"
+        assert "BLOQUEAR PR: SI" in content, f"{path.name} omite bloqueo PR"
+        assert "application/input/port" in content, f"{path.name} omite input port layout"
+        assert "application/output/port" in content, f"{path.name} omite output port layout"
+
+
 # ---------------------------------------------------------------------------
 # Guard 4: los 3 canonicals nuevos de v0.23.15 existen
 # ---------------------------------------------------------------------------

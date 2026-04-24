@@ -286,14 +286,14 @@ remove the JPA/Hikari block.
 - **Repository pattern:**
   ```java
   // application/output/port/CustomerOutputPort.java (framework-agnostic)
-  public abstract class CustomerOutputPort {
-      public abstract Optional<Customer> findById(String id);
+  public interface CustomerOutputPort {
+      Optional<Customer> findById(String id);
   }
 
   // infrastructure/output/adapter/persistence/CustomerJpaAdapter.java
   @Component
   @RequiredArgsConstructor
-  public class CustomerJpaAdapter extends CustomerOutputPort {
+  public class CustomerJpaAdapter implements CustomerOutputPort {
       private final CustomerJpaRepository repo;
       private final CustomerEntityMapper mapper;
       @Override public Optional<Customer> findById(String id) {
@@ -939,6 +939,12 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 7. **Fix `schemaLocation` in XSD files:** If any XSD references `../TCSProcesarServicioSOAP/GenericSOAP.xsd` or similar external paths, fix the path to point locally (e.g., `GenericSOAP.xsd`). Copy `GenericSOAP.xsd` from the canonical pattern reference project to `src/main/resources/legacy/` if not present.
 8. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly. If it fails due to missing XSD files, locate and copy them.
 9. **Move project files:** If the MCP creates a subfolder (e.g., `destino/<namespace>-msa-sp-<svc>/`), move all contents to the root of the destination folder.
+
+**Peer review gate:** before closing migration, run or inspect
+`./gradlew architectureReview`. Do not close with `BLOQUEAR PR: SI`, score < 7,
+or observations in architecture/tests. Use ports under `application/input/port`
+and `application/output/port` (not `application/port/input|output`) and include
+`@SpringBootTest` integration tests with `MockWebServiceClient`.
 
 **If MCP fabrics is NOT available (not installed/connected)**, proceed with manual scaffolding below.
 
