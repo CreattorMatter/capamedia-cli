@@ -22,7 +22,7 @@ allowed_tools:
 - mcp__fabrics__create_project_with_wsdl
 ---
 
-# Prompt: SOAP Migration - Implement Spring Boot Service (WAS with 2+ Operations)
+# Prompt: SOAP Migration - Implement Spring Boot Service (Rule 3 SOAP/MVC)
 
 > **Version:** 2.0.0
 > **Date:** 2026-04-21
@@ -69,7 +69,7 @@ de este prompt — funciona nativo sobre Spring MVC.
 
 **Both REST and SOAP services receive/return SOAP XML envelopes at the HTTP level.** The REST prompt uses `@RestController` + manual JAXB parsing, while this SOAP prompt uses Spring WS `@Endpoint` + `@PayloadRoot` dispatching on top of Spring MVC. URL path is `/IntegrationBus/soap/<ServiceName>` in both.
 
-**Count WSDL operations correctly (only relevant for WAS classification):**
+**Count WSDL operations correctly (used by Rule 3 classification after source/override checks):**
 
 ```bash
 # Count <wsdl:operation> ONLY inside <portType> (not binding, which duplicates)
@@ -149,7 +149,7 @@ Before executing, verify that you have access to:
 
 5. **Gold standard reference project:** `<namespace>-msa-sp-<svc>` -- the ONLY approved SOAP migration reference. Uses Spring WS `@Endpoint`, `BancsClientHelper` abstract + per-TX subclasses, `HeaderRequestModel`, `NamespacePrefixInterceptor`, `WebServiceConfig`, per-TX circuit breaker, Undertow blocking.
 
-> **CRITICAL WARNING about wsclientes0015:** This canonical pattern was originally a **BUS (IIB)** service migrated as SOAP. Under the **current MCP matrix**, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they would NEVER use this SOAP prompt. The 0015 remains valid as a canonical pattern **exclusively for WAS services with 2+ operations** (the only case that reaches this prompt). When using 0015 as reference, be aware that its BANCS integration patterns (BancsClientHelper, per-TX circuit breaker) are correct for the SOAP/MVC stack, but its origin as a BUS service is a historical artifact that should NOT be taken as evidence that BUS services can use SOAP.
+> **CRITICAL WARNING about wsclientes0015:** This canonical pattern was originally a **BUS (IIB)** service migrated as SOAP. Under the **current MCP matrix**, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they would NEVER use this SOAP prompt. The 0015 remains valid as a SOAP/MVC pattern for Rule 3 services (WAS 2+ ops, or BUS 2+ ops without BANCS). When using 0015 as reference, be aware that its BANCS integration patterns (BancsClientHelper, per-TX circuit breaker) are correct for the SOAP/MVC stack, but its origin as a BUS service is a historical artifact that should NOT override `bank-mcp-matrix.md`.
 
 If the analysis document is missing, **STOP** and request Phase 1 execution first.
 
@@ -159,7 +159,7 @@ If the analysis document is missing, **STOP** and request Phase 1 execution firs
 
 **The canonical pattern is `<namespace>-msa-sp-<svc>` -- the ONLY service approved via PR for SOAP/MVC migrations.**
 
-> **REMINDER:** this SOAP prompt applies ONLY to **WAS services with 2+ operations**. BUS (IIB) with `invocaBancs: true` ALWAYS goes REST+WebFlux (use the REST prompt). ORQ ALWAYS goes REST+WebFlux. Do not use this SOAP prompt as justification to migrate a BUS or ORQ service as SOAP.
+> **REMINDER:** this SOAP prompt applies ONLY when Rule 3 selects SOAP/MVC: WAS services with 2+ operations, or BUS services with 2+ operations and no BANCS. BUS (IIB) with `invocaBancs: true` ALWAYS goes REST+WebFlux (use the REST prompt). ORQ ALWAYS goes REST+WebFlux. Do not use this SOAP prompt to bypass `bank-mcp-matrix.md`.
 
 When implementing ANY aspect of the migration (build.gradle, application-test.yml, integration tests, error handling, dependency versions, YAML structure), the FIRST question must ALWAYS be: **"How does the canonical SOAP pattern do this?"**
 
@@ -653,7 +653,7 @@ This SOAP prompt ALWAYS produces a Spring MVC stack with Spring WS `@Endpoint` d
 | BANCS outbound | BANCS Core Adapter via REST (`BancsClient` can use `WebClient` internally) | Same |
 
 **Decision rules:**
-- Choice of this SOAP prompt vs REST prompt is decided **only** by WSDL `<portType>` operation count (1 → REST, 2+ → SOAP). See `§ WHEN TO USE THIS PROMPT`.
+- Choice of this SOAP prompt vs REST prompt is decided **only** by `bank-mcp-matrix.md` (Rule 3), not by operation count alone. See `§ WHEN TO USE THIS PROMPT`.
 - Presence of DB adds the HikariCP+JPA layer inside this prompt, it does NOT change the REST/SOAP decision.
 - **NEVER mix JPA with WebFlux** (Rule 4). This prompt is MVC, so JPA is safe here.
 
@@ -853,7 +853,7 @@ Document the MCP version used in `migration-context.json` under `scaffolding.mcp
 
 ##### 1.0.2 MCP parameters for SOAP services
 
-**This prompt only applies to WAS with 2+ operations. SOAP services MUST use these MCP parameters:**
+**This prompt applies only when `bank-mcp-matrix.md` triggers Rule 3. SOAP services MUST use these MCP parameters:**
 ```
 Parameters:
   projectName: "<nombre_msa>"
@@ -861,26 +861,24 @@ Parameters:
   wsdlFilePath: "<ServiceName>.wsdl"
   groupId: "com.pichincha.sp"
   namespace: <tribu>
-  tecnologia: was
+  tecnologia: was|bus
   webFramework: mvc
   projectType: soap
+  deploymentType: microservicio
+  invocaBancs: false
 ```
 
-**NOTE:** BUS (IIB) services NEVER use `projectType: soap`. Even with 2+ operations, BUS services use `invocaBancs: true` which forces REST+WebFlux — use the REST prompt instead. ORQ services use `deploymentType: orquestador` which also forces WebFlux — use the REST prompt.
+**NOTE:** BUS (IIB) services with `invocaBancs: true` never use `projectType: soap`; Rule 1 forces REST+WebFlux. BUS without BANCS and 2+ operations can reach this SOAP/MVC prompt via Rule 3. ORQ services use `deploymentType: orquestador` and always use the REST prompt.
 
 ##### 1.0.3 Known MCP gaps — compensate manually if still present
 
 **MCP gaps observados en versiones recientes (verificá si siguen aplicando en tu versión):**
 
-1. **`spring-boot-starter-webflux` NOT included in SOAP scaffold** even when `webFramework: webflux` is passed.
-   - **Symptom:** generated `build.gradle` only has `spring-boot-starter-web-services` + `spring-boot-starter-undertow` → project arranca como servlet puro, sin `WebClient` reactive.
-   - **Impact:** `lib-bnc-api-client` usa `WebClient` internamente. Sin el starter, las llamadas a BANCS fallan.
-   - **Workaround manual:** agregar a `build.gradle` después del scaffold:
-     ```groovy
-     implementation 'org.springframework.boot:spring-boot-starter-webflux'
-     ```
-   - **Observado en:** wsclientes0007 commit `e1bff14` (fix aplicado por julio soria, 10-abr-2026).
-   - **Validación post-scaffold:** correr `grep "spring-boot-starter-webflux" build.gradle` — si no hay match, agregar.
+1. **Stack Spring incorrecto en scaffold SOAP.**
+   - **Symptom:** generated `build.gradle` includes `spring-boot-starter-webflux` or omits the Spring WS servlet stack.
+   - **Impact:** SOAP/MVC must run on Spring WS `@Endpoint` over servlet/MVC; WebFlux belongs only to REST BUS/ORQ.
+   - **Workaround manual:** keep `spring-boot-starter-web-services` and servlet/MVC dependencies, remove `spring-boot-starter-webflux` if present.
+   - **Validación post-scaffold:** `grep "spring-boot-starter-webflux" build.gradle` must be empty for SOAP/MVC.
 
 2. **`jaxws-rt:4.0.3` NOT included** — necesario para servicios SOAP. Agregar manualmente con exclusiones de `jaxb-core` y `jaxb-impl`:
    ```groovy
@@ -941,7 +939,7 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
 1. **Read ANALYSIS** to extract:
    - `nombre_msa` (e.g., `<namespace>-msa-sp-<svc>`)
    - `tribu` (e.g., `tnd`)
-   - `framework` (webflux or mvc)
+   - `framework` (must be `mvc` for this SOAP prompt)
    - SOAP operation names
    - Consumed BANCS TX codes
    - Required environment variables
@@ -956,7 +954,7 @@ implementation('com.sun.xml.ws:jaxws-rt:4.0.3') {
     "backend": "BANCS",
     "metodo_principal": "<operacion_principal>",
     "tecnologia_origen": "bus|was",
-    "framework": "webflux|mvc",
+    "framework": "mvc",
     "tiene_bdd": false,
     "volumen": "alto|medio|bajo",
     "jira_ticket": "<BTHCCC-XXX>"
@@ -1134,13 +1132,13 @@ Execute ALL verifications. If any fails, enter the self-correction loop.
 grep "rootProject.name" settings.gradle
 # EXPECTED: rootProject.name = '<nombre_msa>'
 
-# CHECK 2: build.gradle does NOT have spring-boot-starter-web if BUS Mode
-grep "spring-boot-starter-web" build.gradle
-# EXPECTED: empty if BUS (WebFlux), present if WAS (MVC)
+# CHECK 2: build.gradle has Spring WS / servlet stack for SOAP MVC
+grep "spring-boot-starter-web-services" build.gradle
+# EXPECTED: present
 
-# CHECK 3: build.gradle does NOT have spring-boot-starter-webflux if WAS Mode
+# CHECK 3: build.gradle does NOT have spring-boot-starter-webflux
 grep "spring-boot-starter-webflux" build.gradle
-# EXPECTED: empty if WAS (MVC), present if BUS (WebFlux)
+# EXPECTED: empty
 
 # CHECK 4: WSDL exists in src/main/resources/legacy/
 find src/main/resources/legacy -name "*.wsdl" | head -5
@@ -2946,7 +2944,7 @@ void givenBlankIdentification_whenGetCustomerInfo_thenThrowsValidationException(
 4. **Mappers** -- Cover: full mapping, null fields, edge cases
 5. **BancsClientHelper** -- Cover: success, null response, error response, RuntimeException wrapping
 
-**Reactive tests (BUS Mode):**
+**Reactive adapter tests (only if an internal client returns Mono/Flux; the SOAP app itself remains MVC):**
 ```java
 // ALWAYS use StepVerifier to verify reactive chains
 @Test
@@ -3276,7 +3274,7 @@ Este historial documenta las decisiones clave que motivan reglas específicas de
 | 2026-04-16 | wsclientes0007 post-audit | **`error.backend` desde el catálogo oficial** `sqb-cfg-codigosBackend-config/codigosBackend.xml`, nunca hardcodeado como `"00000"`. Regla: 9c. |
 | 2026-04-17 | wsclientes0007 post-fix | **`log.info` reservado para eventos de contrato; diagnóstico a `log.debug`.** Origen: feedback del equipo [FB-JA]. Regla: 9e.1. |
 | 2026-04-17 | wsclientes0007 post-fix | **`HeaderRequestValidator` como `@Component` con `@ConfigurationProperties`** (`HeaderValidationProperties`), patterns vía ConfigMap de OpenShift. Validator deja de ser `final class` estática. Origen: feedback del equipo [FB-JA]. Regla: 9e.2. |
-| 2026-04-18 | Matriz oficial formalizada | **Este prompt es SOAP = 2+ operaciones, o cualquier WAS con DB.** 1 op va a REST/WebFlux. La matriz es estricta por cantidad de operaciones; BD es tecnología agregada (HikariCP+JPA en MVC), no criterio de ruteo. |
+| 2026-04-18 | Matriz oficial formalizada | **Este prompt es SOAP/MVC solo cuando `bank-mcp-matrix.md` dispara Regla 3: WAS 2+ ops o BUS 2+ ops sin BANCS.** WAS 1 op va REST/MVC; BUS/ORQ REST va WebFlux. BD es tecnologia agregada (HikariCP+JPA en MVC), no criterio de ruteo. |
 | 2026-04-20 | BPTPSRE PDFs incorporados | **Rule 4.1** — WAS + DB usa HikariCP+JPA+Oracle bajo Spring MVC (NUNCA WebFlux). **Rule 9f** — estructura oficial de error con 8 campos (`mensajeNegocio` = DataPower). Tabla `componente` distinta para IIB vs WAS (3-part en WAS). |
 
 **Golds citados como referencia o anti-patrón:**

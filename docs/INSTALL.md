@@ -176,9 +176,9 @@ Después abrí VS Code y desde Extensions instalá **SonarQube for IDE** (ex Son
 
 ### 9. Claude Code o Codex
 
-Instalá **al menos uno** de los dos. Son alternativos entre sí.
+Instalá **al menos uno** de los dos. Son alternativos entre sí. Para fabrica batch, Codex es el default recomendado.
 
-**Claude Code** (recomendado para este flujo):
+**Claude Code**:
 ```powershell
 npm install -g @anthropic-ai/claude-code
 claude --version
@@ -188,6 +188,14 @@ claude --version
 ```powershell
 npm install -g codex
 codex --version
+codex login
+```
+
+Recomendado para migraciones pesadas con Codex CLI:
+
+```toml
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
 ```
 
 ### 10. MCP Fabrics (dep del flujo)
@@ -258,6 +266,7 @@ npm install -g @anthropic-ai/claude-code
 
 # Codex (alternativa)
 npm install -g codex
+codex login
 ```
 
 ---
@@ -541,6 +550,7 @@ Antes de lanzar tu primer `/migrate`, confirmá:
 - [ ] Abrís VS Code y SonarLint carga sin errores
 - [ ] Podés correr `./gradlew --version` desde cualquier carpeta
 - [ ] Tu harness AI (Claude Code o Codex) arranca con `claude --version` o `codex --version`
+- [ ] Si vas a usar batch Codex, `codex login status` responde OK y `~/.codex/config.toml` usa `model = "gpt-5.5"` con `model_reasoning_effort = "xhigh"`
 - [ ] Tenés un PAT de Azure Artifacts exportado como `AZURE_ARTIFACTS_TOKEN` (para el build del servicio generado)
 - [ ] Revisaste `.capamedia/properties-report.yaml` del workspace y ya le pediste los `PENDING_FROM_BANK` al owner (si los hay)
 

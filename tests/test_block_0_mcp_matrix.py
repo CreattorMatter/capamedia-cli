@@ -10,7 +10,6 @@ from capamedia_cli.core.checklist_rules import (
     run_block_0,
 )
 
-
 # ---------------------------------------------------------------------------
 # Unit tests de _expected_framework (matriz pura)
 # ---------------------------------------------------------------------------
@@ -156,6 +155,38 @@ def test_run_block_0_bus_with_bancs_soap_fails(tmp_path: Path) -> None:
     assert r.status == "fail"
     assert r.severity == "high"
     assert "MAL-CLASIFICADO" in r.detail
+
+
+def test_run_block_0_bus_without_bancs_rest_ok(tmp_path: Path) -> None:
+    """BUS sin BANCS con 1 op migrado como REST -> PASS."""
+    project = _mk_minimal_project(tmp_path, has_endpoint=False, has_controller=True, ops=1)
+    ctx = CheckContext(
+        migrated_path=project,
+        legacy_path=None,
+        source_type="bus",
+        has_bancs=False,
+    )
+    results = run_block_0(ctx)
+    r = _find_0_2c(results)
+    assert r.status == "pass"
+    assert "BUS" in r.detail
+    assert "invocaBancs=NO" in r.detail
+
+
+def test_run_block_0_bus_without_bancs_soap_ok(tmp_path: Path) -> None:
+    """BUS sin BANCS con 2+ ops migrado como SOAP -> PASS por Regla 3."""
+    project = _mk_minimal_project(tmp_path, has_endpoint=True, has_controller=False, ops=2)
+    ctx = CheckContext(
+        migrated_path=project,
+        legacy_path=None,
+        source_type="bus",
+        has_bancs=False,
+    )
+    results = run_block_0(ctx)
+    r = _find_0_2c(results)
+    assert r.status == "pass"
+    assert "BUS" in r.detail
+    assert "Regla 3" in r.detail
 
 
 def test_run_block_0_orq_rest_ok(tmp_path: Path) -> None:

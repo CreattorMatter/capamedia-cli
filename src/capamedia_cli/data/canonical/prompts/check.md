@@ -33,9 +33,10 @@ Audita el proyecto migrado contra el checklist oficial del equipo **BPTPSRE** de
 ## Paso 1 — Cargar contexto
 
 Leer:
-- `migration-context.json` del destino — tipo, operaciones, UMPs
+- `migration-context.json` del destino — tipo, operaciones, UMPs y parametros MCP
 - `COMPLEXITY_<servicio>.md` si existe
 - `MIGRATION_REPORT.md` del destino
+- `bank-mcp-matrix.md` como fuente unica de la decision REST/WebFlux, REST/MVC o SOAP/MVC
 
 ## Paso 2 — Ejecutar BLOQUE 0 con diálogo cruzado legacy ↔ migrado
 
@@ -43,7 +44,7 @@ Leer:
 - `grep @RestController` y `grep @Endpoint` en `src/main/java`
 - Determinar REST vs SOAP
 
-### Check 0.2 — Conteo de operaciones con diálogo conversacional
+### Check 0.2 — Matriz BPTPSRE con diálogo conversacional
 
 Contar operaciones en:
 - WSDL del migrado (`src/main/resources/legacy/*.wsdl`)
@@ -53,18 +54,21 @@ Producir literal este diálogo:
 
 ```
 ¿Cuántas operaciones tiene el WSDL? → N
-¿Qué framework corresponde según la matriz? → REST si 1, SOAP si 2+
+¿Qué fuente y overrides MCP aplican? → WAS/BUS/ORQ + invocaBancs/deploymentType
+¿Qué stack corresponde según bank-mcp-matrix.md? → REST+WebFlux / REST+MVC / SOAP+MVC
 ¿Qué framework se usó en la migración? → <actual>
 ¿Coincide lo usado con lo que la matriz pide? → SÍ ✅ / NO ❌
 Veredicto: PASS / HIGH mal-clasificado
 ```
 
 Diálogos por caso:
-- 1 op + REST → *"Es 1 op, va REST. ¿Está OK? Sí, está OK."*
-- 2+ ops + SOAP → *"Son N ops, va SOAP. ¿Está OK? Sí, está OK."*
-- 1 op + SOAP → HIGH *"Es 1 op → debió ir REST+WebFlux. Mal-clasificado."*
-- 2+ ops + REST → HIGH *"Son N ops → REST+WebFlux no soporta dispatching multi-op."*
-- 1 op + REST + DB → PASS con flag `ATTENTION_NEEDED_REST_WITH_DB`
+- BUS/IIB + BANCS → *"Regla 1: BANCS fuerza REST+WebFlux, con 1 o N operaciones."*
+- ORQ/orquestador → *"Regla 2: orquestador fuerza REST+WebFlux + lib-event-logs."*
+- WAS + 1 op → *"Caso base WAS: 1 op va REST+Spring MVC."*
+- WAS + 2+ ops → *"Regla 3: SOAP+Spring MVC."*
+- BUS/IIB sin BANCS + 1 op → *"Caso base BUS sin BANCS: REST+WebFlux."*
+- BUS/IIB sin BANCS + 2+ ops → *"Regla 3: SOAP+Spring MVC."*
+- Cualquier mismatch → HIGH con la regla exacta incumplida; no sugerir otro stack sin citar `bank-mcp-matrix.md`.
 
 ### Check 0.3 — Nombres de operaciones coinciden (legacy vs migrado)
 
@@ -120,12 +124,13 @@ Escribir `CHECKLIST_<servicio>.md` con esta estructura:
 
 ## Block 0 — Pre-check + cross-check
 
-### 0.2 Operation count — ✅ PASS
+### 0.2 BPTPSRE matrix — ✅ PASS
 ¿Cuántas operaciones tiene el WSDL? → 1
-¿Qué framework corresponde? → REST + WebFlux
-¿Qué framework se usó? → REST + WebFlux
+¿Qué fuente y overrides MCP aplican? → WAS, microservicio, sin BANCS
+¿Qué framework corresponde? → REST + Spring MVC
+¿Qué framework se usó? → REST + Spring MVC
 ¿Coincide? → SÍ ✅
-Veredicto: **PASS** — *"Es 1 op, va REST. ¿Está OK? Sí, está OK."*
+Veredicto: **PASS** — *"Caso base WAS: 1 op va REST+Spring MVC."*
 
 ### 0.3 Operation names — ✅ PASS
 (...)

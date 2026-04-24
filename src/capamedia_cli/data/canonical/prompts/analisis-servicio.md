@@ -354,7 +354,7 @@ Error-related WAS classes (mandatory to inspect if errors are in scope):
 
 Two authoritative sources cross-reference each BANCS TX code to its Core Adapter. Both are under `prompts/`:
 
-1. **`prompts/tx-adapter-catalog.json`** (JSON array) — canonical for the `/migrar` step. Each entry: `tx`, `tipo` (TX/RX), `dominio`, `capacidad`, `tribu`, `adaptador`. Use this to fill the TX Summary Table (Section 5.1).
+1. **`prompts/tx-adapter-catalog.json`** (JSON array) — canonical for the `/migrate` step (legacy alias `/migrar`). Each entry: `tx`, `tipo` (TX/RX), `dominio`, `capacidad`, `tribu`, `adaptador`. Use this to fill the TX Summary Table (Section 5.1).
 
 2. **`prompts/Transacciones catalogadas Dominio_v1 (1).xlsx`** — human-readable source used by the domain/tribe team. If a TX is NOT in the JSON but IS in the XLSX, flag as `CATALOG_MISMATCH` so the JSON gets updated.
 

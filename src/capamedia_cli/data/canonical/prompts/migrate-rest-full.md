@@ -1,7 +1,7 @@
 ---
 name: migrate-rest-full
-title: Migracion REST completa (WebFlux + RestController) para WSDL de 1 operacion
-description: Prompt detallado para migrar servicios con WSDL de 1 op al stack REST+WebFlux.
+title: Migracion REST completa segun matriz BPTPSRE (BUS/ORQ WebFlux, WAS MVC)
+description: Prompt detallado para migrar servicios que la matriz BPTPSRE clasifica como REST.
   Incluye 7 blocks con GATEs y self-correction loop.
 type: prompt
 scope: project
@@ -108,7 +108,9 @@ Before executing, verify that you have access to:
 
 4. **Servicios Configurables catalog (MANDATORY when the ANALYSIS reports `GestionarRecursoConfigurable`)** — Local file `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`. Treat it as the operational source of truth for `Environment.cache.<ConfigName>.<field>` values. Resolve every used field here before leaving any placeholder.
 
-5. **Canonical REST pattern (defined in this document):** `@RestController` + `@PostMapping`, Spring WebFlux (Netty reactive, NO `.block()`), `ErrorResolverHandler` (`ErrorWebExceptionHandler`) for SOAP Fault generation, single adapter with `@BancsService("ws-txNNNNNN")`, NO WebServiceConfig, NO NamespacePrefixInterceptor.
+5. **Canonical REST patterns (defined in this document):**
+   - BUS/ORQ REST: `@RestController` + `@PostMapping`, Spring WebFlux (Netty reactive, NO `.block()`), `ErrorResolverHandler` (`ErrorWebExceptionHandler`) for SOAP Fault generation, single adapter with `@BancsService("ws-txNNNNNN")`, NO WebServiceConfig, NO NamespacePrefixInterceptor.
+   - WAS single-op REST: `@RestController` + Spring MVC (servlet/Undertow), blocking allowed, HikariCP+JPA+Oracle allowed when the analysis proves DB usage.
 
 > **CRITICAL: MCP matrix for REST.** BUS (IIB) with `invocaBancs: true` → REST+WebFlux always (MCP override, any number of ops). ORQ → REST+WebFlux always. WAS 1-op → REST+MVC. WAS 2+ ops → SOAP+MVC (uses the other prompt). If you see `@Endpoint`/`WebServiceConfig`/`BancsClientHelper`/`.block()` in a BUS or ORQ service, it is **mis-classified** under the current matrix — those are SOAP patterns.
 >
@@ -119,7 +121,7 @@ Before executing, verify that you have access to:
 > - `.block()` calls — keep the reactive chain end-to-end (`Mono`/`Flux`)
 > - `spring-boot-starter-web-services` — use `spring-boot-starter-webflux`
 
-**Note:** Both REST and SOAP services receive/return SOAP XML envelopes. The "REST" refers to the Spring framework used (WebFlux + @RestController for manual JAXB), not REST-over-JSON. URL path remains `/IntegrationBus/soap/<ServiceName>` in both.
+**Note:** Both REST and SOAP services receive/return SOAP XML envelopes. The "REST" refers to `@RestController`, not REST-over-JSON. The stack is WebFlux for BUS/ORQ and Spring MVC for WAS single-op. URL path remains `/IntegrationBus/soap/<ServiceName>` in both.
 
 If the analysis document is missing, **STOP** and request Phase 1 execution first.
 
@@ -317,13 +319,13 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 | Error propagated from a library (e.g., `lib-bnc-api-client`) | `<LIBRERIA>` | `ApiClient` |
 | Controlled business error propagated from ApiClient | `TX<CÓDIGO>` (6-digit TX, prefixed `TX`) | `TX060480` |
 
-**WAS-sourced services have a different `componente` format** — if this REST service is migrated from a WAS legacy, check the SOAP prompt Rule 9f for the WAS-specific table (rare case, since 1-op WAS+DB goes to SOAP, but 1-op WAS without DB lands here).
+**WAS-sourced services have a different `componente` format** — if this REST service is migrated from a WAS legacy, check the SOAP prompt Rule 9f for the WAS-specific table. WAS single-op stays REST+MVC even when it has DB access.
 
 ### Security and Configuration (Rules 10-13)
 
 **Rule 10 — NEVER hardcode credentials, URLs, or secrets** in code or YAMLs. Everything via `${CCC_*}` environment variables.
 
-**Rule 11 — NEVER use `spring.jpa.hibernate.ddl-auto`** — REST services default to no own database. If the analysis flagged `ATTENTION_NEEDED_REST_WITH_DB` (rare case: 1 op + DB), use **R2DBC** (reactive, no Hibernate DDL) or an explicit blocking boundary; in neither case enable JPA auto-DDL.
+**Rule 11 — NEVER use `spring.jpa.hibernate.ddl-auto`** — BUS/ORQ REST services default to no own database. If a BUS/ORQ WebFlux service unexpectedly has DB usage, use **R2DBC** or an explicit blocking boundary and flag it. WAS REST/MVC with DB uses HikariCP+JPA+Oracle, with `ddl-auto=validate` or omitted, never auto-DDL.
 
 **Rule 12 — NEVER commit `.env`, `credentials.json`, or similar files.**
 
@@ -792,9 +794,20 @@ Parameters:
 7. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly.
 8. **Move project files:** If the MCP creates a subfolder, move all contents to the root destination folder.
 
-#### 1.1 build.gradle — COMPLETE TEMPLATE (Gold Standard 0024)
+#### 1.1 build.gradle — preserve MCP scaffold and apply stack-specific deltas
 
-The build.gradle MUST match this template. After MCP generation, verify and adjust:
+Do not overwrite the MCP `build.gradle`. Verify the generated stack against
+`bank-mcp-matrix.md` and apply only the missing deltas:
+
+- BUS/ORQ REST WebFlux: include `spring-boot-starter-webflux`; do not include
+  `spring-boot-starter-web` or `spring-boot-starter-web-services`.
+- WAS REST MVC: include `spring-boot-starter-web`; do not include
+  `spring-boot-starter-webflux` or `spring-boot-starter-web-services`.
+- WAS REST MVC with DB: add HikariCP+JPA+Oracle following the SOAP prompt's
+  persistence rules.
+
+The following template is a BUS/ORQ WebFlux reference only. Do not apply this
+WebFlux dependency block to WAS REST/MVC services:
 
 ```groovy
 plugins {
@@ -860,7 +873,7 @@ dependencies {
     implementation 'org.mapstruct:mapstruct-processor:1.6.3'
     annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
 
-    // Spring Boot Starters — WebFlux (Netty), NOT web-services
+    // Spring Boot Starters — WebFlux (BUS/ORQ REST only), NOT web-services
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -961,7 +974,10 @@ tasks.named('compileJava') {
 }
 ```
 
-**DO NOT include:** `spring-boot-starter-web-services`, `wsdl4j`, `spring-boot-starter-web` (servlet). These are SOAP-specific dependencies.
+**Stack dependency guard:** BUS/ORQ REST must not include servlet `spring-boot-starter-web`.
+WAS REST/MVC must not include `spring-boot-starter-webflux`. No REST service
+should include `spring-boot-starter-web-services` or `wsdl4j`; those are
+SOAP-specific dependencies.
 
 #### 1.2 Additional scaffolding files
 
@@ -1009,9 +1025,12 @@ public class Application {
 grep "rootProject.name" settings.gradle
 # EXPECTED: rootProject.name = '<nombre_msa>'
 
-# CHECK 2: build.gradle has spring-boot-starter-webflux
+# CHECK 2: REST stack dependency is correct
 grep "spring-boot-starter-webflux" build.gradle
-# EXPECTED: present
+# EXPECTED: present for BUS/ORQ REST, empty for WAS REST/MVC
+
+grep "spring-boot-starter-web'" build.gradle
+# EXPECTED: present for WAS REST/MVC, empty for BUS/ORQ REST
 
 # CHECK 3: build.gradle does NOT have spring-boot-starter-web-services
 grep "spring-boot-starter-web-services" build.gradle
@@ -2634,7 +2653,7 @@ optimus:
         x-geolocation: { forward: true }
 ```
 
-**Note:** by default, NO H2 or JPA configuration — REST services have no own database. Exception: if the analysis flagged `ATTENTION_NEEDED_REST_WITH_DB` (rare case, 1 op + DB), add **R2DBC** (reactive driver) or an explicit blocking boundary isolated on `Schedulers.boundedElastic()` — NEVER plain HikariCP+JPA on the WebFlux request path.
+**Note:** by default, BUS/ORQ REST has no own database. If DB appears in a BUS/ORQ WebFlux service, escalate or use R2DBC/an explicit blocking boundary isolated on `Schedulers.boundedElastic()` — NEVER plain HikariCP+JPA on the WebFlux request path. WAS REST/MVC with DB uses HikariCP+JPA+Oracle and never WebFlux.
 
 ---
 

@@ -1,4 +1,4 @@
-# capamedia-cli · v0.3.8
+# capamedia-cli - v0.23.16
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -167,7 +167,9 @@ capamedia batch migrate \
 
 Este comando:
 
-- ejecuta `codex exec` una vez por servicio
+- ejecuta Codex CLI por defecto (`codex exec`) una vez por servicio
+- usa GPT-5.5 + `xhigh` si el workspace fue generado por `capamedia init --ai codex`
+- permite override explicito con `--model gpt-5.5 --reasoning-effort xhigh`
 - exige evidencia previa de Fabrics en `.capamedia/fabrics.json`
 - exige salida final estructurada por JSON Schema
 - guarda prompt, stdout, stderr y last message en `.capamedia/batch-migrate/`
@@ -196,6 +198,8 @@ clone -> init -> fabrics generate -> codex exec -> check
 Garantias del pipeline:
 
 - `Fabrics` es prerequisito duro
+- `Codex` es el engine headless default; usar `--engine claude` o `--engine auto` si se quiere Claude
+- `--reasoning-effort` permite `low | medium | high | xhigh` para Codex, con `xhigh` como default recomendado
 - `batch-state/*.json` permite resume por etapa
 - `--retries` reintenta solo lo fallido o pendiente
 - Azure DevOps puede correr unattended via `CAPAMEDIA_AZDO_PAT`
@@ -302,6 +306,7 @@ capamedia-cli/
 - [x] v0.3.6 - `resume` + `retries` + agents/skills reales de Codex
 - [x] v0.3.7 - Fabrics como gate duro + `batch watch`
 - [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
+- [x] v0.23.16 - Codex first-class: GPT-5.5, `xhigh`, batch default Codex, `--reasoning-effort`
 - [ ] v0.4.0 - integracion con Jira / Azure Boards / Confluence / Slack
 
 ## Licencia

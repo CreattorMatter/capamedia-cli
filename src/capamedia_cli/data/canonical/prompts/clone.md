@@ -107,11 +107,12 @@ WSDL=$(find legacy -name "*.wsdl" -not -path "*/node_modules/*" | head -1)
 OPS=$(awk '/<wsdl:portType/,/<\/wsdl:portType>/' "$WSDL" | grep -c "<wsdl:operation")
 ```
 
-El framework se decide segun la matriz MCP oficial del banco (BUS+invocaBancs
-siempre REST, ORQ siempre REST, WAS 1op REST / WAS 2+ops SOAP). Las reglas
-canonicas viven en los contextos del CLI (`bank-official-rules.md`,
-`hexagonal.md`, `bancs.md`) — no hace falta clonar un "servicio gold" de
-referencia.
+El framework se decide segun `bank-mcp-matrix.md`: BUS+invocaBancs siempre
+REST+WebFlux, ORQ siempre REST+WebFlux, WAS 1 op REST+MVC, WAS 2+ ops SOAP+MVC,
+BUS sin BANCS 1 op REST+WebFlux y BUS sin BANCS 2+ ops SOAP+MVC. Las reglas
+canonicas viven en los contextos del CLI (`bank-mcp-matrix.md`,
+`bank-official-rules.md`, `hexagonal.md`, `bancs.md`) — no hace falta clonar un
+"servicio gold" de referencia.
 
 ### Paso 6 — Detectar tipo de fuente (IIB / WAS / ORQ)
 
@@ -129,7 +130,7 @@ Al final, respondé en el chat con un resumen estructurado:
 
 - **Tipo de fuente:** IIB / WAS / ORQ
 - **Operaciones WSDL:** <N>
-- **Framework recomendado:** REST + WebFlux (1 op) | SOAP + Spring MVC (2+ ops)
+- **Framework recomendado:** segun `bank-mcp-matrix.md` (REST+WebFlux, REST+Spring MVC o SOAP+Spring MVC)
 - **UMPs detectados:** <lista con TX codes>
 - **BD detectada:** SI / NO (solo relevante para WAS)
 - **Complejidad estimada:** LOW / MEDIUM / HIGH

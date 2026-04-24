@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -34,6 +35,10 @@ RATE_LIMIT_PATTERNS = (
 RETRY_AFTER_PATTERN = re.compile(r"retry[-_\s]?after[:\s=]+(\d+)", re.IGNORECASE)
 
 
+def _resolve_executable(bin_path: str) -> str:
+    return shutil.which(bin_path) or bin_path
+
+
 @dataclass
 class EngineInput:
     """Parametros para una corrida headless del engine."""
@@ -44,6 +49,7 @@ class EngineInput:
     output_path: Path
     timeout_seconds: int
     model: str | None = None
+    reasoning_effort: str | None = None
     unsafe: bool = False
 
 
@@ -94,9 +100,10 @@ class CodexEngine:
         self.bin_path = bin_path
 
     def is_available(self) -> tuple[bool, str]:
+        executable = _resolve_executable(self.bin_path)
         try:
             result = subprocess.run(
-                [self.bin_path, "--version"],
+                [executable, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -104,6 +111,8 @@ class CodexEngine:
             )
         except FileNotFoundError:
             return (False, f"binario `{self.bin_path}` no encontrado en PATH")
+        except OSError as exc:
+            return (False, f"binario `{self.bin_path}` no ejecutable: {exc}")
         except subprocess.TimeoutExpired:
             return (False, f"`{self.bin_path} --version` timeout")
         if result.returncode != 0:
@@ -111,7 +120,7 @@ class CodexEngine:
         # Check login (best effort)
         try:
             login = subprocess.run(
-                [self.bin_path, "login", "status"],
+                [executable, "login", "status"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -124,8 +133,9 @@ class CodexEngine:
         return (True, f"codex {result.stdout.strip()}")
 
     def run_headless(self, einput: EngineInput) -> EngineResult:
+        executable = _resolve_executable(self.bin_path)
         cmd = [
-            self.bin_path,
+            executable,
             "exec",
             "--skip-git-repo-check",
             "--cd",
@@ -139,6 +149,8 @@ class CodexEngine:
             cmd.extend(["--output-schema", str(einput.schema_path)])
         if einput.model:
             cmd.extend(["--model", einput.model])
+        if einput.reasoning_effort:
+            cmd.extend(["-c", f'model_reasoning_effort="{einput.reasoning_effort}"'])
         if einput.unsafe:
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         else:
@@ -203,9 +215,10 @@ class ClaudeEngine:
         self.bin_path = bin_path
 
     def is_available(self) -> tuple[bool, str]:
+        executable = _resolve_executable(self.bin_path)
         try:
             result = subprocess.run(
-                [self.bin_path, "--version"],
+                [executable, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -213,6 +226,8 @@ class ClaudeEngine:
             )
         except FileNotFoundError:
             return (False, f"binario `{self.bin_path}` no encontrado en PATH")
+        except OSError as exc:
+            return (False, f"binario `{self.bin_path}` no ejecutable: {exc}")
         except subprocess.TimeoutExpired:
             return (False, f"`{self.bin_path} --version` timeout")
         if result.returncode != 0:
@@ -239,9 +254,10 @@ class ClaudeEngine:
         return prompt + appendix
 
     def run_headless(self, einput: EngineInput) -> EngineResult:
+        executable = _resolve_executable(self.bin_path)
         prompt = self._prompt_with_schema(einput.prompt, einput.schema_path)
         cmd = [
-            self.bin_path,
+            executable,
             "-p",
             prompt,
             "--output-format",

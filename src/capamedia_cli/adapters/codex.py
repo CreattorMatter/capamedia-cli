@@ -10,26 +10,40 @@ from capamedia_cli.adapters.base import HarnessAdapter, model_hint_comment
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
 
+DEFAULT_CODEX_MODEL = "gpt-5.5"
+FAST_CODEX_MODEL = "gpt-5.4-mini"
+DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
+
 MODEL_MAP = {
-    "opus": "gpt-5.3-codex",
-    "sonnet": "gpt-5.1-codex",
-    "haiku": "gpt-5.4-mini",
+    "opus": DEFAULT_CODEX_MODEL,
+    "sonnet": DEFAULT_CODEX_MODEL,
+    "haiku": FAST_CODEX_MODEL,
+}
+
+REASONING_MAP = {
+    "high": "xhigh",
+    "medium": "high",
+    "low": "medium",
 }
 
 
 def _resolve_model(asset: CanonicalAsset) -> str:
+    override = asset.override_for("codex").get("model")
+    if override:
+        return str(override)
     preferred = asset.preferred_model.get("openai")
     if preferred:
         return preferred
-    return MODEL_MAP.get(asset.fallback_model, "gpt-5.1-codex")
+    return MODEL_MAP.get(asset.fallback_model, DEFAULT_CODEX_MODEL)
 
 
 def _resolve_reasoning(asset: CanonicalAsset) -> str:
-    if asset.complexity == "high":
-        return "high"
-    if asset.complexity == "low":
-        return "low"
-    return "medium"
+    override = asset.override_for("codex").get("model_reasoning_effort") or asset.override_for(
+        "codex"
+    ).get("reasoning_effort")
+    if override:
+        return str(override)
+    return REASONING_MAP.get(asset.complexity, DEFAULT_CODEX_REASONING_EFFORT)
 
 
 def _resolve_sandbox_mode(asset: CanonicalAsset) -> str:
@@ -113,7 +127,8 @@ class CodexAdapter(HarnessAdapter):
             config.write_bytes(
                 tomli_w.dumps(
                     {
-                        "model": "gpt-5.1-codex",
+                        "model": DEFAULT_CODEX_MODEL,
+                        "model_reasoning_effort": DEFAULT_CODEX_REASONING_EFFORT,
                         "approval-policy": "on-failure",
                         "agents": {
                             "max_threads": 6,

@@ -33,11 +33,17 @@ Migra toda la lógica del servicio legacy al arquetipo destino generado por Fabr
 
 ## Paso 1 — Detectar modo
 
-Leer `COMPLEXITY_<servicio>.md` y `migration-context.json` en `destino/`:
+Leer `bank-mcp-matrix.md`, `COMPLEXITY_<servicio>.md` y
+`migration-context.json` en `destino/`. La matriz BPTPSRE manda sobre cualquier
+heuristica local:
 
-- Si `projectType=rest` → cargar el prompt interno `prompts.migrate-rest` (análogo a `migracion/REST/02-REST-migrar-servicio.md` del repo de referencia)
-- Si `projectType=soap` → cargar `prompts.migrate-soap`
-- Si hay ambigüedad → preguntar al usuario.
+- Si `projectType=rest` + `webFramework=mvc` + `sourceKind=was` -> cargar
+  `migrate-rest-full.md` en modo WAS REST/MVC.
+- Si `projectType=rest` + `webFramework=webflux` -> cargar
+  `migrate-rest-full.md` en modo BUS/ORQ REST/WebFlux.
+- Si `projectType=soap` -> cargar `migrate-soap-full.md` en modo SOAP/MVC.
+- Si `migration-context.json` contradice `bank-mcp-matrix.md` -> detenerse y
+  pedir confirmacion; no cambiar el arquetipo por cuenta propia.
 
 ## Paso 2 — Lanzar agente migrador
 
@@ -48,6 +54,7 @@ Usar el sub-agente `migrador` (definido en `.claude/agents/migrador.md` del proy
 - `gold-ref/` — proyecto gold (0024 para REST, 0015 para SOAP) como referencia de patrones
 - `destino/tnd-msa-sp-<servicio>/` — destino donde se implementa
 - `COMPLEXITY_<servicio>.md` — análisis previo
+- `bank-mcp-matrix.md` — fuente unica para decidir REST/WebFlux, REST/MVC o SOAP/MVC
 
 El agente ejecuta los 7 bloques del prompt de migración:
 
@@ -96,7 +103,7 @@ Escribir `destino/tnd-msa-sp-<servicio>/MIGRATION_REPORT.md` con:
 ```markdown
 ## Migración completada: <servicio>
 
-- **Modo:** REST + WebFlux / SOAP + Spring MVC
+- **Modo:** REST + WebFlux / REST + Spring MVC / SOAP + Spring MVC
 - **Archivos creados:** N
 - **Build:** verde (./gradlew build)
 - **Tests:** X/Y pasando, cobertura Z%
@@ -114,4 +121,4 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 4. **HTTP 200 para errores de negocio** (compatibilidad con IIB caller).
 5. **Secrets vía `${CCC_*}` env vars.**
 6. **Código en inglés**, documentación en inglés.
-7. **Si el ANALISIS dice `ATTENTION_NEEDED_REST_WITH_DB`** (1 op + DB), usar R2DBC o blocking boundary con `Schedulers.boundedElastic()` — NUNCA HikariCP+JPA en el request path de WebFlux.
+7. **DB no cambia REST/SOAP.** WAS REST/MVC con DB usa HikariCP+JPA+Oracle. Si un caso BUS/ORQ WebFlux trae DB propia, escalar o aislar el bloqueo con R2DBC/`Schedulers.boundedElastic()`; nunca meter HikariCP+JPA en el request path de WebFlux.

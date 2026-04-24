@@ -12,6 +12,7 @@ from capamedia_cli.commands.batch import (
     _ensure_migrate_schema,
     _find_legacy_root,
     _find_migrated_project,
+    _normalize_reasoning_effort,
     _process_migrate_service,
     _process_pipeline_service,
     _read_services_file,
@@ -41,12 +42,14 @@ class _FakeEngine:
         self._rate_limited = rate_limited
         self._should_fail = should_fail_if_called
         self.calls = 0
+        self.inputs = []
 
     def is_available(self) -> tuple[bool, str]:
         return (True, "fake engine")
 
     def run_headless(self, einput) -> EngineResult:
         self.calls += 1
+        self.inputs.append(einput)
         if self._should_fail:
             raise AssertionError("engine.run_headless should not be called (resume expected)")
         if self._payload is not None:
@@ -72,6 +75,12 @@ def _migrate_payload(project: Path, *, build: str = "green") -> dict:
         "build_status": build,
         "migrated_project": str(project),
     }
+
+
+def test_normalize_reasoning_effort_accepts_codex_values() -> None:
+    assert _normalize_reasoning_effort("XHIGH") == "xhigh"
+    assert _normalize_reasoning_effort(" high ") == "high"
+    assert _normalize_reasoning_effort(None) is None
 
 
 def _write_fabrics_metadata(workspace: Path, service: str, *, status: str = "ok") -> None:
@@ -207,19 +216,23 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
         },
     )
 
+    engine = _FakeEngine(_migrate_payload(project))
     row = _process_migrate_service(
         service,
         root,
         schema_path,
-        engine=_FakeEngine(_migrate_payload(project)),
-        model=None,
+        engine=engine,
+        model="gpt-5.5",
         prompt_file=None,
         timeout_minutes=5,
         run_check=True,
         unsafe=False,
+        reasoning_effort="xhigh",
     )
 
     assert row.status == "ok"
+    assert engine.inputs[0].model == "gpt-5.5"
+    assert engine.inputs[0].reasoning_effort == "xhigh"
     assert row.fields["codex"] == "ok"
     assert row.fields["framework"] == "REST"
     assert row.fields["build"] == "green"

@@ -60,7 +60,7 @@ domain/
   model/         <- Records puros, CERO imports de Spring
   exception/     <- Excepciones tipadas
 infrastructure/
-  input/adapter/ <- SOAP controller, DTOs envelope
+  input/adapter/ <- REST controller or SOAP endpoint segun bank-mcp-matrix
   output/adapter/<- BANCS adapters via Core Adapter REST
   config/        <- @Configuration, @ConfigurationProperties
   mapper/        <- MapStruct o @Component mappers
@@ -93,11 +93,13 @@ y un servicio migrado el mes pasado puede tener gaps que ya se resolvieron.
 1. `/pre-migracion <ruta>` — Detecta tipo (IIB / WAS / ORQ) y genera ANALISIS_*.md
    - IIB o WAS -> usa `pre-migracion/01-analisis-servicio.md`
    - ORQ (orquestador) -> usa `pre-migracion/01-analisis-orq.md` (análisis liviano)
-2. `/migrar` — Ejecuta migracion con autocorreccion segun matriz MCP:
-   - BUS (IIB) + invocaBancs -> usa `migracion/REST/02-REST-migrar-servicio.md` (WebFlux, 1 o N ops)
-   - WAS con 1 operacion -> usa `migracion/REST/02-REST-migrar-servicio.md` (MVC)
-   - WAS con 2+ operaciones -> usa `migracion/SOAP/02-SOAP-migrar-servicio.md` (MVC)
-   - ORQ (orquestador) -> usa `migracion/REST/02-REST-migrar-servicio.md` (WebFlux)
+2. `/migrate` — Ejecuta migracion con autocorreccion segun `bank-mcp-matrix.md`:
+   - BUS (IIB) + invocaBancs -> usa `migrate-rest-full.md` (WebFlux, 1 o N ops)
+   - BUS (IIB) sin BANCS + 1 op -> usa `migrate-rest-full.md` (WebFlux)
+   - BUS (IIB) sin BANCS + 2+ ops -> usa `migrate-soap-full.md` (MVC)
+   - WAS con 1 operacion -> usa `migrate-rest-full.md` (MVC)
+   - WAS con 2+ operaciones -> usa `migrate-soap-full.md` (MVC)
+   - ORQ (orquestador) -> usa `migrate-rest-full.md` (WebFlux + lib-event-logs)
 3. `/post-migracion` — Audita el proyecto migrado contra la checklist (`post-migracion/03-checklist.md`), genera reporte pass/fail por bloque (incluye BLOQUE 13 si hay JPA/HikariCP)
 
 ## Commits

@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-import typer
 from typer.testing import CliRunner
 
 from capamedia_cli.commands.batch import app as batch_app
-
 
 runner = CliRunner()
 
@@ -26,6 +23,24 @@ def test_batch_clone_has_init_flag_in_help() -> None:
     assert "--init" in result.output
     assert "--init-ai" in result.output
     assert "claude" in result.output.lower()
+
+
+def test_batch_migrate_help_shows_codex_55_controls() -> None:
+    result = runner.invoke(batch_app, ["migrate", "--help"])
+
+    assert result.exit_code == 0
+    assert "--model" in result.output
+    assert "--reasoning-effort" in result.output
+    assert "xhigh" in result.output
+
+
+def test_batch_pipeline_help_shows_codex_55_controls() -> None:
+    result = runner.invoke(batch_app, ["pipeline", "--help"])
+
+    assert result.exit_code == 0
+    assert "--model" in result.output
+    assert "--reasoning-effort" in result.output
+    assert "xhigh" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +130,7 @@ def test_batch_review_writes_markdown_report(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = runner.invoke(batch_app, ["review", str(tmp_path), "--workers", "1"])
+    runner.invoke(batch_app, ["review", str(tmp_path), "--workers", "1"])
     # Debe haber creado un reporte .md
     reports = list(tmp_path.rglob("batch-review-*.md"))
     assert len(reports) >= 1, f"esperaba 1+ reporte batch-review-*.md, got {reports}"

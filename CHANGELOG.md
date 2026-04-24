@@ -4,6 +4,16 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.16] - 2026-04-24
+
+### Changed - Codex GPT-5.5 first-class
+
+- Codex harness defaults now generate `.codex/config.toml` with `model = "gpt-5.5"` and `model_reasoning_effort = "xhigh"`.
+- Codex agent TOML generation now maps high-complexity assets to GPT-5.5 + `xhigh`, medium assets to GPT-5.5 + `high`, and low assets to GPT-5.4-Mini + `medium`.
+- `batch pipeline` and `batch migrate` now default to `--engine codex`; `--engine claude` and `--engine auto` remain available.
+- Added `--reasoning-effort low|medium|high|xhigh` for Codex batch runs and forward it to `codex exec` via config override.
+- Added regression coverage so old `gpt-5.1-codex` defaults and missing reasoning forwarding fail tests.
+
 ## [0.23.15] - 2026-04-23
 
 ### Fixed - Unificación single-source-of-truth de canonicals (Phases 1–4)

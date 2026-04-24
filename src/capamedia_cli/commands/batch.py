@@ -66,6 +66,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
+DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
+
 
 @dataclass
 class BatchRow:
@@ -73,6 +76,18 @@ class BatchRow:
     status: str  # "ok" | "fail" | "skip" | "wait"
     detail: str
     fields: dict[str, str]
+
+
+def _normalize_reasoning_effort(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized not in CODEX_REASONING_EFFORTS:
+        valid = " | ".join(sorted(CODEX_REASONING_EFFORTS))
+        raise typer.BadParameter(f"reasoning effort invalido: {value}. Usa {valid}")
+    return normalized
 
 
 MIGRATE_FIELD_ORDER = ["engine", "codex", "result", "framework", "build", "check", "seconds", "project"]
@@ -225,7 +240,7 @@ def _write_markdown_report(
     lines.append(f"**OK:** {ok} · **FAIL:** {fail} · **WAIT:** {wait} · **SKIP:** {skip}\n")
 
     if rows:
-        cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+        cols = field_order or sorted({k for r in rows for k in r.fields})
         header = ["service", "status", "detail", *cols]
         lines.append("")
         lines.append("| " + " | ".join(header) + " |")
@@ -243,7 +258,7 @@ def _write_csv_report(
 ) -> Path:
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     dest = workspace / f"batch-{cmd}-{ts}.csv"
-    cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+    cols = field_order or sorted({k for r in rows for k in r.fields})
     with dest.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["service", "status", "detail", *cols])
@@ -253,7 +268,7 @@ def _write_csv_report(
 
 
 def _render_table(cmd: str, rows: list[BatchRow], field_order: list[str] | None = None) -> None:
-    cols = field_order or sorted({k for r in rows for k in r.fields.keys()})
+    cols = field_order or sorted({k for r in rows for k in r.fields})
     table = Table(title=f"Batch {cmd}: {len(rows)} servicios", title_style="bold cyan")
     table.add_column("Servicio", style="cyan")
     table.add_column("Status", style="bold", width=6)
@@ -677,6 +692,7 @@ def _process_migrate_service(
     timeout_minutes: int,
     run_check: bool,
     unsafe: bool,
+    reasoning_effort: str | None = None,
     resume: bool = False,
     scheduler: BatchScheduler | None = None,
 ) -> BatchRow:
@@ -753,7 +769,6 @@ def _process_migrate_service(
     stderr_path = run_dir / f"{engine.name}-stderr-{ts}.log"
     prompt_path.write_text(prompt + "\n", encoding="utf-8")
 
-    started = time.perf_counter()
     skip_migrate = resume and stage_ok(state, "migrate")
     project_name = migrated_project.name
     result_status = "ok"
@@ -777,6 +792,7 @@ def _process_migrate_service(
             output_path=output_path,
             timeout_seconds=timeout_minutes * 60,
             model=model,
+            reasoning_effort=reasoning_effort,
             unsafe=unsafe,
         )
         if scheduler is not None:
@@ -921,6 +937,7 @@ def _process_pipeline_service(
     shallow: bool,
     skip_check: bool,
     unsafe: bool,
+    reasoning_effort: str | None = None,
     resume: bool = False,
     scheduler: BatchScheduler | None = None,
 ) -> BatchRow:
@@ -1052,6 +1069,7 @@ def _process_pipeline_service(
         schema_path,
         engine=engine,
         model=model,
+        reasoning_effort=reasoning_effort,
         prompt_file=prompt_file,
         timeout_minutes=timeout_minutes,
         run_check=not skip_check,
@@ -1486,7 +1504,6 @@ def batch_review(
       - Cerrar un sprint donde migraste varios servicios — revisarlos de una
       - Validar que los N migrados del equipo esten listos para PR
     """
-    from capamedia_cli.commands.review import review as review_single
     from capamedia_cli.core.checklist_rules import CheckContext, run_all_blocks
 
     root_path = (root or Path.cwd()).resolve()
@@ -1879,16 +1896,33 @@ def batch_pipeline(
         str,
         typer.Option(
             "--engine",
-            help="Engine AI headless: claude | codex | auto (default auto = prioriza claude)",
+            help="Engine AI headless: claude | codex | auto (default codex; auto prioriza Claude si esta disponible)",
         ),
-    ] = "auto",
+    ] = "codex",
     claude_bin: Annotated[
         str, typer.Option("--claude-bin", help="Binario de Claude Code CLI")
     ] = "claude",
     codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
     model: Annotated[
-        str | None, typer.Option("--model", help="Override del modelo del engine seleccionado")
+        str | None,
+        typer.Option(
+            "--model",
+            help=(
+                "Override del modelo del engine seleccionado. Para Codex, default desde "
+                "~/.codex/config.toml o GPT-5.5 si el workspace fue generado por capamedia init."
+            ),
+        ),
     ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help=(
+                "Override de razonamiento para Codex CLI: low | medium | high | xhigh. "
+                "Default recomendado: xhigh."
+            ),
+        ),
+    ] = DEFAULT_CODEX_REASONING_EFFORT,
     prompt_file: Annotated[
         Path | None,
         typer.Option(
@@ -1947,7 +1981,7 @@ def batch_pipeline(
         if not prompt_file.exists():
             raise typer.BadParameter(f"prompt no existe: {prompt_file}")
 
-    # Engine selection (env -> flag -> auto)
+    # Engine selection (env -> flag)
     env_pref = engine_from_env()
     eff_engine_name = env_pref or engine_name
     try:
@@ -1970,13 +2004,15 @@ def batch_pipeline(
         harnesses.append(engine.name)
 
     schema_path = _ensure_migrate_schema(ws)
+    eff_reasoning = _normalize_reasoning_effort(reasoning_effort if engine.name == "codex" else None)
 
     console.print(
         Panel.fit(
             f"[bold]batch pipeline[/bold]\n"
             f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
             f"Harnesses: {', '.join(harnesses)} · Namespace: {namespace}\n"
-            f"Engine: [green]{engine.name}[/green] ({engine.subscription_type}) · Model: {model or '(default)'}\n"
+            f"Engine: [green]{engine.name}[/green] ({engine.subscription_type}) · "
+            f"Model: {model or '(default)'} · Reasoning: {eff_reasoning or '(engine default)'}\n"
             f"Resume: {'SI' if resume else 'NO'} · Retries: {retries} · "
             f"Window: {max_services_per_window or 'off'}/{window_hours}h",
             border_style="cyan",
@@ -2008,6 +2044,7 @@ def batch_pipeline(
                         group_id=group_id,
                         engine=engine,
                         model=model,
+                        reasoning_effort=eff_reasoning,
                         prompt_file=prompt_file,
                         timeout_minutes=timeout_minutes,
                         skip_tx=skip_tx,
@@ -2046,16 +2083,33 @@ def batch_migrate(
         str,
         typer.Option(
             "--engine",
-            help="Engine AI headless: claude | codex | auto (default auto = prioriza claude)",
+            help="Engine AI headless: claude | codex | auto (default codex; auto prioriza Claude si esta disponible)",
         ),
-    ] = "auto",
+    ] = "codex",
     claude_bin: Annotated[
         str, typer.Option("--claude-bin", help="Binario de Claude Code CLI")
     ] = "claude",
     codex_bin: Annotated[str, typer.Option("--codex-bin", help="Binario de Codex CLI")] = "codex",
     model: Annotated[
-        str | None, typer.Option("--model", help="Override del modelo del engine seleccionado")
+        str | None,
+        typer.Option(
+            "--model",
+            help=(
+                "Override del modelo del engine seleccionado. Para Codex, default desde "
+                "~/.codex/config.toml o GPT-5.5 si el workspace fue generado por capamedia init."
+            ),
+        ),
     ] = None,
+    reasoning_effort: Annotated[
+        str | None,
+        typer.Option(
+            "--reasoning-effort",
+            help=(
+                "Override de razonamiento para Codex CLI: low | medium | high | xhigh. "
+                "Default recomendado: xhigh."
+            ),
+        ),
+    ] = DEFAULT_CODEX_REASONING_EFFORT,
     prompt_file: Annotated[
         Path | None,
         typer.Option(
@@ -2106,7 +2160,7 @@ def batch_migrate(
         if not prompt_file.exists():
             raise typer.BadParameter(f"prompt no existe: {prompt_file}")
 
-    # Engine selection (env -> flag -> auto)
+    # Engine selection (env -> flag)
     env_pref = engine_from_env()
     eff_engine_name = env_pref or engine_name
     try:
@@ -2125,13 +2179,15 @@ def batch_migrate(
     )
 
     schema_path = _ensure_migrate_schema(ws)
+    eff_reasoning = _normalize_reasoning_effort(reasoning_effort if engine.name == "codex" else None)
 
     console.print(
         Panel.fit(
             f"[bold]batch migrate[/bold]\n"
             f"Servicios: {len(services)} · Workers: {workers} · Root: {ws}\n"
             f"Engine: [green]{engine.name}[/green] ({engine.subscription_type}) · "
-            f"Model: {model or '(default)'} · Checklist: {'NO' if skip_check else 'SI'}\n"
+            f"Model: {model or '(default)'} · Reasoning: {eff_reasoning or '(engine default)'} · "
+            f"Checklist: {'NO' if skip_check else 'SI'}\n"
             f"Resume: {'SI' if resume else 'NO'} · Retries: {retries} · "
             f"Window: {max_services_per_window or 'off'}/{window_hours}h",
             border_style="cyan",
@@ -2159,6 +2215,7 @@ def batch_migrate(
                         schema_path,
                         engine=engine,
                         model=model,
+                        reasoning_effort=eff_reasoning,
                         prompt_file=prompt_file,
                         timeout_minutes=timeout_minutes,
                         run_check=not skip_check,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +13,7 @@ from capamedia_cli.commands.status import (
     _check_artifacts_token,
     _check_azure_pat,
     _check_binary,
+    _check_codex_model_config,
     _check_engines,
     status_command,
 )
@@ -125,6 +127,39 @@ def test_check_engines_never_looks_at_openai_api_key(monkeypatch) -> None:
 
     assert result.ok is True
     assert "OPENAI" not in result.detail.upper()
+
+
+def test_check_codex_model_config_detects_gpt55_xhigh(tmp_path: Path) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text(
+        'model = "gpt-5.5"\nmodel_reasoning_effort = "xhigh"\n',
+        encoding="utf-8",
+    )
+
+    with patch("capamedia_cli.commands.status.Path.home", return_value=tmp_path):
+        result = _check_codex_model_config()
+
+    assert result.ok is True
+    assert result.required is False
+    assert "gpt-5.5" in result.detail
+    assert "xhigh" in result.detail
+
+
+def test_check_codex_model_config_marks_legacy_defaults_optional(tmp_path: Path) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "config.toml").write_text(
+        'model = "gpt-5.1-codex"\nmodel_reasoning_effort = "high"\n',
+        encoding="utf-8",
+    )
+
+    with patch("capamedia_cli.commands.status.Path.home", return_value=tmp_path):
+        result = _check_codex_model_config()
+
+    assert result.ok is False
+    assert result.required is False
+    assert "gpt-5.1-codex" in result.detail
 
 
 # ---------------------------------------------------------------------------

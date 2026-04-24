@@ -49,11 +49,26 @@ Leer en este orden:
 
 ## Paso 3 — Deducir parámetros del MCP
 
+La decision de arquetipo sale de `bank-mcp-matrix.md`. No recalcularla con
+heuristicas locales.
+
+| Caso BPTPSRE | `tecnologia` | `projectType` | `webFramework` | Overrides |
+|---|---|---|---|---|
+| WAS con 1 operacion | `was` | `rest` | `mvc` | `deploymentType=microservicio`, `invocaBancs=false` |
+| WAS con 2+ operaciones | `was` | `soap` | `mvc` | `deploymentType=microservicio`, `invocaBancs=false` |
+| BUS/IIB con BANCS | `bus` | `rest` | `webflux` | `invocaBancs=true` fuerza REST con cualquier cantidad de ops |
+| BUS/IIB sin BANCS con 1 operacion | `bus` | `rest` | `webflux` | `deploymentType=microservicio` |
+| BUS/IIB sin BANCS con 2+ operaciones | `bus` | `soap` | `mvc` | `deploymentType=microservicio` |
+| ORQ/orquestador | `bus` | `rest` | `webflux` | `deploymentType=orquestador`, agregar `lib-event-logs` |
+
 | Parámetro | Cómo se deduce |
 |---|---|
 | `wsdlPath` | Ruta absoluta al `*.wsdl` del legacy clonado |
-| `projectType` | `rest` si WSDL tiene 1 op, `soap` si tiene 2+ ops |
-| `webFramework` | `webflux` si no hay BD, `mvc` si hay BD (solo aplica a SOAP) |
+| `tecnologia` / `sourceKind` | WAS, BUS/IIB u ORQ segun `COMPLEXITY_*`, `migration-context.json` y evidencia legacy |
+| `projectType` | Segun la tabla BPTPSRE anterior, no solo por cantidad de operaciones |
+| `webFramework` | Segun la tabla BPTPSRE anterior; WAS siempre MVC, BUS/ORQ REST siempre WebFlux |
+| `invocaBancs` | `true` solo cuando el analisis detecta consumo BANCS directo |
+| `deploymentType` | `orquestador` solo para ORQ; en los demas casos `microservicio` |
 | `serviceName` | Nombre del servicio (del argumento de `/clone`) |
 | `groupId` | `com.pichincha.sp` (standard del banco) |
 | `artifactId` | `tnd-msa-sp-<servicio>` |
@@ -79,15 +94,19 @@ Si el MCP crea una subcarpeta `./destino/<namespace>-msa-sp-<servicio>/`, está 
 
 Verificar cada gap y aplicar el workaround si corresponde. Si el MCP nuevo ya lo fixeó, registrar en `.capamedia/config.yaml` bajo `scaffolding.gaps_fixed_by_mcp`.
 
-### Gap 1 — `spring-boot-starter-webflux` faltante en scaffold SOAP
+### Gap 1 — Stack Spring incorrecto para el arquetipo elegido
 
-Si `projectType=soap` y el `build.gradle` generado **no** incluye `spring-boot-starter-webflux`, agregarlo manualmente:
+Validar el `build.gradle` contra la matriz, sin mezclar stacks:
 
-```groovy
-implementation 'org.springframework.boot:spring-boot-starter-webflux'
-```
+- BUS/ORQ REST debe tener `spring-boot-starter-webflux` y no debe tener
+  `spring-boot-starter-web` ni `spring-boot-starter-web-services`.
+- WAS REST MVC debe tener `spring-boot-starter-web` y no debe tener
+  `spring-boot-starter-webflux` ni `spring-boot-starter-web-services`.
+- SOAP MVC debe tener Spring WS (`spring-boot-starter-web-services`) sobre
+  servlet/MVC y no debe tener `spring-boot-starter-webflux`.
 
-(Necesario porque `lib-bnc-api-client` usa `WebClient` internamente).
+Si el MCP genera un stack distinto, corregir el scaffold para volver al caso
+BPTPSRE correspondiente y registrar el workaround.
 
 ### Gap 2 — `jaxws-rt` faltante
 
@@ -149,7 +168,7 @@ Escribir `destino/<namespace>-msa-sp-<servicio>/migration-context.json`:
 - wsdlPath: .../legacy/.../consultarCliente.wsdl
 
 **Workarounds aplicados:**
-- Gap 1 (webflux starter) — AGREGADO
+- Gap 1 (stack Spring segun matriz) — OK / CORREGIDO
 - Gap 2 (jaxws-rt) — NO aplica (projectType=rest)
 - Gap 3 (versiones) — sincronizado con gold-ref
 

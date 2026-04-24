@@ -27,7 +27,7 @@ cp prompts/configuracion-claude-code/CLAUDE.md /path/to/tnd-msa-sp-wsclientes000
     qa-generator.md      <- Subagente para generar artefactos QA
   skills/
     pre-migracion/SKILL.md   <- /pre-migracion command
-    migrar/SKILL.md          <- /migrar command
+    migrar/SKILL.md          <- /migrate command (legacy alias /migrar)
     post-migracion/SKILL.md  <- /post-migracion command
   rules/
     hexagonal.md         <- Reglas de arquitectura hexagonal
@@ -42,7 +42,7 @@ CLAUDE.md                <- Instrucciones globales del proyecto
 | Comando | Que hace |
 |---|---|
 | `/pre-migracion <ruta_zip>` | Analiza un servicio legacy y genera ANALISIS_*.md |
-| `/migrar` | Ejecuta la migracion completa con loop de autocorreccion |
+| `/migrate` | Ejecuta la migracion completa con loop de autocorreccion |
 | `/post-migracion` | Genera PENDIENTES_*.md y guia de primera ejecucion |
 
 ## Subagentes disponibles

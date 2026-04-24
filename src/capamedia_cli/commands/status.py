@@ -14,7 +14,9 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -73,6 +75,36 @@ def _check_engines() -> StatusCheck:
         name="AI engine (suscripcion)",
         ok=ok,
         detail=" | ".join(parts),
+    )
+
+
+def _check_codex_model_config() -> StatusCheck:
+    """Best-effort visibility for the Codex GPT-5.5/xhigh setup."""
+    config = Path.home() / ".codex" / "config.toml"
+    if not config.exists():
+        return StatusCheck(
+            name="Codex GPT-5.5/xhigh",
+            ok=False,
+            detail="sin ~/.codex/config.toml; batch Codex puede usar defaults del CLI",
+            required=False,
+        )
+    try:
+        data = tomllib.loads(config.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return StatusCheck(
+            name="Codex GPT-5.5/xhigh",
+            ok=False,
+            detail=f"config ilegible: {type(exc).__name__}",
+            required=False,
+        )
+
+    model = str(data.get("model", "")).strip()
+    effort = str(data.get("model_reasoning_effort", "")).strip()
+    return StatusCheck(
+        name="Codex GPT-5.5/xhigh",
+        ok=model == "gpt-5.5" and effort == "xhigh",
+        detail=f"model={model or '?'} reasoning={effort or '?'}",
+        required=False,
     )
 
 
@@ -215,6 +247,7 @@ def status_command() -> None:
         _check_binary("node", ["--version"]),
         # AI engine — al menos uno
         _check_engines(),
+        _check_codex_model_config(),
         # Credenciales (env vars, no API keys)
         _check_azure_pat(),
         _check_artifacts_token(),

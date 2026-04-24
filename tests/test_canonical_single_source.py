@@ -204,6 +204,62 @@ def test_ambiguous_matrix_phrase_removed() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Guard 3b: contradicciones de arquetipo BPTPSRE no deben reaparecer
+# ---------------------------------------------------------------------------
+
+FORBIDDEN_ARCHETYPE_DRIFT_PHRASES = [
+    "SOAP controllers sobre WebFlux",
+    "Ports son ABSTRACT CLASSES",
+    "Ports son abstract classes",
+    "WSDL de 1 op al stack REST+WebFlux",
+    "1 op va a REST/WebFlux",
+    "cualquier WAS con DB",
+    "spring-boot-starter-webflux faltante en scaffold SOAP",
+    "debio ir REST+WebFlux",
+    "debi\u00f3 ir REST+WebFlux",
+]
+
+
+def test_forbidden_archetype_drift_phrases_removed() -> None:
+    """Evita que vuelvan las contradicciones que cambian el arquetipo MCP."""
+    offenders: list[str] = []
+
+    for md in _iter_md_files():
+        content = md.read_text(encoding="utf-8")
+        for phrase in FORBIDDEN_ARCHETYPE_DRIFT_PHRASES:
+            if phrase not in content:
+                continue
+            for lineno, line in enumerate(content.splitlines(), start=1):
+                if phrase in line:
+                    offenders.append(
+                        f"{md.relative_to(CANONICAL_ROOT)}:{lineno} contiene "
+                        f"frase prohibida {phrase!r}"
+                    )
+
+    assert not offenders, (
+        "Contradicciones de arquetipo BPTPSRE detectadas:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_rest_prompt_has_stack_specific_dependency_guards() -> None:
+    """El prompt REST diferencia BUS/ORQ WebFlux de WAS REST/MVC."""
+    content = (CANONICAL_ROOT / "prompts" / "migrate-rest-full.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "BUS/ORQ REST WebFlux" in content
+    assert "WAS REST MVC" in content
+    assert "spring-boot-starter-webflux" in content
+    assert "spring-boot-starter-web" in content
+    assert "WAS REST/MVC with DB uses HikariCP+JPA+Oracle" in content
+    assert (
+        "**DO NOT include:** `spring-boot-starter-web-services`, `wsdl4j`, "
+        "`spring-boot-starter-web`"
+    ) not in content
+
+
+# ---------------------------------------------------------------------------
 # Guard 4: los 3 canonicals nuevos de v0.23.15 existen
 # ---------------------------------------------------------------------------
 

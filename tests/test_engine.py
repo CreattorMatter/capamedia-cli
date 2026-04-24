@@ -80,6 +80,15 @@ def test_codex_engine_unavailable_when_binary_missing() -> None:
     assert "no encontrado" in reason.lower() or "not found" in reason.lower()
 
 
+def test_codex_engine_unavailable_when_binary_access_denied() -> None:
+    engine = CodexEngine(bin_path="codex")
+    with patch("capamedia_cli.core.engine.subprocess.run", side_effect=PermissionError("denied")):
+        ok, reason = engine.is_available()
+
+    assert ok is False
+    assert "no ejecutable" in reason
+
+
 def test_codex_engine_run_headless_missing_binary(tmp_path: Path) -> None:
     engine = CodexEngine(bin_path="nonexistent-codex-binary-xyz")
     einput = EngineInput(
@@ -112,6 +121,33 @@ def test_codex_engine_run_headless_success(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert result.rate_limited is False
+
+
+def test_codex_engine_run_headless_forwards_model_and_reasoning(tmp_path: Path) -> None:
+    engine = CodexEngine(bin_path="codex")
+    einput = EngineInput(
+        workspace=tmp_path,
+        prompt="do the thing",
+        schema_path=None,
+        output_path=tmp_path / "out.json",
+        timeout_seconds=5,
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
+    )
+    fake_completed = subprocess.CompletedProcess(
+        args=["codex"], returncode=0, stdout="ok", stderr=""
+    )
+
+    with patch("capamedia_cli.core.engine.subprocess.run", return_value=fake_completed) as run:
+        engine.run_headless(einput)
+
+    cmd = run.call_args.args[0]
+    assert cmd[0].lower().endswith(("codex", "codex.cmd", "codex.exe"))
+    assert cmd[1] == "exec"
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.5"
+    assert "-c" in cmd
+    assert 'model_reasoning_effort="xhigh"' in cmd
 
 
 def test_codex_engine_detects_rate_limit_in_stderr(tmp_path: Path) -> None:
