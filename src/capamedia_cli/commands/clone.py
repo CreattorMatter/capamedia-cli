@@ -358,9 +358,8 @@ def _write_complexity_report(
 
     lines.append("## Proximo paso")
     lines.append("")
-    lines.append("- Abri este workspace en Claude Code / Cursor / Windsurf")
-    lines.append("- Ejecuta `/fabric` en el chat para generar el arquetipo")
-    lines.append("- Alternativamente, corre `capamedia fabrics generate` en shell para armar el prompt")
+    lines.append("- Corre `capamedia fabrics generate` desde el workspace para generar el arquetipo")
+    lines.append("- Luego corre `capamedia ai migrate` y `capamedia ai doublecheck`")
     lines.append("")
 
     dest.write_text("\n".join(lines), encoding="utf-8")
@@ -641,7 +640,7 @@ def clone_service(
         console.print(
             f"\n[bold yellow]ATENCION:[/bold yellow] hay [bold red]{pending_props}[/bold red] "
             ".properties especificos del servicio/UMP que NO estan en el repo. "
-            "Antes de [cyan]/migrate[/cyan], pedir estos archivos al owner del "
+            "Antes de [cyan]capamedia ai migrate[/cyan], pedir estos archivos al owner del "
             "servicio para evitar placeholders en application.yml.\n"
             f"  Detalle: [cyan].capamedia/properties-report.yaml[/cyan]"
         )
@@ -676,8 +675,7 @@ def clone_service(
     if init:
         console.print("  [cyan]capamedia fabrics generate[/cyan]  (desde este mismo workspace)")
     else:
-        console.print("  Abri el workspace en tu IDE (Claude Code, Cursor, Windsurf)")
-        console.print("  Ejecuta [cyan]/fabric[/cyan] en el chat, o [cyan]capamedia fabrics generate[/cyan] en shell")
+        console.print("  [cyan]capamedia fabrics generate[/cyan]  (desde este mismo workspace)")
 
 
 # ---------------------------------------------------------------------------
@@ -768,7 +766,7 @@ def _write_properties_report(analysis, ws: Path) -> Path | None:
 def _action_for_status(status: str) -> str:
     if status == "PENDING_FROM_BANK":
         return (
-            "Pedir al owner del servicio antes de /migrate. "
+            "Pedir al owner del servicio antes de capamedia ai migrate. "
             "Sin este archivo, las keys quedan como ${CCC_*} placeholder en application.yml."
         )
     if status == "SAMPLE_IN_REPO":

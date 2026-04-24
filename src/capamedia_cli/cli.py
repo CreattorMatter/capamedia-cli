@@ -5,26 +5,25 @@ Comandos disponibles:
   capamedia check-install  - verifica que todo el toolchain este OK
   capamedia auth           - bootstrap de credenciales para Fabrics/Azure/Codex
   capamedia init           - inicializa un proyecto con scaffolding para el harness elegido
-  capamedia fabrics        - gestiona el MCP Fabrics (setup y preflight)
+  capamedia fabrics        - gestiona el MCP Fabrics (setup y generate)
+  capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
+  capamedia ai doublecheck - corre el doble check AI post-migracion
   capamedia doctor         - diagnostico del CLI y el entorno
   capamedia upgrade        - agrega o actualiza harnesses en un proyecto ya inicializado
 
-Los comandos de trabajo diario (clone, fabric, migrate, check) son SLASH COMMANDS
-ejecutados desde el chat del IDE (Claude Code, Cursor, Windsurf, Copilot, etc.),
-no comandos shell. El CLI solo genera los slash commands en la carpeta correcta.
+Flujo recomendado:
+  capamedia clone -> capamedia fabrics generate -> capamedia ai migrate
+  -> capamedia ai doublecheck -> capamedia review
+
+Los assets nativos de cada harness se siguen generando, pero el flujo operativo
+portable vive en comandos shell para que Codex, Claude y futuros engines usen
+la misma entrada.
 """
 
 from __future__ import annotations
 
 import sys
-
-# Forzar UTF-8 en stdout/stderr para que emojis y acentos no exploten en Windows cp1252.
-# Esto se ejecuta AL IMPORT, antes de cualquier print.
-for stream in (sys.stdout, sys.stderr):
-    try:
-        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    except (AttributeError, OSError):
-        pass
+from contextlib import suppress
 
 import typer
 from rich.console import Console
@@ -32,6 +31,9 @@ from rich.console import Console
 from capamedia_cli import __version__
 from capamedia_cli.commands import (
     adopt as adopt_cmd,
+)
+from capamedia_cli.commands import (
+    ai,
     auth,
     batch,
     canonical,
@@ -40,17 +42,29 @@ from capamedia_cli.commands import (
     clone,
     doctor,
     fabrics,
-    info as info_cmd,
     init,
     install,
     review,
     status,
     uninstall,
-    update as update_cmd,
     upgrade,
     validate,
+)
+from capamedia_cli.commands import (
+    info as info_cmd,
+)
+from capamedia_cli.commands import (
+    update as update_cmd,
+)
+from capamedia_cli.commands import (
     version as version_cmd,
 )
+
+# Forzar UTF-8 en stdout/stderr para que emojis y acentos no exploten en Windows cp1252.
+# Esto se ejecuta al import, antes de cualquier print del CLI.
+for stream in (sys.stdout, sys.stderr):
+    with suppress(AttributeError, OSError):
+        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 console = Console()
 
@@ -100,6 +114,7 @@ app.command("check")(check.check_project)
 app.command("checklist")(check.checklist_project)  # v0.23.0: alias doble-check
 # v0.23.2: review con subcomandos `review orq|bus|was` para forzar el source_type
 app.add_typer(review.app, name="review")
+app.add_typer(ai.app, name="ai", help="Etapas AI headless: migrate y doublecheck")
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")

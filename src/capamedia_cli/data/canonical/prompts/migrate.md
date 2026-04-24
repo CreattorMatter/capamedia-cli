@@ -21,15 +21,15 @@ allowed_tools:
   - Task
 ---
 
-# /migrate
+# migrate
 
 Migra toda la lógica del servicio legacy al arquetipo destino generado por Fabrics.
 
 ## Prerequisitos
 
-1. Haber corrido `/clone <servicio>` — deja `legacy/`, `umps/`, `tx/`, `gold-ref/`, `COMPLEXITY_*.md`.
-2. Haber corrido `/fabric` — deja `destino/tnd-msa-sp-<servicio>/` con el scaffold base.
-3. Estar **dentro** de `destino/tnd-msa-sp-<servicio>/` o en la raíz del workspace (el comando detecta ambos).
+1. Haber corrido `capamedia clone <servicio>` - deja `legacy/`, `umps/`, `tx/`, `gold-ref/`, `COMPLEXITY_*.md`.
+2. Haber corrido `capamedia fabrics generate` - deja `destino/<namespace>-msa-sp-<servicio>/` con el scaffold base.
+3. Ejecutar desde la raiz del workspace; no desde `destino/`.
 
 ## Paso 1 — Detectar modo
 

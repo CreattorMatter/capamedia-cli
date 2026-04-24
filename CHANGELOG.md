@@ -4,6 +4,18 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.17] - 2026-04-24
+
+### Added - Flujo AI portable para migrate y doublecheck
+
+- Nuevo namespace `capamedia ai` con `capamedia ai migrate` y `capamedia ai doublecheck`.
+- `ai migrate` reutiliza el runner headless de batch sobre el workspace actual, con `--engine codex|claude|auto`, `--model`, `--reasoning-effort`, `--resume` y `--retries`.
+- `ai migrate` no corre checklist por defecto: el doble check queda como etapa separada.
+- `ai doublecheck` ejecuta el prompt post-migracion con salida JSON estructurada y deja `capamedia review` como auditoria deterministica final.
+- `fabrics generate`, `init`, `info`, README e INSTALL ahora recomiendan el flujo shell portable: `clone -> fabrics generate -> ai migrate -> ai doublecheck -> review`.
+- Se actualizo la instalacion documentada de Codex CLI a `npm install -g @openai/codex`.
+- Tests nuevos cubren registro del namespace `ai`, autodeteccion de servicio, skip de checklist por defecto y salida estructurada del doublecheck.
+
 ## [0.23.16] - 2026-04-24
 
 ### Changed - Codex GPT-5.5 first-class

@@ -20,20 +20,22 @@ allowed_tools:
   - Edit
 ---
 
-# /doublecheck — doble pasada: checklist + autofixes + reporte final
+# doublecheck - doble pasada: checklist + autofixes + reporte final
 
-Equivale al comando `capamedia checklist` (v0.23.0) pero ejecutable desde el
-chat de Claude Code. Se usa **despues de `/migrate`** para cerrar todo lo
-autofixeable de una sola vez y dejar claro lo que queda como handoff al
-owner del servicio.
+Equivale al comando `capamedia checklist` (v0.23.0) pero ejecutado por el
+engine AI elegido desde `capamedia ai doublecheck`. En Claude Code tambien
+puede existir como slash command legacy `/doublecheck`.
 
-Diferencia con `/check`:
-- `/check` — **solo reporta**, no modifica archivos.
-- `/doublecheck` — reporta + **aplica autofixes** + re-reporta.
+Se usa **despues de `capamedia ai migrate`** para cerrar todo lo autofixeable
+de una sola vez y dejar claro lo que queda como handoff al owner del servicio.
+
+Diferencia con `capamedia check`:
+- `capamedia check` - **solo reporta**, no modifica archivos.
+- `capamedia ai doublecheck` - reporta + **aplica autofixes** + re-reporta.
 
 ## Cuando usarlo
 
-- Despues de que `/migrate` termino y el build esta verde.
+- Despues de que `capamedia ai migrate` termino y el build esta verde.
 - Antes de abrir el PR al banco.
 - Cuando querés ver **qué queda realmente como trabajo manual** (sin el
   ruido de lo que el CLI puede arreglar solo).
@@ -118,7 +120,7 @@ developer, son handoff a otros roles.
 
 ## Paso 5 — Responder conversacionalmente
 
-Al final del `/doublecheck`, responder en el chat con un resumen:
+Al final del doublecheck, responder con un resumen:
 
 ```markdown
 ## Doble check ejecutado: <servicio>
@@ -129,7 +131,7 @@ Al final del `/doublecheck`, responder en el chat con un resumen:
 - Re-check post-fix: <X'/Y PASS>
 
 ### Estado final
-- ✅ PR_READY / ⚠️ READY_WITH_FOLLOW_UP / 🔴 BLOCKED_BY_HIGH
+- PR_READY / READY_WITH_FOLLOW_UP / BLOCKED_BY_HIGH
 
 ### Fixes aplicados automaticamente
 1. `lib-bnc-api-client` normalizado a 1.1.0 estable
@@ -156,7 +158,8 @@ o abrir el PR si no hay residuales HIGH.
    checklist siguiente lo detecta y marca HIGH.
 3. **Nunca inventar secretos ni config keys.** Lo desconocido se marca como
    handoff, no se completa con placeholder al voleo.
-4. **No correr `/migrate` en el medio.** `/doublecheck` asume que el
-   codigo ya esta migrado y compila; solo pule lo determinista.
+4. **No correr `capamedia ai migrate`, `batch migrate` ni `/migrate` en el medio.**
+   El doublecheck asume que el codigo ya esta migrado y compila; solo pule lo
+   determinista.
 5. **Informativo, no destructivo.** Todo cambio del autofix queda en
    `.capamedia/autofix/<ts>.log` para trazabilidad.

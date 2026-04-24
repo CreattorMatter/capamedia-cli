@@ -195,7 +195,7 @@ def test_success_message_does_not_suggest_init_inside_destino() -> None:
     `init --here dentro de destino/` (bug UX: eso ensuciaria el repo Java
     del banco con assets de Claude).
 
-    En lugar, debe mandar al usuario al workspace root para claude + /migrate.
+    En lugar, debe mandar al usuario al workspace root y al flujo AI shell.
     """
     import capamedia_cli.commands.fabrics as fabrics_module
 
@@ -205,5 +205,6 @@ def test_success_message_does_not_suggest_init_inside_destino() -> None:
         "El mensaje de exito no debe sugerir init --here dentro de destino/ - "
         "eso duplicaria configs de Claude dentro del repo Java del banco"
     )
-    # Y debe mandar a correr claude desde el workspace
-    assert "claude ." in source or "claude `." in source
+    # Y debe mandar a correr el flujo AI desde el workspace, no desde destino/
+    assert "capamedia ai migrate --engine codex" in source
+    assert "capamedia ai doublecheck --engine codex" in source

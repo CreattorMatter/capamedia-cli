@@ -90,17 +90,20 @@ aplicar las reglas como estan definidas aqui. Los patrones del banco evolucionan
 y un servicio migrado el mes pasado puede tener gaps que ya se resolvieron.
 
 ## Flujo de trabajo
-1. `/pre-migracion <ruta>` — Detecta tipo (IIB / WAS / ORQ) y genera ANALISIS_*.md
-   - IIB o WAS -> usa `pre-migracion/01-analisis-servicio.md`
-   - ORQ (orquestador) -> usa `pre-migracion/01-analisis-orq.md` (análisis liviano)
-2. `/migrate` — Ejecuta migracion con autocorreccion segun `bank-mcp-matrix.md`:
+1. `capamedia clone <servicio>` - trae legacy, UMPs, TX y evidencia de configuracion.
+2. `capamedia fabrics generate` - invoca el MCP Fabrics y crea el arquetipo oficial en `destino/`.
+3. `capamedia ai migrate --engine codex` - ejecuta migracion con autocorreccion segun `bank-mcp-matrix.md`:
    - BUS (IIB) + invocaBancs -> usa `migrate-rest-full.md` (WebFlux, 1 o N ops)
    - BUS (IIB) sin BANCS + 1 op -> usa `migrate-rest-full.md` (WebFlux)
    - BUS (IIB) sin BANCS + 2+ ops -> usa `migrate-soap-full.md` (MVC)
    - WAS con 1 operacion -> usa `migrate-rest-full.md` (MVC)
    - WAS con 2+ operaciones -> usa `migrate-soap-full.md` (MVC)
    - ORQ (orquestador) -> usa `migrate-rest-full.md` (WebFlux + lib-event-logs)
-3. `/post-migracion` — Audita el proyecto migrado contra la checklist (`post-migracion/03-checklist.md`), genera reporte pass/fail por bloque (incluye BLOQUE 13 si hay JPA/HikariCP)
+4. `capamedia ai doublecheck --engine codex` - corre checklist + autofixes + re-check.
+5. `capamedia review` - auditoria final deterministica del banco.
+
+Claude Code puede tener slash commands legacy, pero la entrada operativa
+portable para todas las IA es `capamedia ai migrate` y `capamedia ai doublecheck`.
 
 ## Commits
 Conventional Commits: `feat|fix|refactor|test|docs|chore|ci|iac: descripcion`

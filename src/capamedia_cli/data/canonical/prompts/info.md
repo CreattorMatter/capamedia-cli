@@ -94,7 +94,8 @@ Handoffs pendientes (NO son bugs del codigo)
 Siguiente paso
   1) Pedir los .properties pendientes al owner del servicio
   2) Pegar en .capamedia/inputs/<file>.properties (o en la raiz)
-  3) capamedia checklist (o /doublecheck en Claude Code)
+  3) capamedia ai doublecheck --engine codex (o --engine claude/auto)
+  4) capamedia review
 ```
 
 ## Interpretacion
@@ -106,10 +107,10 @@ Siguiente paso
 - **Handoffs**: items que no pueden autofixearse (son del owner / ops).
 - **Siguiente paso**: recomendacion concreta segun el estado.
 
-## No confundir con /check y /doublecheck
+## No confundir con check y doublecheck
 
 - `/info` — **read-only**, solo muestra estado. No corre el checklist.
-- `/check` — corre el checklist contra el codigo (los 20 blocks).
-- `/doublecheck` — corre checklist + autofixes + re-check.
+- `capamedia check` — corre el checklist contra el codigo (los 20 blocks).
+- `capamedia ai doublecheck` — corre checklist + autofixes + re-check.
 
 `/info` es ideal para **entender que falta** antes de arrancar con los otros.

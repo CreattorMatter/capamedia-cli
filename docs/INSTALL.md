@@ -186,7 +186,7 @@ claude --version
 
 **Codex**:
 ```powershell
-npm install -g codex
+npm install -g @openai/codex
 codex --version
 codex login
 ```
@@ -265,7 +265,7 @@ Abrir VS Code, instalar **SonarQube for IDE** desde el marketplace.
 npm install -g @anthropic-ai/claude-code
 
 # Codex (alternativa)
-npm install -g codex
+npm install -g @openai/codex
 codex login
 ```
 
@@ -534,15 +534,15 @@ Corregido en v0.18.0 embebiendo el catálogo de `generalservices.properties` + `
 
 Actualizá al CLI >= 0.18.0 y re-corré `capamedia init <svc> --force` para regenerar `CLAUDE.md`.
 
-### ❌ `/migrate` no sabe qué `.properties` del UMP pedirle al banco
+### ❌ `ai migrate` no sabe que `.properties` del UMP pedirle al banco
 
-Corregido en v0.19.0. El `capamedia clone <svc>` ahora genera `.capamedia/properties-report.yaml` con la lista de `.properties` específicos que están `PENDING_FROM_BANK`. Abrilo antes de lanzar `/migrate` para saber qué tenés que pedir.
+Corregido en v0.19.0. El `capamedia clone <svc>` ahora genera `.capamedia/properties-report.yaml` con la lista de `.properties` especificos que estan `PENDING_FROM_BANK`. Abrilo antes de lanzar `capamedia ai migrate` para saber que tenes que pedir.
 
 ---
 
 ## Checklist final pre-migración
 
-Antes de lanzar tu primer `/migrate`, confirmá:
+Antes de lanzar tu primer `capamedia ai migrate`, confirma:
 
 - [ ] `capamedia status` todas las filas en OK
 - [ ] `capamedia version` >= 0.19.0
@@ -550,8 +550,16 @@ Antes de lanzar tu primer `/migrate`, confirmá:
 - [ ] Abrís VS Code y SonarLint carga sin errores
 - [ ] Podés correr `./gradlew --version` desde cualquier carpeta
 - [ ] Tu harness AI (Claude Code o Codex) arranca con `claude --version` o `codex --version`
-- [ ] Si vas a usar batch Codex, `codex login status` responde OK y `~/.codex/config.toml` usa `model = "gpt-5.5"` con `model_reasoning_effort = "xhigh"`
+- [ ] Si vas a usar Codex, `codex login status` responde OK y `~/.codex/config.toml` usa `model = "gpt-5.5"` con `model_reasoning_effort = "xhigh"`
 - [ ] Tenés un PAT de Azure Artifacts exportado como `AZURE_ARTIFACTS_TOKEN` (para el build del servicio generado)
 - [ ] Revisaste `.capamedia/properties-report.yaml` del workspace y ya le pediste los `PENDING_FROM_BANK` al owner (si los hay)
 
-Si todo OK → arrancar con `claude .` dentro del workspace y `/migrate` en el chat.
+Si todo OK:
+
+```powershell
+capamedia ai migrate --engine codex
+capamedia ai doublecheck --engine codex
+capamedia review
+```
+
+Usa `--engine claude` o `--engine auto` si ese es tu engine disponible.

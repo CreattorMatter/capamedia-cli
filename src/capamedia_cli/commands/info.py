@@ -427,7 +427,7 @@ def _render_next_step(
             "completas\n"
             "  3) Pedir los .properties pendientes al owner y pegar en "
             "[cyan].capamedia/inputs/[/cyan]\n"
-            "  4) [cyan]capamedia checklist[/cyan] (o `/doublecheck` en Claude Code)"
+            "  4) [cyan]capamedia ai doublecheck --engine codex[/cyan]"
         )
         return
 
@@ -436,7 +436,7 @@ def _render_next_step(
             "  1) Pedir los .properties pendientes al owner del servicio\n"
             "  2) Pegar en [cyan].capamedia/inputs/<file>.properties[/cyan] "
             "(o en la raiz del workspace)\n"
-            "  3) [cyan]capamedia checklist[/cyan] (o `/doublecheck` en Claude Code)"
+            "  3) [cyan]capamedia ai doublecheck --engine codex[/cyan]"
         )
         return
 

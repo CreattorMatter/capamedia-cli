@@ -611,7 +611,7 @@ def _write_wsdl_placeholder(
     hacer copyfile sin fallar (cuando el WAS legacy solo tiene anotaciones
     JAX-WS y no hay `.wsdl` fisico).
 
-    El agente `/migrate` despues reconstruye el WSDL real desde las anotaciones
+    El agente de `capamedia ai migrate` despues reconstruye el WSDL real desde las anotaciones
     @WebService del legacy o lo regenera via Gradle `generateFromWsdl`.
 
     Returns el path absoluto al placeholder escrito.
@@ -631,9 +631,9 @@ def _write_wsdl_placeholder(
   `{service_name}` NO tiene un `.wsdl` fisico (usa anotaciones JAX-WS
   @WebService / @WebMethod).
 
-  Durante `/migrate`, el agente reconstruye el contrato SOAP real desde
+  Durante `capamedia ai migrate`, el agente reconstruye el contrato SOAP real desde
   las anotaciones Java del legacy, o lo regenera con Gradle
-  `generateFromWsdl`. Despues de `/migrate` este placeholder se puede
+  `generateFromWsdl`. Despues de `capamedia ai migrate` este placeholder se puede
   reemplazar/eliminar.
 -->
 <wsdl:definitions
@@ -820,7 +820,7 @@ def generate(
             "[cyan]WSDL placeholder[/cyan] temporal para satisfacer al MCP "
             "Fabrics:\n"
             f"  [dim]{placeholder}[/dim]\n"
-            "Durante [cyan]/migrate[/cyan] el agente reconstruye el contrato "
+            "Durante [cyan]capamedia ai migrate[/cyan] el agente reconstruye el contrato "
             "real desde las anotaciones Java del legacy."
         )
     else:
@@ -1024,11 +1024,15 @@ def generate(
                 f"Arquetipo generado en [cyan]{proj_dir}[/cyan]\n\n"
                 f"Proximos pasos:\n"
                 f"{recovery_line}"
-                f"  1. Abri Claude Code desde el workspace (NO desde destino/):\n"
+                f"  1. Volve al workspace (NO a destino/):\n"
                 f"     [cyan]cd {ws}[/cyan]\n"
-                f"     [cyan]claude .[/cyan]\n"
-                f"  2. En el chat de Claude Code, corre: [cyan]/migrate[/cyan]\n"
-                f"  3. Cuando termine, audita con: [cyan]capamedia review[/cyan]\n"
+                f"  2. Migra con AI headless:\n"
+                f"     [cyan]capamedia ai migrate --engine codex[/cyan]\n"
+                f"     [dim](tambien podes usar --engine claude o --engine auto)[/dim]\n"
+                f"  3. Doble check AI post-migracion:\n"
+                f"     [cyan]capamedia ai doublecheck --engine codex[/cyan]\n"
+                f"  4. Auditoria final deterministica:\n"
+                f"     [cyan]capamedia review[/cyan]\n"
                 f"     (autodetecta destino/ y legacy/ desde el workspace)",
                 border_style="green",
                 title="OK",
@@ -1119,7 +1123,7 @@ def preflight() -> None:
                 "[bold]Recordatorio[/bold] (Julio Soria, 2026-04-17):\n"
                 "> [italic]Siempre hay que mirar la ultima version del MCP.[/italic]\n\n"
                 "El MCP se instala con [cyan]@latest[/cyan], asi que en teoria es siempre el ultimo.\n"
-                "Pero antes de invocar [cyan]/fabric[/cyan] desde Claude Code:\n"
+                "Pero antes de invocar [cyan]capamedia fabrics generate[/cyan]:\n"
                 "  1. Verifica que el tool [cyan]mcp__fabrics__create_project_with_wsdl[/cyan] aparezca\n"
                 "  2. Revisa el schema del tool por parametros nuevos\n"
                 "  3. Registra en [cyan].capamedia/config.yaml[/cyan] la fecha de scaffolding"

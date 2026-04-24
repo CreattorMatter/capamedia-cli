@@ -1,4 +1,4 @@
-# capamedia-cli - v0.23.16
+# capamedia-cli - v0.23.17
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -11,13 +11,16 @@ Un solo canonical, 6 harnesses soportados: **Claude Code · Cursor · Windsurf �
 Separa claramente dos responsabilidades:
 
 1. **Setup local**: `capamedia install`, `capamedia check-install`, `capamedia auth bootstrap`, `capamedia init`, `capamedia fabrics setup`
-2. **Trabajo diario en IDE**: `/clone`, `/fabric`, `/migrate`, `/check`
+2. **Trabajo por servicio**: `capamedia clone`, `capamedia fabrics generate`, `capamedia ai migrate`, `capamedia ai doublecheck`, `capamedia review`
 3. **Fabrica batch**: `capamedia batch complexity|clone|init|pipeline|migrate|check|watch`
 
-El CLI genera slash commands y assets nativos del harness elegido. Para Fabrics usa siempre el MCP del banco como gate del arquetipo; si el arquetipo no sale de Fabrics, la migracion no avanza.
+El CLI genera assets nativos del harness elegido, pero el flujo operativo portable vive en comandos shell. Para Fabrics usa siempre el MCP del banco como gate del arquetipo; si el arquetipo no sale de Fabrics, la migracion no avanza.
 
 ```text
 install -> check-install -> auth bootstrap -> init -> fabrics setup
+                                      |
+                                      v
+          clone -> fabrics generate -> ai migrate -> ai doublecheck -> review
                                       |
                                       v
                          batch pipeline / batch migrate / batch watch
@@ -142,11 +145,13 @@ Eso genera, segun el harness:
 - `.mcp.json`
 - `.sonarlint/connectedMode.json`
 
-En modo IDE el flujo sigue siendo:
+Flujo recomendado por servicio:
 
 ```text
-/clone <servicio> -> /fabric -> /migrate -> /check
+capamedia clone <servicio> -> capamedia fabrics generate -> capamedia ai migrate -> capamedia ai doublecheck -> capamedia review
 ```
+
+Los slash commands legacy pueden seguir existiendo en algunos harnesses, pero no son la entrada recomendada para Codex ni para el flujo multi-IA.
 
 ---
 
@@ -243,7 +248,10 @@ Esta version deja cerrados los P0 para correr desde macOS, Linux o Windows:
 | `capamedia clone` | clona legacy, UMPs y TX |
 | `capamedia fabrics setup` | registra el MCP Fabrics |
 | `capamedia fabrics generate` | invoca el MCP y genera `destino/` |
+| `capamedia ai migrate` | migracion AI headless del workspace actual (Codex/Claude) |
+| `capamedia ai doublecheck` | doble check AI post-migracion; no reemplaza `review` |
 | `capamedia check` | corre el checklist deterministico |
+| `capamedia review` | auditoria final deterministica del banco |
 | `capamedia batch pipeline` | fabrica completa por servicio |
 | `capamedia batch migrate` | migracion headless sobre workspaces ya preparados |
 | `capamedia batch watch` | mirador operativo del lote |
@@ -307,6 +315,7 @@ capamedia-cli/
 - [x] v0.3.7 - Fabrics como gate duro + `batch watch`
 - [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
 - [x] v0.23.16 - Codex first-class: GPT-5.5, `xhigh`, batch default Codex, `--reasoning-effort`
+- [x] v0.23.17 - `capamedia ai migrate/doublecheck` como flujo portable multi-IA
 - [ ] v0.4.0 - integracion con Jira / Azure Boards / Confluence / Slack
 
 ## Licencia

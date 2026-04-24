@@ -14,6 +14,9 @@ Genera en la carpeta destino:
 
 Por defecto corre INTERACTIVO: te pregunta uno por uno cuales harnesses activar.
 Usa --ai <csv> para saltar el prompt (ej: --ai claude,cursor).
+
+El flujo operativo recomendado usa comandos shell:
+clone/fabrics generate/ai migrate/ai doublecheck/review.
 """
 
 from __future__ import annotations
@@ -156,7 +159,9 @@ def _post_process_agent_docs(target_dir: Path, service_name: str, cli_version: s
         f"# {service_name} - Migracion CapaMedia OLA1\n\n"
         f"Proyecto generado por `capamedia init` (v{cli_version}).\n\n"
         f"- **Servicio:** `{service_name}`\n"
-        f"- **Flujo esperado:** `/clone {service_name}` -> `/fabric` -> `/migrate` -> `/check`\n\n"
+        f"- **Flujo esperado:** `capamedia clone {service_name}` -> "
+        f"`capamedia fabrics generate` -> `capamedia ai migrate` -> "
+        f"`capamedia ai doublecheck` -> `capamedia review`\n\n"
         f"El contenido siguiente es contexto comun para toda migracion CapaMedia.\n\n"
         f"---\n\n"
     )
@@ -241,7 +246,7 @@ def init_project(
         ),
     ] = None,
 ) -> None:
-    """Inicializa un proyecto CapaMedia con los slash commands del harness elegido."""
+    """Inicializa un workspace CapaMedia con assets del harness elegido."""
     # v0.20.1: auto-padding a 4 digitos segun convencion del banco
     if service_name and service_name != ".":
         from capamedia_cli.commands.clone import normalize_service_name
@@ -337,12 +342,11 @@ def init_project(
     console.print()
     console.print("[bold]Proximos pasos:[/bold]")
     console.print(f"  1. [cyan]cd {target_dir}[/cyan]")
-    console.print("  2. Abri el IDE preferido ([cyan]code .[/cyan], [cyan]claude[/cyan], [cyan]cursor .[/cyan])")
-    console.print("  3. En el chat del IDE, ejecuta los slash commands:")
-    console.print(f"     [cyan]/clone {service_name}[/cyan]  - trae legacy + UMPs + TX")
-    console.print("     [cyan]/fabric[/cyan]               - genera arquetipo con el MCP")
-    console.print("     [cyan]/migrate[/cyan]              - migra la logica al destino")
-    console.print("     [cyan]/check[/cyan]                - ejecuta checklist post-migracion")
+    console.print(f"  2. [cyan]capamedia clone {service_name}[/cyan]")
+    console.print("  3. [cyan]capamedia fabrics generate[/cyan]")
+    console.print("  4. [cyan]capamedia ai migrate --engine codex[/cyan]  (o --engine claude/auto)")
+    console.print("  5. [cyan]capamedia ai doublecheck --engine codex[/cyan]")
+    console.print("  6. [cyan]capamedia review[/cyan]")
     console.print()
     if (artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}") == "${CAPAMEDIA_ARTIFACT_TOKEN}":
         console.print(

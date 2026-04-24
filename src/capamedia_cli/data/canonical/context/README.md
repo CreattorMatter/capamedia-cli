@@ -1,4 +1,4 @@
-# Configuracion Claude Code - Capa Media OLA1
+# Configuracion AI - Capa Media OLA1
 
 ## Como usar
 
@@ -37,13 +37,18 @@ cp prompts/configuracion-claude-code/CLAUDE.md /path/to/tnd-msa-sp-wsclientes000
 CLAUDE.md                <- Instrucciones globales del proyecto
 ```
 
-## Comandos disponibles despues de configurar
+## Flujo operativo portable
 
-| Comando | Que hace |
+| Comando shell | Que hace |
 |---|---|
-| `/pre-migracion <ruta_zip>` | Analiza un servicio legacy y genera ANALISIS_*.md |
-| `/migrate` | Ejecuta la migracion completa con loop de autocorreccion |
-| `/post-migracion` | Genera PENDIENTES_*.md y guia de primera ejecucion |
+| `capamedia clone <servicio>` | Trae legacy, UMPs y TX |
+| `capamedia fabrics generate` | Genera el arquetipo oficial con MCP Fabrics |
+| `capamedia ai migrate --engine codex` | Ejecuta la migracion con Codex/Claude headless |
+| `capamedia ai doublecheck --engine codex` | Corre checklist + autofixes + re-check |
+| `capamedia review` | Auditoria final deterministica |
+
+Claude Code puede exponer slash commands legacy (`/migrate`, `/doublecheck`),
+pero el flujo recomendado para cualquier IA es el shell flow anterior.
 
 ## Subagentes disponibles
 

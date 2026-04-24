@@ -697,6 +697,37 @@ def _process_migrate_service(
     scheduler: BatchScheduler | None = None,
 ) -> BatchRow:
     workspace = root / service
+    return _process_migrate_workspace(
+        service,
+        workspace,
+        schema_path,
+        engine=engine,
+        model=model,
+        prompt_file=prompt_file,
+        timeout_minutes=timeout_minutes,
+        run_check=run_check,
+        unsafe=unsafe,
+        reasoning_effort=reasoning_effort,
+        resume=resume,
+        scheduler=scheduler,
+    )
+
+
+def _process_migrate_workspace(
+    service: str,
+    workspace: Path,
+    schema_path: Path,
+    *,
+    engine: Engine,
+    model: str | None,
+    prompt_file: Path | None,
+    timeout_minutes: int,
+    run_check: bool,
+    unsafe: bool,
+    reasoning_effort: str | None = None,
+    resume: bool = False,
+    scheduler: BatchScheduler | None = None,
+) -> BatchRow:
     if not workspace.exists():
         return BatchRow(service, "fail", f"workspace no existe: {workspace}", {})
 

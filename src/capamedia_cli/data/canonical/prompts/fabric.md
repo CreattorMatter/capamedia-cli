@@ -21,13 +21,13 @@ allowed_tools:
   - mcp__fabrics__create_project_with_wsdl
 ---
 
-# /fabric
+# fabric
 
 Genera el arquetipo oficial del Banco Pichincha usando el MCP Fabrics, con todos los parámetros deducidos del análisis previo.
 
 ## Prerequisitos
 
-1. Haber corrido `/clone <servicio>` antes (deja `legacy/`, `COMPLEXITY_*.md`, etc.).
+1. Haber corrido `capamedia clone <servicio>` antes (deja `legacy/`, `COMPLEXITY_*.md`, etc.).
 2. El MCP Fabrics debe estar conectado. Si el tool `mcp__fabrics__create_project_with_wsdl` no aparece, parar y correr `capamedia fabrics preflight` en shell.
 
 ## Paso 1 — Preflight del MCP
@@ -179,7 +179,15 @@ Revisá:
 2. `src/main/resources/wsdl/` — que el WSDL esté copiado
 3. `.claude/` y `CLAUDE.md` — que estén adentro
 
-Si está todo bien, abrí esa carpeta en el IDE y corré `/migrate`.
+Si esta todo bien, volve al workspace root y corre:
+
+```bash
+capamedia ai migrate --engine codex
+capamedia ai doublecheck --engine codex
+capamedia review
+```
+
+Usa `--engine claude` o `--engine auto` si ese es el engine disponible.
 ```
 
 ## Reglas importantes
