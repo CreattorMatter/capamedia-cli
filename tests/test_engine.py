@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ from capamedia_cli.core.engine import (
     EngineResult,
     _detect_rate_limit,
     _last_json_block,
+    _run_text_process,
     available_engines,
     select_engine,
 )
@@ -66,6 +68,23 @@ def test_last_json_block_multiple_blocks_returns_last() -> None:
 def test_last_json_block_fallback_balanced_braces() -> None:
     text = 'prefix noise {"ok": true} suffix'
     assert json.loads(_last_json_block(text)) == {"ok": True}
+
+
+def test_run_text_process_streams_and_captures_output(capsys) -> None:
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; print('out live'); print('err live', file=sys.stderr)",
+    ]
+
+    result = _run_text_process(cmd, timeout_seconds=5, stream_output=True)
+    captured = capsys.readouterr()
+
+    assert result.returncode == 0
+    assert "out live" in result.stdout
+    assert "err live" in result.stderr
+    assert "out live" in captured.out
+    assert "err live" in captured.err
 
 
 # ---------------------------------------------------------------------------

@@ -77,6 +77,7 @@ def test_ai_migrate_help_shows_engine_controls() -> None:
     assert "--engine" in result.output
     assert "--reasoning-effort" in result.output
     assert "--check" in result.output
+    assert "--stream" in result.output
 
 
 def test_ai_doublecheck_help_shows_engine_controls() -> None:
@@ -85,6 +86,7 @@ def test_ai_doublecheck_help_shows_engine_controls() -> None:
     assert result.exit_code == 0
     assert "--engine" in result.output
     assert "--reasoning-effort" in result.output
+    assert "--stream" in result.output
     assert "review" in result.output.lower()
 
 
@@ -134,6 +136,7 @@ def test_ai_migrate_autodetects_service_and_skips_check_by_default(
     assert captured["run_check"] is False
     assert captured["reasoning_effort"] == "xhigh"
     assert captured["engine"] is fake
+    assert captured["stream_output"] is True
     assert captured["schema_path"].name == "codex-batch-migrate.schema.json"
 
 

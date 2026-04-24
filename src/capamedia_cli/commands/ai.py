@@ -240,6 +240,7 @@ def _process_doublecheck_workspace(
     unsafe: bool,
     reasoning_effort: str | None = None,
     resume: bool = False,
+    stream_output: bool = False,
 ) -> BatchRow:
     if not workspace.exists():
         return BatchRow(service, "fail", f"workspace no existe: {workspace}", {})
@@ -303,6 +304,7 @@ def _process_doublecheck_workspace(
         model=model,
         reasoning_effort=reasoning_effort,
         unsafe=unsafe,
+        stream_output=stream_output,
     )
     eres = engine.run_headless(einput)
     elapsed = eres.duration_seconds or (time.perf_counter() - started)
@@ -424,6 +426,10 @@ def ai_migrate(
         bool,
         typer.Option("--unsafe", help="Usa permisos full para el engine"),
     ] = False,
+    stream: Annotated[
+        bool,
+        typer.Option("--stream/--no-stream", help="Muestra salida live del engine en consola"),
+    ] = True,
 ) -> None:
     """Migra el workspace actual usando un engine AI headless."""
     ws = _resolve_workspace(workspace)
@@ -440,7 +446,8 @@ def ai_migrate(
             f"Workspace: [cyan]{ws}[/cyan]\n"
             f"Engine: [green]{engine.name}[/green] ({engine.subscription_type})\n"
             f"Model: {model or '(default)'} | Reasoning: {eff_reasoning or '(engine default)'}\n"
-            f"Checklist final: {'SI' if check else 'NO'} | Resume: {'SI' if resume else 'NO'} | Retries: {retries}",
+            f"Checklist final: {'SI' if check else 'NO'} | Resume: {'SI' if resume else 'NO'} | Retries: {retries}\n"
+            f"Stream: {'SI' if stream else 'NO'}",
             border_style="cyan",
         )
     )
@@ -458,6 +465,7 @@ def ai_migrate(
             run_check=check,
             unsafe=unsafe,
             resume=resume or attempt > 0,
+            stream_output=stream,
         )
 
     row = _run_service_with_retries(
@@ -527,6 +535,10 @@ def ai_doublecheck(
         bool,
         typer.Option("--unsafe", help="Usa permisos full para el engine"),
     ] = False,
+    stream: Annotated[
+        bool,
+        typer.Option("--stream/--no-stream", help="Muestra salida live del engine en consola"),
+    ] = True,
 ) -> None:
     """Ejecuta el doble check AI post-migracion y deja el review para `capamedia review`."""
     ws = _resolve_workspace(workspace)
@@ -543,7 +555,8 @@ def ai_doublecheck(
             f"Workspace: [cyan]{ws}[/cyan]\n"
             f"Engine: [green]{engine.name}[/green] ({engine.subscription_type})\n"
             f"Model: {model or '(default)'} | Reasoning: {eff_reasoning or '(engine default)'}\n"
-            f"Resume: {'SI' if resume else 'NO'} | Retries: {retries}",
+            f"Resume: {'SI' if resume else 'NO'} | Retries: {retries}\n"
+            f"Stream: {'SI' if stream else 'NO'}",
             border_style="cyan",
         )
     )
@@ -560,6 +573,7 @@ def ai_doublecheck(
             timeout_minutes=timeout_minutes,
             unsafe=unsafe,
             resume=resume or attempt > 0,
+            stream_output=stream,
         )
 
     row = _run_service_with_retries(

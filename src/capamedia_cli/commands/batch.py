@@ -727,6 +727,7 @@ def _process_migrate_service(
     reasoning_effort: str | None = None,
     resume: bool = False,
     scheduler: BatchScheduler | None = None,
+    stream_output: bool = False,
 ) -> BatchRow:
     workspace = root / service
     return _process_migrate_workspace(
@@ -742,6 +743,7 @@ def _process_migrate_service(
         reasoning_effort=reasoning_effort,
         resume=resume,
         scheduler=scheduler,
+        stream_output=stream_output,
     )
 
 
@@ -759,6 +761,7 @@ def _process_migrate_workspace(
     reasoning_effort: str | None = None,
     resume: bool = False,
     scheduler: BatchScheduler | None = None,
+    stream_output: bool = False,
 ) -> BatchRow:
     if not workspace.exists():
         return BatchRow(service, "fail", f"workspace no existe: {workspace}", {})
@@ -857,6 +860,7 @@ def _process_migrate_workspace(
             model=model,
             reasoning_effort=reasoning_effort,
             unsafe=unsafe,
+            stream_output=stream_output,
         )
         if scheduler is not None:
             scheduler.acquire(service)

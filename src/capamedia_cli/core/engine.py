@@ -18,6 +18,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +55,7 @@ class EngineInput:
     model: str | None = None
     reasoning_effort: str | None = None
     unsafe: bool = False
+    stream_output: bool = False
 
 
 @dataclass
@@ -90,6 +93,90 @@ def _detect_rate_limit(text: str) -> tuple[bool, int | None]:
         except ValueError:
             pass
     return (True, None)
+
+
+def _run_text_process(
+    cmd: list[str],
+    *,
+    timeout_seconds: int,
+    input_text: str | None = None,
+    cwd: str | None = None,
+    stream_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    if not stream_output:
+        return subprocess.run(
+            cmd,
+            input=input_text,
+            text=True,
+            **TEXT_IO_KWARGS,
+            capture_output=True,
+            check=False,
+            timeout=timeout_seconds,
+            cwd=cwd,
+        )
+
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **TEXT_IO_KWARGS,
+        cwd=cwd,
+    )
+
+    def drain(pipe, sink, parts: list[str]) -> None:
+        if pipe is None:
+            return
+        for chunk in iter(pipe.readline, ""):
+            parts.append(chunk)
+            sink.write(chunk)
+            sink.flush()
+
+    stdout_thread = threading.Thread(
+        target=drain,
+        args=(proc.stdout, sys.stdout, stdout_parts),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=drain,
+        args=(proc.stderr, sys.stderr, stderr_parts),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    if input_text is not None and proc.stdin is not None:
+        try:
+            proc.stdin.write(input_text)
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    try:
+        returncode = proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        returncode = proc.wait()
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        raise subprocess.TimeoutExpired(
+            exc.cmd,
+            exc.timeout,
+            output="".join(stdout_parts),
+            stderr="".join(stderr_parts),
+        ) from exc
+
+    stdout_thread.join(timeout=1)
+    stderr_thread.join(timeout=1)
+    return subprocess.CompletedProcess(
+        args=cmd,
+        returncode=returncode,
+        stdout="".join(stdout_parts),
+        stderr="".join(stderr_parts),
+    )
 
 
 class CodexEngine:
@@ -163,14 +250,11 @@ class CodexEngine:
 
         started = time.perf_counter()
         try:
-            result = subprocess.run(
+            result = _run_text_process(
                 cmd,
-                input=einput.prompt,
-                text=True,
-                **TEXT_IO_KWARGS,
-                capture_output=True,
-                check=False,
-                timeout=einput.timeout_seconds,
+                input_text=einput.prompt,
+                timeout_seconds=einput.timeout_seconds,
+                stream_output=einput.stream_output,
             )
         except FileNotFoundError:
             elapsed = time.perf_counter() - started
@@ -281,14 +365,11 @@ class ClaudeEngine:
         # Claude Code CLI no tiene --cd, lo corremos con cwd del subprocess
         started = time.perf_counter()
         try:
-            result = subprocess.run(
+            result = _run_text_process(
                 cmd,
-                text=True,
-                **TEXT_IO_KWARGS,
-                capture_output=True,
-                check=False,
-                timeout=einput.timeout_seconds,
                 cwd=str(einput.workspace),
+                timeout_seconds=einput.timeout_seconds,
+                stream_output=einput.stream_output,
             )
         except FileNotFoundError:
             elapsed = time.perf_counter() - started
