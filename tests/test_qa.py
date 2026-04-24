@@ -17,7 +17,7 @@ def test_qa_command_is_registered() -> None:
     assert "pack" in result.output
 
 
-def test_qa_pack_generates_copilot_prompt_and_bash_contract(tmp_path: Path) -> None:
+def test_qa_pack_generates_copilot_prompt_and_cmd_contract(tmp_path: Path) -> None:
     service = "wstecnicos0098"
     (tmp_path / "legacy" / f"sqb-msa-{service}").mkdir(parents=True)
     destino = tmp_path / "destino" / f"tnd-msa-sp-{service}"
@@ -35,12 +35,21 @@ def test_qa_pack_generates_copilot_prompt_and_bash_contract(tmp_path: Path) -> N
     content = prompt.read_text(encoding="utf-8")
     assert "name: qa" in content
     assert "TRAMAS.txt" in content
-    assert "Usa Bash" in content
+    assert "Command Prompt" in content
+    assert "cmd.exe" in content
     assert "No uses PowerShell" in content
+    assert "curl.exe" in content
+    assert "Get-Content" in content
     assert "execute/runInTerminal" in content
     assert not list(tmp_path.rglob("*.ps1"))
     assert (tmp_path / "TRAMAS.txt").exists()
     assert (tmp_path / ".capamedia" / "qa" / "pack.json").exists()
+    settings = tmp_path / ".vscode" / "settings.json"
+    assert settings.exists()
+    settings_content = settings.read_text(encoding="utf-8")
+    assert "terminal.integrated.defaultProfile.windows" in settings_content
+    assert "Command Prompt" in settings_content
+    assert "cmd.exe" in settings_content
 
 
 def test_qa_prepare_fails_when_repos_are_missing_but_writes_prompt(tmp_path: Path) -> None:

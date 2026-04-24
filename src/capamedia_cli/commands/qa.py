@@ -222,19 +222,51 @@ def _write_status_placeholder(workspace: Path, service: str) -> Path:
     return path
 
 
-def _write_bash_notes(workspace: Path) -> Path:
+def _write_command_prompt_notes(workspace: Path) -> Path:
     qa_dir = workspace / ".capamedia" / "qa"
     qa_dir.mkdir(parents=True, exist_ok=True)
     path = qa_dir / "README.md"
     path.write_text(
         "# CapaMedia QA\n\n"
-        "Este circuito esta pensado para VDI con Bash disponible.\n\n"
+        "Este circuito esta pensado para VDI con Command Prompt disponible.\n\n"
         "- No se generan scripts PowerShell.\n"
+        "- No se requieren comandos Bash.\n"
         "- Ejecuta `/qa` en Copilot Chat desde VS Code.\n"
-        "- Si necesitas terminal, usa Bash y `curl`.\n"
+        "- Si necesitas terminal, usa Command Prompt (`cmd.exe`) y `curl.exe`.\n"
         "- `TRAMAS.txt` es el oraculo de respuestas legacy; no lo modifiques desde la IA.\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _write_vscode_cmd_settings(workspace: Path) -> Path:
+    settings_dir = workspace / ".vscode"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    path = settings_dir / "settings.json"
+
+    data: dict[str, object] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = dict(loaded)
+        except (OSError, json.JSONDecodeError):
+            data = {}
+
+    profiles_raw = data.get("terminal.integrated.profiles.windows")
+    profiles = dict(profiles_raw) if isinstance(profiles_raw, dict) else {}
+    profiles["Command Prompt"] = {
+        "path": "C:\\Windows\\System32\\cmd.exe",
+        "args": [],
+    }
+    data["terminal.integrated.profiles.windows"] = profiles
+    data["terminal.integrated.defaultProfile.windows"] = "Command Prompt"
+    data["terminal.integrated.automationProfile.windows"] = {
+        "path": "C:\\Windows\\System32\\cmd.exe",
+        "args": [],
+    }
+
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -271,7 +303,10 @@ def _prompt_text(
         "\n"
         "## Reglas duras\n"
         "\n"
-        "- Usa Bash para comandos de terminal. No uses PowerShell ni generes scripts .ps1.\n"
+        "- Usa Command Prompt (`cmd.exe`) para comandos de terminal.\n"
+        "- No uses PowerShell. No ejecutes `powershell.exe`, `pwsh`, `Get-Content`, `Select-String` ni scripts `.ps1`.\n"
+        "- No uses Bash como requisito; este workspace esta preparado para `cmd.exe`.\n"
+        "- Para leer archivos usa `type`, para listar usa `dir`, para variables usa `set VAR=valor`.\n"
         "- No modifiques `legacy/`.\n"
         "- No modifiques `TRAMAS.txt`; es el oraculo de respuestas legacy.\n"
         "- No inventes respuestas esperadas. Si una trama no permite identificar request o expected, marca BLOCKED y pregunta.\n"
@@ -284,8 +319,8 @@ def _prompt_text(
         "2. Inspecciona `legacy/` solo para entender reglas que puedan faltar en el migrado.\n"
         "3. Ubica el proyecto Spring Boot dentro de `destino/`.\n"
         "4. Si el usuario paso `target=...` junto a `/qa`, usa ese endpoint.\n"
-        "5. Si no hay `target`, intenta levantar el migrado localmente desde Bash o pregunta una sola vez por la URL.\n"
-        "6. Ejecuta `curl` para cada request encontrado en `TRAMAS.txt`.\n"
+        "5. Si no hay `target`, intenta levantar el migrado localmente desde Command Prompt o pregunta una sola vez por la URL.\n"
+        "6. Ejecuta `curl.exe` para cada request encontrado en `TRAMAS.txt`.\n"
         "7. Compara cada response migrada contra la response legacy esperada del mismo archivo.\n"
         "8. Si hay diferencias, corrige `destino/`, recompila y repite los curls hasta PASS o BLOCKED.\n"
         "9. Actualiza `QA_STATUS.md` con casos, comandos ejecutados, diferencias y cambios aplicados.\n"
@@ -313,31 +348,33 @@ def _prompt_text(
         "- cardinalidad de listas\n"
         "- campos faltantes o extras visibles para el consumidor\n"
         "\n"
-        "## Comandos Bash sugeridos\n"
+        "## Comandos Command Prompt sugeridos\n"
         "\n"
         "Para compilar:\n"
         "\n"
-        "```bash\n"
-        "cd destino/<proyecto>\n"
-        "./gradlew generateFromWsdl clean build --no-daemon\n"
+        "```bat\n"
+        "cd /d destino\\<proyecto>\n"
+        "gradlew.bat generateFromWsdl clean build --no-daemon\n"
         "```\n"
         "\n"
         "Si Gradle falla por cache/permisos, usa un home local:\n"
         "\n"
-        "```bash\n"
-        "cd destino/<proyecto>\n"
-        "GRADLE_USER_HOME=\"$PWD/.gradle-home\" gradle generateFromWsdl clean build --no-daemon --offline\n"
+        "```bat\n"
+        "cd /d destino\\<proyecto>\n"
+        "set GRADLE_USER_HOME=%CD%\\.gradle-home\n"
+        "gradle generateFromWsdl clean build --no-daemon --offline\n"
         "```\n"
         "\n"
         "Para ejecutar curl con body temporal:\n"
         "\n"
-        "```bash\n"
-        "mkdir -p .capamedia/qa/results\n"
-        "curl -sS -X POST \"$TARGET_URL\" \\\n"
-        "  -H 'Content-Type: text/xml; charset=utf-8' \\\n"
-        "  --data-binary @.capamedia/qa/tmp/request.xml \\\n"
-        "  -o .capamedia/qa/results/<case-id>.response.xml\n"
+        "```bat\n"
+        "if not exist .capamedia\\qa\\results mkdir .capamedia\\qa\\results\n"
+        "set TARGET_URL=http://localhost:8080\n"
+        "curl.exe -sS -X POST \"%TARGET_URL%\" -H \"Content-Type: text/xml; charset=utf-8\" --data-binary @.capamedia\\qa\\tmp\\request.xml -o .capamedia\\qa\\results\\<case-id>.response.xml\n"
+        "type .capamedia\\qa\\results\\<case-id>.response.xml\n"
         "```\n"
+        "\n"
+        "Si el terminal intenta abrir PowerShell y falla, no sigas intentando PowerShell. Usa el perfil `Command Prompt` de VS Code o pide al usuario reabrir la carpeta despues de correr `capamedia qa prepare`.\n"
         "\n"
         "## Criterio de cierre\n"
         "\n"
@@ -384,7 +421,7 @@ def _write_pack_metadata(qw: QaWorkspace) -> Path:
         "destino_path": str(qw.destino_path) if qw.destino_path else "",
         "tramas_path": str(qw.tramas_path),
         "prompt_path": str(qw.prompt_path),
-        "shell": "bash",
+        "shell": "cmd",
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return path
@@ -407,7 +444,7 @@ def _render_summary(qw: QaWorkspace) -> None:
     )
     table.add_row("tramas", "[green]OK[/green]", _safe_rel(qw.tramas_path, qw.workspace))
     table.add_row("prompt /qa", "[green]OK[/green]", _safe_rel(qw.prompt_path, qw.workspace))
-    table.add_row("shell QA", "[green]Bash[/green]", "sin scripts PowerShell")
+    table.add_row("shell QA", "[green]Command Prompt[/green]", "cmd.exe")
     console.print(table)
 
 
@@ -421,7 +458,8 @@ def _prepare_workspace(
     _write_config(workspace, service)
     tramas = _write_tramas_placeholder(workspace)
     _write_status_placeholder(workspace, service)
-    _write_bash_notes(workspace)
+    _write_command_prompt_notes(workspace)
+    _write_vscode_cmd_settings(workspace)
     prompt = _write_prompt(
         service=service,
         workspace=workspace,
@@ -489,7 +527,7 @@ def pack(
             f"[bold]CapaMedia QA pack[/bold]\n"
             f"Servicio: [cyan]{service}[/cyan]\n"
             f"Workspace: [cyan]{ws}[/cyan]\n"
-            "Shell QA: [green]Bash[/green]",
+            "Shell QA: [green]Command Prompt[/green]",
             border_style="cyan",
         )
     )
