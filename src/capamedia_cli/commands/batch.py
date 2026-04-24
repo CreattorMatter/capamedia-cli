@@ -23,6 +23,7 @@ from __future__ import annotations
 import csv
 import datetime
 import json
+import re
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -121,7 +122,15 @@ WATCH_FIELD_ORDER = [
 MIGRATE_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["status", "summary"],
+    "required": [
+        "status",
+        "summary",
+        "framework",
+        "build_status",
+        "migrated_project",
+        "artifacts",
+        "notes",
+    ],
     "properties": {
         "status": {
             "type": "string",
@@ -588,6 +597,9 @@ def _build_batch_migrate_prompt(
         - Corre al menos un build real del proyecto migrado si el proyecto existe.
         - No incluyas Markdown ni explicaciones fuera del JSON final.
         - La respuesta final debe ser SOLO el objeto JSON pedido por el schema.
+        - Inclui siempre todas las claves del schema: status, summary, framework,
+          build_status, migrated_project, artifacts y notes. Si no aplica, usa
+          string vacio o lista vacia.
 
         Prompt base del proyecto:
         ---
@@ -632,6 +644,26 @@ def _read_structured_message(path: Path) -> dict[str, Any]:
             return {}
 
     return data if isinstance(data, dict) else {}
+
+
+def _summarize_engine_output(stderr: str, stdout: str, default: str) -> str:
+    text = (stderr.strip() or stdout.strip()).strip()
+    if not text:
+        return default
+
+    error_match = re.search(
+        r'"code"\s*:\s*"([^"]+)".*?"message"\s*:\s*"([^"]+)"',
+        text,
+        re.DOTALL,
+    )
+    if error_match:
+        return f"{error_match.group(1)}: {error_match.group(2)}"
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ERROR:"):
+            return stripped[:160]
+    return text.splitlines()[0][:160]
 
 
 def _as_text(value: Any, default: str = "") -> str:
@@ -882,8 +914,10 @@ def _process_migrate_workspace(
         result_status = _as_text(payload.get("status"), "ok" if returncode == 0 else "failed").lower()
         summary = _as_text(payload.get("summary")).strip()
         if not summary:
-            summary = stderr_text.strip() or stdout_text.strip() or (
-                f"{engine.name} termino sin resumen estructurado"
+            summary = _summarize_engine_output(
+                stderr_text,
+                stdout_text,
+                f"{engine.name} termino sin resumen estructurado",
             )
         framework = _as_text(payload.get("framework"), "?").strip() or "?"
         build_status = _normalize_build_status(_as_text(payload.get("build_status"), "unknown"))

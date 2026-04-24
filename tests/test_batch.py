@@ -7,6 +7,7 @@ from pathlib import Path
 
 from capamedia_cli.commands.batch import (
     BatchRow,
+    MIGRATE_OUTPUT_SCHEMA,
     _build_batch_migrate_prompt,
     _collect_watch_rows,
     _ensure_migrate_schema,
@@ -36,11 +37,15 @@ class _FakeEngine:
         exit_code: int = 0,
         rate_limited: bool = False,
         should_fail_if_called: bool = False,
+        stderr: str = "",
+        stdout: str | None = None,
     ) -> None:
         self._payload = payload
         self._exit_code = exit_code
         self._rate_limited = rate_limited
         self._should_fail = should_fail_if_called
+        self._stderr = stderr
+        self._stdout = stdout
         self.calls = 0
         self.inputs = []
 
@@ -60,8 +65,8 @@ class _FakeEngine:
             )
         return EngineResult(
             exit_code=self._exit_code,
-            stdout="ok" if self._exit_code == 0 else "",
-            stderr="",
+            stdout=self._stdout if self._stdout is not None else ("ok" if self._exit_code == 0 else ""),
+            stderr=self._stderr,
             duration_seconds=0.1,
             rate_limited=self._rate_limited,
         )
@@ -74,6 +79,8 @@ def _migrate_payload(project: Path, *, build: str = "green") -> dict:
         "framework": "REST",
         "build_status": build,
         "migrated_project": str(project),
+        "artifacts": [],
+        "notes": [],
     }
 
 
@@ -188,6 +195,15 @@ def test_build_batch_migrate_prompt_contains_workspace_context(tmp_path: Path) -
     assert "Servicio objetivo: svc" in prompt
     assert str(project) in prompt
     assert "PROMPT BASE" in prompt
+    assert "status, summary, framework" in prompt
+
+
+def test_migrate_output_schema_is_codex_strict_compatible() -> None:
+    properties = set(MIGRATE_OUTPUT_SCHEMA["properties"])
+    required = set(MIGRATE_OUTPUT_SCHEMA["required"])
+
+    assert MIGRATE_OUTPUT_SCHEMA["additionalProperties"] is False
+    assert required == properties
 
 
 def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
@@ -238,6 +254,43 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
     assert row.fields["build"] == "green"
     assert row.fields["check"] == "READY_TO_MERGE"
     assert row.detail == "Migracion completa"
+
+
+def test_process_migrate_service_reports_openai_schema_error(tmp_path: Path) -> None:
+    root = tmp_path
+    service = "wsclientes0011"
+    workspace = root / service
+    project = workspace / "destino" / "tnd-msa-sp-wsclientes0011"
+    project.mkdir(parents=True)
+    (project / "build.gradle").write_text("plugins {}", encoding="utf-8")
+    _write_fabrics_metadata(workspace, service)
+    schema_path = _ensure_migrate_schema(root)
+    stderr = (
+        "OpenAI Codex v0.124.0 (research preview)\n"
+        "--------\n"
+        "ERROR: {\n"
+        '  "error": {\n'
+        '    "code": "invalid_json_schema",\n'
+        '    "message": "Invalid schema for response_format: Missing framework."\n'
+        "  }\n"
+        "}\n"
+    )
+
+    row = _process_migrate_service(
+        service,
+        root,
+        schema_path,
+        engine=_FakeEngine(payload=None, exit_code=1, stderr=stderr),
+        model=None,
+        prompt_file=None,
+        timeout_minutes=5,
+        run_check=False,
+        unsafe=False,
+    )
+
+    assert row.status == "fail"
+    assert row.detail.startswith("invalid_json_schema:")
+    assert "Missing framework" in row.detail
 
 
 def test_process_migrate_service_fails_without_destino(tmp_path: Path) -> None:
