@@ -419,7 +419,7 @@ AUDIT_FILES = (
 # canonical con MUST/NEVER + ejemplo NO. El audit falla si alguna falta.
 OFFICIAL_BANK_RULES = {
     "1": "Capas application/domain/infrastructure",
-    "2": "WSDL framework (1 op REST+WebFlux, 2+ SOAP+MVC)",
+    "2": "WSDL framework (invocaBancs REST+WebFlux; fallback 1 op REST+WebFlux, 2+ SOAP+MVC)",
     "3": "@BpTraceable controllers",
     "4": "@BpLogger services",
     "5": "Sin navegacion cruzada entre capas",

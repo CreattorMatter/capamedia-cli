@@ -6,7 +6,7 @@
 ================================================================================
   Validaciones:
     1. Capas permitidas: application, domain, infrastructure
-    2. WSDL: 1 método → REST + WebFlux | >1 métodos → SOAP + MVC
+    2. WSDL: invocaBancs=true -> REST + WebFlux; si no, 1 método → REST + WebFlux | >1 métodos → SOAP + MVC
     3. Controladores deben usar @BpTraceable (excluye controladores de test)
     4. Servicios deben usar @BpLogger
     5. No navegación cruzada entre capas
@@ -294,6 +294,57 @@ def _detect_framework(root: Path) -> dict[str, bool]:
     return flags
 
 
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y", "si", "sí"}
+
+
+def _load_fabrics_metadata(root: Path) -> dict:
+    """
+    Read CapaMedia Fabrics metadata when the validator is executed against
+    workspace/destino/<project>. Missing or malformed metadata keeps the
+    upstream WSDL-count fallback unchanged.
+    """
+    candidates: list[Path] = [root / ".capamedia" / "fabrics.json"]
+
+    if root.parent.name.lower() == "destino":
+        candidates.append(root.parent.parent / ".capamedia" / "fabrics.json")
+
+    candidates.extend(parent / ".capamedia" / "fabrics.json" for parent in root.parents)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            if not candidate.exists():
+                continue
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _is_bus_bancs(metadata: dict) -> bool:
+    source_kind = str(metadata.get("source_kind") or "").strip().lower()
+    tecnologia = str(metadata.get("tecnologia") or "").strip().lower()
+    invoca_bancs = metadata.get("invoca_bancs", metadata.get("invocaBancs"))
+    return (source_kind in {"iib", "bus"} or tecnologia == "bus") and _truthy(invoca_bancs)
+
+
+def _format_fabrics_metadata(metadata: dict) -> str:
+    invoca_bancs = metadata.get("invoca_bancs", metadata.get("invocaBancs", "?"))
+    return (
+        f"source_kind={metadata.get('source_kind', '?')}, "
+        f"tecnologia={metadata.get('tecnologia', '?')}, "
+        f"invoca_bancs={invoca_bancs}"
+    )
+
+
 def check_wsdl(root: Path) -> list[CheckResult]:
     wsdl_files = find_wsdl_files(root)
     if not wsdl_files:
@@ -304,6 +355,8 @@ def check_wsdl(root: Path) -> list[CheckResult]:
         )]
 
     framework = _detect_framework(root)
+    fabrics_metadata = _load_fabrics_metadata(root)
+    bus_bancs_override = _is_bus_bancs(fabrics_metadata)
     results: list[CheckResult] = []
 
     for wsdl_path in wsdl_files:
@@ -322,6 +375,53 @@ def check_wsdl(root: Path) -> list[CheckResult]:
         details.append(f"  Operaciones únicas detectadas: {ops}")
         if op_names:
             details.append(f"  Nombres: {', '.join(op_names)}")
+
+        if bus_bancs_override:
+            # MCP Regla 1: BUS/IIB que invoca BANCS siempre se genera REST + WebFlux.
+            details.append(
+                "  Regla aplicable: MCP Regla 1 invocaBancs=true -> REST + WebFlux "
+                "(ignora cantidad de operaciones WSDL)"
+            )
+            details.append(f"  Metadata Fabrics: {_format_fabrics_metadata(fabrics_metadata)}")
+            details.append(f"  WebFlux detectado: {'✔' if framework['webflux'] else '✘'}")
+            details.append(f"  MVC NO presente:   {'✔' if not framework['mvc'] else '✘ MVC detectado (no debería estar)'}")
+            details.append(f"  SOAP NO presente:  {'✔' if not framework['soap'] else '✘ SOAP detectado (no debería estar)'}")
+
+            if framework["mvc"] or framework["soap"]:
+                detected = []
+                if framework["mvc"]:
+                    detected.append("MVC")
+                if framework["soap"]:
+                    detected.append("SOAP")
+                results.append(CheckResult(
+                    passed=False,
+                    message=(
+                        f"WSDL '{rel.name}': invocaBancs=true — ✘ INCORRECTO "
+                        f"({'+'.join(detected)} detectado, se esperaba REST + WebFlux)."
+                    ),
+                    details=details
+                ))
+            elif framework["webflux"]:
+                results.append(CheckResult(
+                    passed=True,
+                    message=(
+                        f"WSDL '{rel.name}': invocaBancs=true — ✔ CORRECTO "
+                        "(REST + WebFlux confirmado por metadata Fabrics)."
+                    ),
+                    details=details
+                ))
+            else:
+                results.append(CheckResult(
+                    passed=True,
+                    warning=True,
+                    message=f"WSDL '{rel.name}': invocaBancs=true — ⚠ PASA CON OBSERVACIÓN.",
+                    details=details,
+                    observations=[
+                        "No se detectó spring-boot-starter-webflux en los archivos de build.",
+                        "Verificar manualmente que el proyecto use REST + WebFlux.",
+                    ]
+                ))
+            continue
 
         if ops == 1:
             # Expected: REST + WebFlux

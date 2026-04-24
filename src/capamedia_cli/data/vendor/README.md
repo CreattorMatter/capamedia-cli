@@ -33,7 +33,7 @@ O reemplazar manualmente este archivo, verificar que la suite sigue verde
 ### Checks del script oficial
 
 1. Capas `application`/`domain`/`infrastructure` presentes + sin siblings ilegales
-2. WSDL: 1 op -> REST+WebFlux | 2+ ops -> SOAP+MVC
+2. WSDL: invocaBancs=true -> REST+WebFlux; si no, 1 op -> REST+WebFlux | 2+ ops -> SOAP+MVC
 3. `@BpTraceable` en controllers (excluye tests)
 4. `@BpLogger` en services
 5. No navegacion cruzada entre capas
