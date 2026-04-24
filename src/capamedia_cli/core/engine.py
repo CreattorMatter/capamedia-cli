@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+TEXT_IO_KWARGS = {"encoding": "utf-8", "errors": "replace"}
+
 RATE_LIMIT_PATTERNS = (
     re.compile(r"rate[_\s-]?limit", re.IGNORECASE),
     re.compile(r"\b429\b"),
@@ -106,6 +108,7 @@ class CodexEngine:
                 [executable, "--version"],
                 capture_output=True,
                 text=True,
+                **TEXT_IO_KWARGS,
                 timeout=5,
                 check=False,
             )
@@ -123,6 +126,7 @@ class CodexEngine:
                 [executable, "login", "status"],
                 capture_output=True,
                 text=True,
+                **TEXT_IO_KWARGS,
                 timeout=5,
                 check=False,
             )
@@ -163,6 +167,7 @@ class CodexEngine:
                 cmd,
                 input=einput.prompt,
                 text=True,
+                **TEXT_IO_KWARGS,
                 capture_output=True,
                 check=False,
                 timeout=einput.timeout_seconds,
@@ -221,6 +226,7 @@ class ClaudeEngine:
                 [executable, "--version"],
                 capture_output=True,
                 text=True,
+                **TEXT_IO_KWARGS,
                 timeout=5,
                 check=False,
             )
@@ -278,6 +284,7 @@ class ClaudeEngine:
             result = subprocess.run(
                 cmd,
                 text=True,
+                **TEXT_IO_KWARGS,
                 capture_output=True,
                 check=False,
                 timeout=einput.timeout_seconds,

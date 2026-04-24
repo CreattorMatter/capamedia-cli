@@ -123,6 +123,27 @@ def test_codex_engine_run_headless_success(tmp_path: Path) -> None:
     assert result.rate_limited is False
 
 
+def test_codex_engine_run_headless_forces_utf8_text_io(tmp_path: Path) -> None:
+    engine = CodexEngine(bin_path="codex")
+    einput = EngineInput(
+        workspace=tmp_path,
+        prompt="doble check 💡",
+        schema_path=None,
+        output_path=tmp_path / "out.json",
+        timeout_seconds=5,
+    )
+    fake_completed = subprocess.CompletedProcess(
+        args=["codex"], returncode=0, stdout="ok", stderr=""
+    )
+
+    with patch("capamedia_cli.core.engine.subprocess.run", return_value=fake_completed) as run:
+        engine.run_headless(einput)
+
+    assert run.call_args.kwargs["encoding"] == "utf-8"
+    assert run.call_args.kwargs["errors"] == "replace"
+    assert run.call_args.kwargs["input"] == "doble check 💡"
+
+
 def test_codex_engine_run_headless_forwards_model_and_reasoning(tmp_path: Path) -> None:
     engine = CodexEngine(bin_path="codex")
     einput = EngineInput(
@@ -213,6 +234,28 @@ def test_claude_engine_injects_schema_into_prompt(tmp_path: Path) -> None:
 def test_claude_engine_no_schema_passthrough() -> None:
     engine = ClaudeEngine(bin_path="claude")
     assert engine._prompt_with_schema("hello", None) == "hello"
+
+
+def test_claude_engine_run_headless_forces_utf8_text_io(tmp_path: Path) -> None:
+    engine = ClaudeEngine(bin_path="claude")
+    einput = EngineInput(
+        workspace=tmp_path,
+        prompt="doble check 💡",
+        schema_path=None,
+        output_path=tmp_path / "out.json",
+        timeout_seconds=5,
+    )
+    envelope = json.dumps({"type": "result", "result": '{"status":"ok"}'})
+    fake_completed = subprocess.CompletedProcess(
+        args=["claude"], returncode=0, stdout=envelope, stderr=""
+    )
+
+    with patch("capamedia_cli.core.engine.subprocess.run", return_value=fake_completed) as run:
+        result = engine.run_headless(einput)
+
+    assert result.exit_code == 0
+    assert run.call_args.kwargs["encoding"] == "utf-8"
+    assert run.call_args.kwargs["errors"] == "replace"
 
 
 # ---------------------------------------------------------------------------
