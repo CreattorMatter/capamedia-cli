@@ -8,6 +8,7 @@ Comandos disponibles:
   capamedia fabrics        - gestiona el MCP Fabrics (setup y generate)
   capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
   capamedia ai doublecheck - corre el doble check AI post-migracion
+  capamedia qa pack        - prepara QA de equivalencia funcional para Copilot
   capamedia doctor         - diagnostico del CLI y el entorno
   capamedia upgrade        - agrega o actualiza harnesses en un proyecto ya inicializado
 
@@ -44,6 +45,7 @@ from capamedia_cli.commands import (
     fabrics,
     init,
     install,
+    qa,
     review,
     status,
     uninstall,
@@ -115,6 +117,7 @@ app.command("checklist")(check.checklist_project)  # v0.23.0: alias doble-check
 # v0.23.2: review con subcomandos `review orq|bus|was` para forzar el source_type
 app.add_typer(review.app, name="review")
 app.add_typer(ai.app, name="ai", help="Etapas AI headless: migrate y doublecheck")
+app.add_typer(qa.app, name="qa", help="QA de equivalencia funcional con Copilot")
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")
