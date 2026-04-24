@@ -13,7 +13,7 @@ paths:
 - NUNCA commitear .env, credentials.json, *.pem, *.key
 
 ## Config
-- spring.jpa.hibernate.ddl-auto: SIEMPRE "none" (nunca create, update, create-drop)
+- spring.jpa.hibernate.ddl-auto: NUNCA create, update ni create-drop. En WAS+DB/JPA usar validate salvo excepcion explicita del runtime bancario.
 - spring.jpa.open-in-view: false
 
 ## Logging

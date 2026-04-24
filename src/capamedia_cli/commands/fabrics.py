@@ -8,6 +8,7 @@ Subcomandos:
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
 import json
 import os
@@ -23,6 +24,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from capamedia_cli.core.auth import resolve_artifact_token
+from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 
 console = Console()
 
@@ -504,26 +506,6 @@ def _fix_schema_locations(proj_dir: Path) -> list[str]:
     return modified
 
 
-def _set_gradle_java_home(proj_dir: Path, java_home: Path) -> None:
-    """Escribe org.gradle.java.home en gradle.properties para forzar el JDK.
-
-    Usa forward slashes (Gradle los acepta en Windows) para evitar issues de
-    escape de backslashes en .properties files. Reemplaza la linea si ya existe.
-    """
-    props = proj_dir / "gradle.properties"
-    lines: list[str] = []
-    if props.exists():
-        try:
-            for line in props.read_text(encoding="utf-8").splitlines():
-                if not line.strip().startswith("org.gradle.java.home"):
-                    lines.append(line)
-        except OSError:
-            pass
-    java_home_str = str(java_home).replace("\\", "/")
-    lines.append(f"org.gradle.java.home={java_home_str}")
-    props.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
     """Workaround post-MCP: corre `gradlew generateFromWsdl` con path absoluto y env vars.
 
@@ -547,12 +529,15 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
     # 2. Env vars para Azure Artifacts + Java 21 (Gradle 8.x no soporta Java 25+)
     subprocess_env = os.environ.copy()
     subprocess_env.update(_artifact_env_from_mcp(ws))
+    cleanup = remove_committed_gradle_java_home(proj_dir)
+    if cleanup.removed:
+        console.print(
+            f"  [dim]gradle.properties saneado: removido org.gradle.java.home ({cleanup.removed})[/dim]"
+        )
     java21 = _find_java21_home()
     if java21:
-        # Setear via gradle.properties (mas confiable en Windows con paths con espacios)
-        _set_gradle_java_home(proj_dir, java21)
         subprocess_env["JAVA_HOME"] = str(java21)
-        console.print(f"  [dim]Java 21 forzado via gradle.properties: {java21.name}[/dim]")
+        console.print(f"  [dim]Java 21 forzado via JAVA_HOME del proceso: {java21.name}[/dim]")
     else:
         console.print(
             "  [yellow]WARN[/yellow] Java 21 no encontrado. Gradle puede fallar si PATH apunta a Java >=25."
@@ -560,19 +545,15 @@ def _run_gradlew_wsdl_import(proj_dir: Path, ws: Path) -> tuple[bool, str]:
 
     # 3. Ejecutable: en Unix marcar como ejecutable
     if not is_windows:
-        try:
+        with contextlib.suppress(OSError):
             wrapper.chmod(0o755)
-        except OSError:
-            pass
 
     # 4. Limpiar caches previos del proyecto (evita class files de otras versiones de Java)
     import shutil as _sh
     for stale in (proj_dir / ".gradle", proj_dir / "build"):
         if stale.exists():
-            try:
+            with contextlib.suppress(OSError):
                 _sh.rmtree(stale, ignore_errors=True)
-            except OSError:
-                pass
 
     try:
         result = subprocess.run(
@@ -676,35 +657,38 @@ def _autodetect_service_name_from_config(ws: Path) -> str | None:
 
 @app.command("generate")
 def generate(
-    service_name: str | None = typer.Argument(
-        None,
-        help=(
-            "Nombre del servicio (ej: wsclientes0076). Si se omite, "
-            "autodetecta desde ./.capamedia/config.yaml del workspace."
+    service_name: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Nombre del servicio (ej: wsclientes0076). Si se omite, "
+                "autodetecta desde ./.capamedia/config.yaml del workspace."
+            ),
         ),
-    ),
-    workspace: Path | None = typer.Option(
-        None,
-        "--workspace",
-        "-w",
-        help="Workspace root (default: CWD)",
-    ),
-    namespace: str | None = typer.Option(
-        None,
-        "--namespace",
-        "-n",
-        help=f"Namespace del catalogo: {' | '.join(NAMESPACE_OPTIONS)}. Si se omite, se pregunta interactivamente.",
-    ),
-    group_id: str = typer.Option(
-        "com.pichincha.sp",
-        "--group-id",
-        help="Maven groupId del proyecto",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="No invocar el MCP, solo mostrar los parametros que se usarian",
-    ),
+    ] = None,
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", "-w", help="Workspace root (default: CWD)"),
+    ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--namespace",
+            "-n",
+            help=(
+                f"Namespace del catalogo: {' | '.join(NAMESPACE_OPTIONS)}. "
+                "Si se omite, se pregunta interactivamente."
+            ),
+        ),
+    ] = None,
+    group_id: Annotated[
+        str,
+        typer.Option("--group-id", help="Maven groupId del proyecto"),
+    ] = "com.pichincha.sp",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="No invocar el MCP, solo mostrar los parametros que se usarian"),
+    ] = False,
 ) -> None:
     """Invoca el MCP Fabrics del banco y genera el arquetipo en ./destino/.
 
@@ -725,8 +709,8 @@ def generate(
                 "[red]Error:[/red] falta el argumento SERVICE_NAME y no se pudo "
                 "autodetectar.\n"
                 "[yellow]Opciones:[/yellow]\n"
-                f"  1) Correr desde el workspace root (donde vive "
-                f"[cyan].capamedia/config.yaml[/cyan]).\n"
+                "  1) Correr desde el workspace root (donde vive "
+                "[cyan].capamedia/config.yaml[/cyan]).\n"
                 "  2) Pasar el nombre explicito: "
                 "[cyan]capamedia fabrics generate <service_name>[/cyan]"
             )

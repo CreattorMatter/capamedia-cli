@@ -86,7 +86,7 @@ spring:
   jpa:
     database-platform: org.hibernate.dialect.OracleDialect
     hibernate:
-      ddl-auto: none
+      ddl-auto: validate
 ```
 
 **Importante**:

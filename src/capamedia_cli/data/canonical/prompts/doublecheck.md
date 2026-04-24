@@ -111,7 +111,7 @@ Cosas que NO se pueden arreglar automaticamente y deben documentarse como
 |---|---|---|
 | `sonarcloud.io/project-key` | SonarCloud genera el UUID al primer analisis | Esperar primer pipeline + copiar el key |
 | URL de Confluence | Depende del espacio del equipo | Owner completa manual |
-| `.sonarlint/connectedMode.json` | Token personal del developer | Cada dev configura su connected mode |
+| `.sonarlint/connectedMode.json` con `projectKey` real | SonarCloud genera el UUID al primer analisis | Owner copia el `projectKey`; el archivo no contiene token y debe quedar versionado |
 | `<ump>.properties` PENDING | Viene del owner del servicio | Pedirlo + pegar en `.capamedia/inputs/` |
 | JNDI desconocido (WAS+BD) | Fuera del catalogo BPTPSRE-Secretos | Consultar con SRE |
 

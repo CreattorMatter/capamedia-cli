@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 from capamedia_cli.commands.batch import (
-    BatchRow,
     MIGRATE_OUTPUT_SCHEMA,
+    BatchRow,
     _build_batch_migrate_prompt,
     _collect_watch_rows,
     _ensure_migrate_schema,
@@ -39,6 +39,7 @@ class _FakeEngine:
         should_fail_if_called: bool = False,
         stderr: str = "",
         stdout: str | None = None,
+        on_run=None,
     ) -> None:
         self._payload = payload
         self._exit_code = exit_code
@@ -46,6 +47,7 @@ class _FakeEngine:
         self._should_fail = should_fail_if_called
         self._stderr = stderr
         self._stdout = stdout
+        self._on_run = on_run
         self.calls = 0
         self.inputs = []
 
@@ -57,6 +59,8 @@ class _FakeEngine:
         self.inputs.append(einput)
         if self._should_fail:
             raise AssertionError("engine.run_headless should not be called (resume expected)")
+        if self._on_run is not None:
+            self._on_run(einput)
         if self._payload is not None:
             einput.output_path.parent.mkdir(parents=True, exist_ok=True)
             einput.output_path.write_text(
@@ -215,6 +219,12 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
     project.mkdir(parents=True)
     prompt_file.parent.mkdir(parents=True)
     (project / "build.gradle").write_text("plugins {}", encoding="utf-8")
+    props = project / "gradle.properties"
+    props.write_text(
+        "org.gradle.java.home=C:/Program Files/Eclipse Adoptium/jdk-21\n"
+        "org.gradle.jvmargs=-Xmx1g\n",
+        encoding="utf-8",
+    )
     prompt_file.write_text("prompt real", encoding="utf-8")
     (workspace / "legacy").mkdir(parents=True)
     _write_fabrics_metadata(workspace, service)
@@ -232,7 +242,14 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
         },
     )
 
-    engine = _FakeEngine(_migrate_payload(project))
+    def reintroduce_local_jdk_property(_einput) -> None:
+        props.write_text(
+            "org.gradle.java.home=C:/Users/local/jdk-21\n"
+            "org.gradle.jvmargs=-Xmx2g\n",
+            encoding="utf-8",
+        )
+
+    engine = _FakeEngine(_migrate_payload(project), on_run=reintroduce_local_jdk_property)
     row = _process_migrate_service(
         service,
         root,
@@ -249,11 +266,15 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
     assert row.status == "ok"
     assert engine.inputs[0].model == "gpt-5.5"
     assert engine.inputs[0].reasoning_effort == "xhigh"
+    assert "org.gradle.java.home" in engine.inputs[0].prompt
     assert row.fields["codex"] == "ok"
     assert row.fields["framework"] == "REST"
     assert row.fields["build"] == "green"
     assert row.fields["check"] == "READY_TO_MERGE"
     assert row.detail == "Migracion completa"
+    props_text = props.read_text(encoding="utf-8")
+    assert "org.gradle.java.home" not in props_text
+    assert "org.gradle.jvmargs=-Xmx2g" in props_text
 
 
 def test_process_migrate_service_reports_openai_schema_error(tmp_path: Path) -> None:

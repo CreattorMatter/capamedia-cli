@@ -42,6 +42,7 @@ from capamedia_cli.core.batch_state import (
 from capamedia_cli.core.canonical import CANONICAL_ROOT
 from capamedia_cli.core.engine import Engine, EngineInput, engine_from_env, select_engine
 from capamedia_cli.core.frontmatter import parse_frontmatter
+from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 from capamedia_cli.core.self_correction import (
     build_correction_appendix,
     load_failure_context,
@@ -211,6 +212,7 @@ def _build_doublecheck_prompt(
         "- Trabaja desde el workspace root, no desde `destino/`.\n"
         "- Ejecuta `capamedia checklist` y respeta sus autofixes/logs.\n"
         "- No ejecutes `capamedia ai migrate`, `capamedia batch migrate`, `/migrate` ni `capamedia review`.\n"
+        "- Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`; rompe CI si apunta a un JDK local.\n"
         "- No inventes secretos, URLs de Confluence, Sonar keys ni valores PENDING_FROM_BANK.\n"
         "- Si queda un residual que depende del owner/SRE, reportalo como handoff, no como bug.\n\n"
         "Prompt operativo:\n\n"
@@ -268,6 +270,8 @@ def _process_doublecheck_workspace(
         save_state(workspace, "doublecheck", state)
         return BatchRow(service, "fail", detail, fields)
 
+    remove_committed_gradle_java_home(migrated_project)
+
     if resume and state_result.get("status") == "ok" and stage_ok(state, "doublecheck"):
         saved_fields = state_result.get("fields", {})
         fields = {**base_fields, **(saved_fields if isinstance(saved_fields, dict) else {})}
@@ -306,7 +310,10 @@ def _process_doublecheck_workspace(
         unsafe=unsafe,
         stream_output=stream_output,
     )
-    eres = engine.run_headless(einput)
+    try:
+        eres = engine.run_headless(einput)
+    finally:
+        remove_committed_gradle_java_home(migrated_project)
     elapsed = eres.duration_seconds or (time.perf_counter() - started)
 
     stdout_path.write_text(eres.stdout, encoding="utf-8")

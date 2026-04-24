@@ -51,3 +51,9 @@ def test_init_scaffolds_sonarlint_example_and_readme(tmp_path: Path, monkeypatch
     assert "wsclientesXXXX" in readme_content
     # Pasos principales
     assert "Connected Mode" in readme_content
+
+    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert ".sonarlint/*" in gitignore
+    assert "!.sonarlint/connectedMode.json" in gitignore
+    assert "!.sonarlint/connectedMode.example.json" in gitignore
+    assert "!.sonarlint/README.md" in gitignore

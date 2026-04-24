@@ -25,8 +25,9 @@ class _FakeEngine:
     name = "codex"
     subscription_type = "test"
 
-    def __init__(self, payload: dict | None = None) -> None:
+    def __init__(self, payload: dict | None = None, on_run=None) -> None:
         self.payload = payload or {"status": "ok", "summary": "done"}
+        self.on_run = on_run
         self.inputs = []
 
     def is_available(self) -> tuple[bool, str]:
@@ -34,6 +35,8 @@ class _FakeEngine:
 
     def run_headless(self, einput) -> EngineResult:
         self.inputs.append(einput)
+        if self.on_run is not None:
+            self.on_run(einput)
         einput.output_path.parent.mkdir(parents=True, exist_ok=True)
         einput.output_path.write_text(json.dumps(self.payload), encoding="utf-8")
         return EngineResult(exit_code=0, stdout="ok", stderr="", duration_seconds=1.2)
@@ -143,6 +146,20 @@ def test_ai_migrate_autodetects_service_and_skips_check_by_default(
 def test_process_doublecheck_workspace_writes_structured_state(tmp_path: Path) -> None:
     workspace = tmp_path / "wstecnicos0006"
     project = _write_workspace(workspace)
+    props = project / "gradle.properties"
+    props.write_text(
+        "org.gradle.java.home=C:/Program Files/Eclipse Adoptium/jdk-21\n"
+        "org.gradle.jvmargs=-Xmx1g\n",
+        encoding="utf-8",
+    )
+
+    def reintroduce_local_jdk_property(_einput) -> None:
+        props.write_text(
+            "org.gradle.java.home=C:/Users/local/jdk-21\n"
+            "org.gradle.jvmargs=-Xmx2g\n",
+            encoding="utf-8",
+        )
+
     fake = _FakeEngine(
         {
             "status": "ok",
@@ -154,7 +171,8 @@ def test_process_doublecheck_workspace_writes_structured_state(tmp_path: Path) -
             "low": 1,
             "report": str(project / "CHECKLIST_wstecnicos0006.md"),
             "next_step": "capamedia review",
-        }
+        },
+        on_run=reintroduce_local_jdk_property,
     )
     schema_path = _ensure_doublecheck_schema(workspace)
 
@@ -178,4 +196,8 @@ def test_process_doublecheck_workspace_writes_structured_state(tmp_path: Path) -
     assert fake.inputs[0].reasoning_effort == "xhigh"
     assert "No ejecutes `capamedia ai migrate`" in fake.inputs[0].prompt
     assert "ni `capamedia review`" in fake.inputs[0].prompt
+    assert "org.gradle.java.home" in fake.inputs[0].prompt
+    props_text = props.read_text(encoding="utf-8")
+    assert "org.gradle.java.home" not in props_text
+    assert "org.gradle.jvmargs=-Xmx2g" in props_text
     assert (workspace / ".capamedia" / "batch-state" / "doublecheck.json").exists()

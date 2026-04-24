@@ -236,10 +236,20 @@ private CustomerRequest normalizeIdentification(...) { ... }    // NO
 **Rule 4.1 -- DB access (Oracle + HikariCP + JPA) — when `DB_USAGE: YES`:**
 
 This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`. Skip otherwise.
+Do not add `spring-boot-starter-data-jpa`, `spring.jpa`, `spring.datasource`,
+repositories, entities, or Hikari properties when DB usage is not proven by
+legacy evidence. If a reviewer asks why JPA/Hikari is present, the answer must
+point to the exact JNDI/DB evidence from the analysis; without that evidence,
+remove the JPA/Hikari block.
 
 - **Connection pool:** **HikariCP** (Spring Boot default, team standard — no custom configuration needed beyond properties)
 - **Persistence:** Spring Data JPA (`spring-boot-starter-data-jpa`) + Oracle JDBC driver (`com.oracle.database.jdbc:ojdbc11`)
 - **Web stack:** `spring-boot-starter-web` (Tomcat/Undertow MVC) — NEVER `spring-boot-starter-webflux`
+- **Hikari value source:** use the legacy deployment/config evidence first
+  (`deploy-*-config.bat`, JNDI/pool settings, UMP properties, or
+  `.capamedia/*-report.yaml`). If DevOps/SRE provides official pool values,
+  use those. If the value is unknown, keep an env placeholder without inline
+  default and document the handoff; never invent a hardcoded pool number.
 - **Layering (hexagonal):**
   - `infrastructure/output/adapter/persistence/` — `@Repository` interfaces extending `JpaRepository`
   - `infrastructure/persistence/entity/` — `@Entity` classes mapped to Oracle tables
@@ -255,11 +265,11 @@ This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`
       password: ${CCC_DB_PASSWORD}
       driver-class-name: oracle.jdbc.OracleDriver
       hikari:
-        maximum-pool-size: ${CCC_DB_POOL_MAX:10}
-        minimum-idle: ${CCC_DB_POOL_MIN:2}
-        connection-timeout: ${CCC_DB_CONN_TIMEOUT:30000}
-        idle-timeout: ${CCC_DB_IDLE_TIMEOUT:600000}
-        max-lifetime: ${CCC_DB_MAX_LIFETIME:1800000}
+        maximum-pool-size: ${CCC_DB_POOL_MAX}
+        minimum-idle: ${CCC_DB_POOL_MIN}
+        connection-timeout: ${CCC_DB_CONN_TIMEOUT}
+        idle-timeout: ${CCC_DB_IDLE_TIMEOUT}
+        max-lifetime: ${CCC_DB_MAX_LIFETIME}
         pool-name: ${spring.application.name}-pool
     jpa:
       database-platform: org.hibernate.dialect.OracleDialect
@@ -600,7 +610,7 @@ WAS services use the 3-part structure `<NOMBRE_SERVICIO>, <NOMBRE_MÉTODO>, <VAL
 
 **Rule 10 -- NEVER hardcode credentials, URLs, or secrets** in code or YAMLs. Everything via `${CCC_*}` environment variables.
 
-**Rule 11 -- NEVER use `spring.jpa.hibernate.ddl-auto` with a value other than `none`.**
+**Rule 11 -- NEVER use `spring.jpa.hibernate.ddl-auto` with `create`, `update`, or `create-drop`.** For WAS+DB/JPA, use `validate` unless the bank runtime configuration explicitly mandates `none`; document that exception in `MIGRATION_REPORT.md`.
 
 **Rule 12 -- NEVER commit `.env`, `credentials.json`, or similar files.**
 

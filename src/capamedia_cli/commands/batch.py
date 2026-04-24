@@ -52,6 +52,7 @@ from capamedia_cli.core.engine import (
     engine_from_env,
     select_engine,
 )
+from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 from capamedia_cli.core.scheduler import BatchScheduler
 from capamedia_cli.core.self_correction import (
     build_correction_appendix,
@@ -595,6 +596,9 @@ def _build_batch_migrate_prompt(
         Requisitos operativos:
         - Trabaja solo dentro de este workspace.
         - Corre al menos un build real del proyecto migrado si el proyecto existe.
+        - Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`;
+          las rutas locales de JDK rompen Azure DevOps/Linux. Si necesitas Java 21,
+          usa `JAVA_HOME` del entorno del proceso.
         - No incluyas Markdown ni explicaciones fuera del JSON final.
         - La respuesta final debe ser SOLO el objeto JSON pedido por el schema.
         - Inclui siempre todas las claves del schema: status, summary, framework,
@@ -805,6 +809,8 @@ def _process_migrate_workspace(
             fields,
         )
 
+    remove_committed_gradle_java_home(migrated_project)
+
     if resume and state_result.get("status") == "ok" and stage_ok(state, "migrate"):
         check_is_done = (not run_check) or stage_ok(state, "check")
         if check_is_done:
@@ -865,11 +871,14 @@ def _process_migrate_workspace(
         if scheduler is not None:
             scheduler.acquire(service)
         try:
-            eres = engine.run_headless(einput)
-            # Si detecto rate limit, pauso global y reintento una vez
-            if eres.rate_limited and scheduler is not None:
-                scheduler.handle_rate_limit(service, eres.retry_after_seconds)
+            try:
                 eres = engine.run_headless(einput)
+                # Si detecto rate limit, pauso global y reintento una vez
+                if eres.rate_limited and scheduler is not None:
+                    scheduler.handle_rate_limit(service, eres.retry_after_seconds)
+                    eres = engine.run_headless(einput)
+            finally:
+                remove_committed_gradle_java_home(migrated_project)
         finally:
             if scheduler is not None:
                 scheduler.release(service)

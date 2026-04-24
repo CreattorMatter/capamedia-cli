@@ -80,28 +80,37 @@ def _interactive_harness_picker() -> list[str]:
 
 def _update_gitignore(target_dir: Path) -> None:
     gi = target_dir / ".gitignore"
-    block = (
-        "\n# CapaMedia CLI - NO commitear secrets\n"
-        ".mcp.json\n"
-        ".capamedia/\n"
-        "legacy/\n"
-        "umps/\n"
-        "tx/\n"
-        "gold-ref/\n"
-        "destino/build/\n"
-        "destino/.gradle/\n"
-        "ANALISIS_*.md\n"
-        "COMPLEXITY_*.md\n"
-        "CHECKLIST_*.md\n"
-        "FABRICS_PROMPT*.md\n"
-    )
+    lines = [
+        "# CapaMedia CLI - NO commitear secrets",
+        ".mcp.json",
+        ".capamedia/",
+        "legacy/",
+        "umps/",
+        "tx/",
+        "gold-ref/",
+        "destino/build/",
+        "destino/.gradle/",
+        "ANALISIS_*.md",
+        "COMPLEXITY_*.md",
+        "CHECKLIST_*.md",
+        "FABRICS_PROMPT*.md",
+        "",
+        "# SonarLint: versionar binding compartido, ignorar cache local",
+        ".sonarlint/*",
+        "!.sonarlint/connectedMode.json",
+        "!.sonarlint/connectedMode.example.json",
+        "!.sonarlint/README.md",
+    ]
     if gi.exists():
         current = gi.read_text(encoding="utf-8")
-        if "# CapaMedia CLI" in current:
+        current_lines = set(current.splitlines())
+        missing = [line for line in lines if line and line not in current_lines]
+        if not missing:
             return
-        gi.write_text(current + block, encoding="utf-8")
+        separator = "\n" if current.endswith("\n") else "\n\n"
+        gi.write_text(current + separator + "\n".join(missing) + "\n", encoding="utf-8")
     else:
-        gi.write_text(block.lstrip("\n"), encoding="utf-8")
+        gi.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _create_layout(target_dir: Path, service_name: str) -> None:
@@ -293,20 +302,16 @@ def init_project(
 
     # Resolve harnesses
     try:
-        if ai is None:
-            harnesses = _interactive_harness_picker()
-        else:
-            harnesses = resolve_harnesses(ai)
+        harnesses = _interactive_harness_picker() if ai is None else resolve_harnesses(ai)
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from None
 
     # Check empty
-    if target_dir.exists() and any(target_dir.iterdir()):
-        if not force and not here:
-            console.print(f"[yellow]Advertencia:[/yellow] '{target_dir}' no esta vacio")
-            if not Confirm.ask("Continuar igual?", default=False):
-                raise typer.Exit(0)
+    if target_dir.exists() and any(target_dir.iterdir()) and not force and not here:
+        console.print(f"[yellow]Advertencia:[/yellow] '{target_dir}' no esta vacio")
+        if not Confirm.ask("Continuar igual?", default=False):
+            raise typer.Exit(0)
 
     target_dir.mkdir(parents=True, exist_ok=True)
 

@@ -259,6 +259,20 @@ def test_rest_prompt_has_stack_specific_dependency_guards() -> None:
     ) not in content
 
 
+def test_soap_prompt_jpa_hikari_is_conditional_and_no_inline_pool_defaults() -> None:
+    content = (CANONICAL_ROOT / "prompts" / "migrate-soap-full.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "This block applies ONLY when `ANALISIS_<ServiceName>.md` reports `DB_USAGE: YES`" in content
+    assert "If a reviewer asks why JPA/Hikari is present" in content
+    assert "**Hikari value source:**" in content
+    assert "without inline\n  default" in content
+    assert "${CCC_DB_POOL_MAX:10}" not in content
+    assert "${CCC_DB_POOL_MIN:2}" not in content
+    assert "${CCC_DB_CONN_TIMEOUT:30000}" not in content
+
+
 # ---------------------------------------------------------------------------
 # Guard 4: los 3 canonicals nuevos de v0.23.15 existen
 # ---------------------------------------------------------------------------

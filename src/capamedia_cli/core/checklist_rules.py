@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,19 @@ def _grep_files(root: Path, pattern: str, file_glob: str = "**/*.java") -> list[
 
 def _file_exists(path: Path) -> bool:
     return path.exists() and path.is_file()
+
+
+def _git_ignores(root: Path, relative_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", relative_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 def _read_or_empty(path: Path) -> str:
@@ -280,7 +294,7 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
 
     # 1.1 - Capas presentes
     expected_layers = ["application", "domain", "infrastructure"]
-    present = [l for l in expected_layers if any(src_java.rglob(f"{l}/"))]
+    present = [layer for layer in expected_layers if any(src_java.rglob(f"{layer}/"))]
     if len(present) == 3:
         results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "pass", detail=f"{', '.join(present)}"))
     else:
@@ -288,7 +302,6 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("1.1", "Block 1", "Capas hexagonales presentes", "fail", severity="high", detail=f"faltan: {missing}"))
 
     # 1.2 - Domain sin imports framework
-    domain_root = src_java.rglob("domain")
     forbidden_imports = r"import (org\.springframework|jakarta\.persistence|org\.springframework\.web|javax\.ws)"
     forbidden_found: list[str] = []
     for d in src_java.rglob("domain"):
@@ -527,9 +540,8 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     text = _read_or_empty(app_yml)
     hardcoded: list[str] = []
     for line in text.splitlines():
-        if re.search(r"(password|token|secret|user):\s*[^$\s][^\s]*", line, re.IGNORECASE):
-            if "${" not in line:
-                hardcoded.append(line.strip())
+        if re.search(r"(password|token|secret|user):\s*[^$\s][^\s]*", line, re.IGNORECASE) and "${" not in line:
+            hardcoded.append(line.strip())
     if hardcoded:
         results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "fail", severity="high", detail=f"{len(hardcoded)} valores hardcoded"))
     else:
@@ -789,6 +801,27 @@ def run_block_14(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "fail", severity="high", detail=f"actual: {key}"))
     else:
         results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "pass"))
+
+    # 14.4 - El binding compartido no puede quedar ignorado por .gitignore.
+    if _git_ignores(ctx.migrated_path, ".sonarlint/connectedMode.json"):
+        results.append(
+            CheckResult(
+                "14.4",
+                "Block 14",
+                ".sonarlint/connectedMode.json no gitignored",
+                "fail",
+                severity="medium",
+                detail="git check-ignore marca el binding como ignorado",
+                suggested_fix=(
+                    "Ajustar .gitignore: ignorar cache local de .sonarlint/* pero "
+                    "mantener !.sonarlint/connectedMode.json"
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult("14.4", "Block 14", ".sonarlint/connectedMode.json no gitignored", "pass")
+        )
 
     return results
 
