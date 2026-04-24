@@ -73,7 +73,7 @@ evidencia.
 
 | # | Criterio | Validacion |
 |---|---|---|
-| AC-11 | Coverage unit tests > 85% | Reporte JaCoCo/SonarQube |
+| AC-11 | Coverage unit tests ≥ 75% (umbral oficial `BPTPSRE-CheckList Desarrollo`) | Reporte JaCoCo/SonarQube |
 | AC-12 | Codigo duplicado 0% | SonarQube / duplication detector |
 | AC-13 | Cumple `UNIT_TEST_GUIDELINES` (ver canonical) | Manual review + linter |
 | AC-14 | Sin vulnerabilidades critical/high (SCA/SAST) | SonarQube / Snyk |

@@ -50,19 +50,15 @@ Your objective is to produce a **complete, exhaustive, and verifiable** analysis
 
 **Migration matrix (official MCP-driven, no exceptions):**
 
-| Legacy source | Condition | MCP key parameter | Target prompt | Spring stack |
-|---|---|---|---|---|
-| **BUS (IIB)** | Connects to BANCS | `invocaBancs: true` (overrides projectType/webFramework) | `migracion/REST/02-REST-migrar-servicio.md` | WebFlux + `@RestController` |
-| **WAS** | 1 WSDL operation | Standard MCP params | `migracion/REST/02-REST-migrar-servicio.md` | Spring MVC + `@RestController` |
-| **WAS** | 2+ WSDL operations | Standard MCP params | `migracion/SOAP/02-SOAP-migrar-servicio.md` | Spring MVC + `@Endpoint` |
-| **ORQ** | Always | `deploymentType: orquestador` (forces WebFlux) | `migracion/REST/02-REST-migrar-servicio.md` | WebFlux + `@RestController` |
+> **Single source of truth**: see canonical [`bank-mcp-matrix.md`](../context/bank-mcp-matrix.md) — 5 parameters + 3 override rules + 8 canonical cases. Mirror of PDF `BPTPSRE-Modos de uso`. If any conflict appears between this file and the canonical, the canonical wins.
 
-**Key rules:**
-- **BUS + `invocaBancs: true`:** the MCP ignores `projectType` and `webFramework` — it ALWAYS generates REST+WebFlux, regardless of operation count (1 or N operations).
-- **WAS:** operation count in the WSDL `<portType>` determines REST MVC (1 op) vs SOAP MVC (2+ ops). DB presence (`DB_USAGE: YES`) adds HikariCP+JPA inside the chosen prompt — it does NOT change the REST/SOAP decision.
-- **ORQ:** always WebFlux via `deploymentType: orquestador`, no persistence layer.
+**Operational summary** (full detail in the canonical):
+- **Rule 1** — `invocaBancs=true`: REST + WebFlux (total override, ignores op count).
+- **Rule 2** — `deploymentType=orquestador`: REST + WebFlux + `lib-event-logs`.
+- **Rule 3** — `projectType=soap` + microservice (no BANCS): SOAP + Spring MVC + `spring-web-service`.
+- **Base case (WAS 1 op)**: REST + Spring MVC.
 
-**Note on Fabrics:** the Banco Pichincha Fabrics MCP archetype generates the initial scaffold based on a questionnaire. The **decisive MCP parameter for BUS is `invocaBancs`** — when true, it overrides any other parameter. Your analysis FEEDS that questionnaire — be especially explicit about: (a) legacy source type (IIB/WAS/ORQ), (b) whether it connects to BANCS (`invocaBancs`), (c) operation count, (d) presence/absence of DB.
+**Note on Fabrics:** the Banco Pichincha Fabrics MCP archetype generates the initial scaffold based on a questionnaire — see `bank-mcp-matrix.md` for the complete parameter set. Your analysis FEEDS that questionnaire — be especially explicit about: (a) legacy source type (IIB/WAS/ORQ), (b) whether it connects to BANCS (`invocaBancs`), (c) operation count, (d) presence/absence of DB.
 
 ---
 
@@ -400,20 +396,19 @@ Cross-reference ALL information gathered in Steps A-F and generate the metrics t
 
 ### Step H: Migration classification (MCP-driven matrix)
 
-Apply the **official MCP-driven matrix**. The decision depends on the **legacy source type** and the **MCP key parameter**:
+Apply the **official MCP-driven matrix** from the canonical — see
+[`bank-mcp-matrix.md`](../context/bank-mcp-matrix.md) for the complete set of
+5 parameters + 3 override rules + 8 canonical cases. Do **not** re-derive
+the matrix here; consume it.
 
-| Legacy source | Condition | MCP key parameter | Target prompt | Spring stack |
-|---|---|---|---|---|
-| **BUS (IIB)** | Connects to BANCS | `invocaBancs: true` (overrides all) | REST prompt | WebFlux + `@RestController` |
-| **WAS** | 1 WSDL operation | Standard params | REST prompt | Spring MVC + `@RestController` |
-| **WAS** | 2+ WSDL operations | Standard params | SOAP prompt | Spring MVC + `@Endpoint` |
-| **ORQ** | Always | `deploymentType: orquestador` | REST prompt | WebFlux + `@RestController` |
+**Quick triage (resolve against the canonical)**:
+- Source = BUS + `invocaBancs=true` → **Rule 1** (REST + WebFlux).
+- Source = ORQ / `deploymentType=orquestador` → **Rule 2** (REST + WebFlux + `lib-event-logs`).
+- Source = WAS 2+ ops OR BUS 2+ ops without BANCS → **Rule 3** (SOAP + Spring MVC).
+- Source = WAS 1 op → base case (REST + Spring MVC).
 
-**BUS (IIB) rule:** If the service connects to BANCS (which is the case for virtually all IIB services), `invocaBancs: true` in the MCP **overrides** any other parameter (`projectType`, `webFramework`). The MCP will ALWAYS generate REST+WebFlux, regardless of how many operations the WSDL has (1 or N). This is because BUS services orchestrate BANCS via Core Adapter REST and benefit from the reactive non-blocking chain.
-
-**WAS rule:** Operation count in the WSDL `<portType>` determines REST MVC (1 op) vs SOAP MVC (2+ ops). Both use Spring MVC (blocking, Undertow). If `DB_USAGE: YES`, add HikariCP+JPA inside the chosen prompt — it does NOT change the REST/SOAP decision.
-
-**ORQ rule:** `deploymentType: orquestador` forces WebFlux. ORQs have no DB, no persistence layer — just orchestration.
+Persistence (`DB_USAGE: YES`) adds HikariCP+JPA inside the chosen prompt
+only for WAS — it does **not** change the prompt selection.
 
 Document the classification with supporting evidence:
 - Legacy source type: IIB (BUS) | WAS | ORQ
@@ -703,14 +698,10 @@ This table is **MANDATORY** and must be filled with actual data from the analysi
 **WSDL operation count (portType):** <N>
 **DB_USAGE:** <YES | NO>
 
-**MCP-driven matrix (mandatory):**
-
-| Source | Condition | MCP key param | Stack | Prompt |
-|--------|-----------|---------------|-------|--------|
-| BUS (IIB) | invocaBancs=true | `invocaBancs: true` (overrides all) | REST + WebFlux | REST prompt |
-| WAS | 1 op | standard params | REST + MVC | REST prompt |
-| WAS | 2+ ops | standard params | SOAP + MVC | SOAP prompt |
-| ORQ | always | `deploymentType: orquestador` | REST + WebFlux | REST prompt |
+**MCP-driven matrix (mandatory)**: see canonical
+[`bank-mcp-matrix.md`](../context/bank-mcp-matrix.md) — do not re-derive
+the matrix in this template. Resolve the applicable rule using the parameter
+summary above and fill in the classification below.
 
 **This service classification:**
 - Source type: <IIB | WAS | ORQ>

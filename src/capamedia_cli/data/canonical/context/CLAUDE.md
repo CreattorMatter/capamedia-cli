@@ -10,16 +10,13 @@ Migracion de servicios legacy a Java 21 + Spring Boot + arquitectura hexagonal O
 
 **Matriz MCP oficial (mandatoria, sin excepciones):**
 
-| Origen Legacy | Condicion | Parametro MCP clave | Stack Target |
-|---|---|---|---|
-| **BUS (IIB)** | Conecta con BANCS | `invocaBancs: true` (override: ignora projectType/webFramework) | REST + WebFlux + `@RestController` |
-| **WAS** | 1 operacion WSDL | params estandar MCP | REST + Spring MVC + `@RestController` |
-| **WAS** | 2+ operaciones WSDL | params estandar MCP | SOAP + Spring MVC + `@Endpoint` |
-| **ORQ** | Siempre | `deploymentType: orquestador` (override: fuerza WebFlux) | REST + WebFlux + `@RestController` |
+> **Fuente única**: canonical [`bank-mcp-matrix.md`](bank-mcp-matrix.md) — 5 parámetros + 3 reglas de override + 8 casos canónicos. Espejo directo del PDF `BPTPSRE-Modos de uso`. Si hay discrepancia con otro archivo, prevalece el canonical.
 
-- **BUS + invocaBancs:** el MCP ignora `projectType` y `webFramework` — siempre genera REST+WebFlux (1 o N operaciones)
-- **WAS:** el conteo de operaciones decide REST MVC (1 op) vs SOAP MVC (2+ ops). BD presente suma HikariCP+JPA dentro del prompt elegido
-- **ORQ:** siempre WebFlux, sin persistencia
+**Resumen operativo (detalle en el canonical)**:
+- **Regla 1**: `invocaBancs=true` → REST + WebFlux (override total).
+- **Regla 2**: `deploymentType=orquestador` → REST + WebFlux + `lib-event-logs`.
+- **Regla 3**: `projectType=soap` + microservicio → SOAP + Spring MVC + `spring-web-service`.
+- **Caso base WAS 1 op**: REST + Spring MVC (sin regla especial).
 
 **Scaffold inicial:** lo genera el **Fabrics MCP del Banco Pichincha** vía cuestionario. La migración parte desde ese scaffold; no se reconstruye desde cero.
 

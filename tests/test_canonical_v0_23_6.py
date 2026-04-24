@@ -43,8 +43,11 @@ def test_unit_test_guidelines_has_key_rules() -> None:
     content = path.read_text(encoding="utf-8")
     # Patron given_when_then obligatorio
     assert "given[Context]_when[Action]_then[ExpectedResult]" in content
-    # Coverage threshold 85%
-    assert "85%" in content
+    # Coverage threshold 75% (oficial PDF BPTPSRE-CheckList Desarrollo;
+    # antes era 85% — corregido en v0.23.15 para alinear con el gate del banco)
+    assert "75%" in content
+    # Debe referenciar el canonical autoritativo de coverage
+    assert "bank-checklist-desarrollo" in content
     # NO @DisplayName
     assert "@DisplayName" in content
     # Duplication 0%

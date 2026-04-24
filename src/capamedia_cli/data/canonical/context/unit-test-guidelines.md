@@ -2,7 +2,7 @@
 name: unit-test-guidelines
 kind: context
 priority: 1
-summary: Reglas canonicas para tests unitarios en servicios migrados - given_when_then, English, 85% coverage, 0% duplicacion
+summary: Reglas canonicas para tests unitarios en servicios migrados - given_when_then, English, 75% coverage, 0% duplicacion
 ---
 
 # Unit Test Guidelines
@@ -49,12 +49,16 @@ Para tests reactive (Project Reactor):
 
 ## Coverage requirements (MANDATORIO)
 
-- **Line coverage** > 85%.
-- **Branch coverage** > 85%.
-- **Method coverage** > 85%.
+**Fuente oficial**: `BPTPSRE-CheckList Desarrollo` (PDF del banco) define el
+umbral en **75%**. Alineado con `bank-checklist-desarrollo.md`, Block 9 del
+checklist y Rule 19 de los prompts `migrate-*-full`.
+
+- **Line coverage** ≥ 75%.
+- **Branch coverage** ≥ 75%.
+- **Method coverage** ≥ 75%.
 - Medir con JaCoCo (o la tool configurada) y attachar el reporte como evidencia.
 
-Si coverage < 85%:
+Si coverage < 75%:
 1. Identificar lineas/ramas/metodos no cubiertos.
 2. Agregar tests faltantes (happy path, error path, edge cases, null/empty, boundary).
 3. Re-correr coverage hasta pasar el umbral.
@@ -205,7 +209,7 @@ void givenInvalidInput_whenGetCustomerByIdentification_thenThrowsValidationExcep
 - [ ] Todos los method names siguen `given_when_then`.
 - [ ] Cada test tiene `// Given` / `// When` / `// Then` explicitos.
 - [ ] Variables, comments, constants y nested classes en ingles.
-- [ ] Line/branch/method coverage > 85% (JaCoCo attachado).
+- [ ] Line/branch/method coverage ≥ 75% (JaCoCo attachado).
 - [ ] Code duplication = 0% (SonarQube / jscpd attachado).
 - [ ] Sin `@DisplayName`.
 - [ ] Setup compartido via `@BeforeEach` / builders / helpers.

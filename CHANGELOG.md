@@ -4,6 +4,120 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.15] - 2026-04-23
+
+### Fixed - Unificación single-source-of-truth de canonicals (Phases 1–4)
+
+**Root cause del bug `wstecnicos0006`**: el proyecto fue migrado como
+REST+WebFlux siendo WAS con 2 operaciones (debería haber sido SOAP+MVC).
+Traza de la causa: el changelog histórico 2026-04-18 de `checklist-rules.md`
+contenía la frase ambigua *"1 op → REST + WebFlux"* sin calificar la
+tecnología — el agente interpretó mal y aplicó WebFlux a un WAS. Además, la
+matriz MCP vivía duplicada en **7 archivos** distintos y el threshold de
+coverage tenía dos valores contradictorios (75% oficial vs 85% inventado).
+
+Julian (Tech Lead): *"Unifiquemos que esa regla sea única y que todos
+pregunten a esa regla."*
+
+### Phase 1 — Auditoría de canonicals vs PDFs BPTPSRE
+
+Se leyeron los 12 PDFs oficiales del banco (`BPTPSRE-Modos de uso`,
+`BPTPSRE-Estructura de error`, `BPTPSRE-CheckList Desarrollo`,
+`BPTPSRE-Servicios Configurables`, etc.) y se cruzaron contra los canonicals
+actuales. Hallazgos:
+
+- **Matriz MCP duplicada en 7 lugares**: `bank-mcp-matrix.md` (fuente),
+  `bank-official-rules.md` Regla 2, `checklist-rules.md` Check 0.2 + Paso 6
+  + línea 1734 (changelog basura) + línea 1343, `migrate-rest-full.md`,
+  `migrate-soap-full.md` (x2), `CLAUDE.md`, `analisis-servicio.md` (x3).
+- **Coverage conflicto**: PDF dice 75%; `unit-test-guidelines.md` + `qa-review.md`
+  decían 85% (inventado). Los prompts `migrate-*-full.md` + `checklist-rules.md`
+  sí estaban correctos en 75%.
+- **Gaps**: faltaban canonicals únicos para estructura de error (8 campos
+  del PDF) y para el catálogo completo de gates de desarrollo.
+
+### Phase 3 — Ediciones aplicadas (12 acciones)
+
+**Eliminación de duplicaciones de la matriz MCP**:
+
+1. **`checklist-rules.md` línea 1734**: borrada la frase ambigua del
+   changelog (root cause del bug `wstecnicos0006`); reemplazada por
+   entrada de changelog 2026-04-23 que documenta la extracción.
+2. **`checklist-rules.md` Check 0.2 (líneas 81-94)**: matriz embebida →
+   referencia a `bank-mcp-matrix.md` + tabla resumen de 5 casos.
+3. **`checklist-rules.md` Paso 6 (líneas 170-188)**: tabla MCP-driven →
+   lógica de veredicto que llama al canonical + diálogos conversacionales.
+4. **`checklist-rules.md` línea 1343**: "la elección REST vs SOAP se decide
+   por cantidad de ops" → "por la matriz MCP oficial (ver canonical)".
+5. **`bank-official-rules.md` Regla 2 (líneas 37-89)**: colapsada de ~52
+   líneas a ~22 — tabla resumen de 3 reglas + `build.gradle` ejemplos +
+   link al canonical.
+6. **`migrate-rest-full.md` header**: matriz embebida → referencia con
+   lista de casos cubiertos (Rule 1 + base case WAS 1 op + Rule 2 ORQ).
+7. **`migrate-soap-full.md` header + sección "WHEN TO USE"**: las dos
+   copias de la matriz → referencia única a `bank-mcp-matrix.md` (Rule 3
+   = mvc+soap+spring-web-service).
+8. **`CLAUDE.md`**: matriz → resumen de 3 reglas + link al canonical.
+9. **`analisis-servicio.md`** (3 ocurrencias): matriz en Step H + sección
+   Classification + quick-triage → todas referencian al canonical.
+
+**Conflictos de coverage**:
+
+10. **`unit-test-guidelines.md`** líneas 52-57, 208: `85%` → `75%` +
+    referencia a `bank-checklist-desarrollo.md`.
+11. **`qa-review.md`** AC-11: `> 85%` → `≥ 75%` con cita del PDF.
+
+**Canonicals nuevos (3) — fuentes únicas de los PDFs BPTPSRE**:
+
+12. **`context/bank-error-structure.md`** — 7 campos canónicos del bloque
+    `<error>` (`codigo`, `tipo`, `mensajeCliente`, `mensajeNegocio`,
+    `mensajeAplicacion`, `backend`, `momentoError`) + regla maestra
+    *"servicio NUNCA setea `mensajeNegocio` — lo hace DataPower"*.
+13. **`context/bank-configurables.md`** — `GestionarRecursoConfigurable` +
+    `GestionarRecursoXML` + CSV operativo + decisión literal vs `${CCC_*}`.
+14. **`context/bank-checklist-desarrollo.md`** — 75% coverage, SonarLint
+    local, SonarCloud, Snyk (critical/high = fail), azure-pipeline
+    namespaced, 8 gates obligatorios pre-PR.
+
+### Phase 4 — Anti-duplicación tests (4 guards, 8 test cases)
+
+Nuevo archivo `tests/test_canonical_single_source.py`:
+
+1. **`test_matrix_mcp_lives_only_in_canonical`**: escanea todos los .md;
+   si un archivo menciona AMBOS sentinels (`invocaBancs: true` y
+   `deploymentType: orquestador`), debe estar en la allow-list (6
+   archivos) Y referenciar explícitamente a `bank-mcp-matrix.md`.
+2. **`test_coverage_threshold_is_75_percent`**: ningún canonical puede
+   mencionar `85%` junto a palabras de coverage/JaCoCo.
+3. **`test_ambiguous_matrix_phrase_removed`**: la frase ambigua root cause
+   del bug `wstecnicos0006` (`"1 op → REST + WebFlux"` en sus 4 variantes)
+   nunca puede reaparecer en ningún canonical.
+4. **`test_new_canonicals_v0_23_15_exist`**: los 3 canonicals nuevos
+   existen, tienen frontmatter YAML y >500 chars.
+
+### Test fix — `test_canonical_v0_23_6.py`
+
+Test viejo que hardcodeaba `"85%" in content` ajustado a `"75%"` +
+verifica referencia a `bank-checklist-desarrollo.md`.
+
+### Métricas
+
+- **622/622 tests pass** (incluye 8 nuevos guards).
+- **Matriz MCP**: de 7 duplicaciones → 1 fuente + 6 referencias.
+- **Coverage**: de 2 valores contradictorios (75%/85%) → 1 valor (75%) en
+  todos los canonicals, espejo del PDF oficial.
+- **Basura del changelog**: 1 línea ambigua eliminada (`wstecnicos0006`
+  root cause neutralizada).
+- **Gaps cerrados**: 3 nuevos canonicals para estructura de error,
+  configurables y checklist de desarrollo.
+
+### Breaking changes
+
+Ninguno. Los prompts siguen exponiendo la misma información; ahora la
+consumen por referencia en vez de por copia.
+
+---
+
 ## [0.23.14] - 2026-04-23
 
 ### Changed - Matriz MCP oficial completa (PDF BPTPSRE-Modos de uso)

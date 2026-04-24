@@ -80,18 +80,32 @@ grep -rl "@RestController" <PATH>/src/main/java
 
 ### Check 0.2 — Clasificacion MCP: source type + parametro clave ↔ framework
 
-**Principio del banco:** la matriz oficial es MCP-driven, basada en el tipo de origen legacy y el parametro MCP clave:
+> **Fuente única de la matriz MCP**: canonical `bank-mcp-matrix.md`.
+> Este check **aplica** la matriz al proyecto migrado; **no** la redefine.
+> Si hay discrepancia entre este archivo y `bank-mcp-matrix.md`, prevalece
+> `bank-mcp-matrix.md` (espejo directo del PDF `BPTPSRE-Modos de uso`).
 
-| Origen Legacy | Condicion | Parametro MCP clave | Framework correcto | Prompt |
-|---|---|---|---|---|
-| **BUS (IIB)** | invocaBancs=true | `invocaBancs: true` (override) | REST + WebFlux + `@RestController` | REST |
-| **WAS** | 1 op WSDL | params estandar | REST + Spring MVC + `@RestController` | REST |
-| **WAS** | 2+ ops WSDL | params estandar | SOAP + Spring MVC + `@Endpoint` | SOAP |
-| **ORQ** | siempre | `deploymentType: orquestador` | REST + WebFlux + `@RestController` | REST |
+**Parámetros MCP (5)**: `tecnologia` · `projectType` · `framework` ·
+`invocaBancs` · `deploymentType`.
 
-- **BUS + invocaBancs:** el MCP ignora `projectType` y `webFramework` — siempre REST+WebFlux (1 o N ops)
-- **WAS:** el conteo de operaciones decide REST MVC (1 op) vs SOAP MVC (2+ ops). BD presente es ortogonal
-- **ORQ:** siempre WebFlux via `deploymentType: orquestador`
+**Las 3 reglas de override (orden de prioridad)** — detalle completo en
+`bank-mcp-matrix.md`:
+
+1. `invocaBancs: true` → **webflux + rest** (override total).
+2. `deploymentType: orquestador` → **webflux + rest + lib-event-logs**.
+3. `projectType: soap` + `deploymentType: microservicio` + `invocaBancs: false`
+   → **mvc + soap + spring-web-service**.
+
+**Casos canónicos aplicables a este check** (resumen — tabla completa en
+`bank-mcp-matrix.md` §"8 casos canónicos"):
+
+| Origen legacy | Cuándo | Framework esperado |
+|---|---|---|
+| BUS + BANCS | `invocaBancs=true` | REST + WebFlux (**Regla 1**) |
+| WAS 1 op | params estándar | REST + Spring MVC |
+| WAS 2+ ops | params estándar | SOAP + Spring MVC (**Regla 3**) |
+| BUS 2+ ops sin BANCS | params estándar | SOAP + Spring MVC (**Regla 3**) |
+| ORQ | `deploymentType=orquestador` | REST + WebFlux + `lib-event-logs` (**Regla 2**) |
 
 #### Paso 1 — Contar operaciones en el WSDL **migrado**
 
@@ -167,24 +181,41 @@ El reporte debe rendir este diálogo literal, con los valores reemplazados:
 Veredicto final: <PASS | HIGH mal-clasificado | etc.>
 ```
 
-#### Paso 6 — Reglas de severidad (matriz MCP-driven)
+#### Paso 6 — Veredicto aplicando la matriz MCP
 
-**BUS (IIB) + invocaBancs:**
-- BUS + tipo REST (WebFlux) → ✅ **PASS** (cualquier cantidad de ops). Diálogo: *"Es BUS con invocaBancs, va REST+WebFlux. ¿Está OK? Sí, está OK."*
-- BUS + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es BUS con invocaBancs → debió ir REST+WebFlux. El MCP con invocaBancs=true ignora projectType/webFramework. Se migró como SOAP → está mal-clasificado."*
+> La lógica de severidad deriva de las **3 reglas de override** de
+> `bank-mcp-matrix.md`. Este paso compara `actualFramework` (detectado en el
+> Check 0.1) contra `expectedFramework` (calculado con la matriz) y emite
+> un diálogo conversacional.
 
-**WAS:**
-- WAS + 1 op + tipo REST → ✅ **PASS**. Diálogo: *"Es WAS con 1 op, va REST+MVC. ¿Está OK? Sí, está OK."*
-- WAS + 2+ ops + tipo SOAP → ✅ **PASS**. Diálogo: *"Es WAS con N ops, va SOAP+MVC. ¿Está OK? Sí, está OK."*
-- WAS + 1 op + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es WAS con 1 op → debió ir REST+MVC. Se migró como SOAP → está mal-clasificado."*
-- WAS + 2+ ops + tipo REST → **HIGH** (mal-clasificado). Diálogo: *"Es WAS con N ops → REST no soporta dispatching multi-operation para WAS, necesita Spring WS sobre MVC."*
-- WAS + tipo REST + `DB_USAGE: YES` → ✅ **PASS**. Diálogo: *"Es WAS con 1 op y BD → queda en REST+MVC con HikariCP+JPA. Correcto."*
+**Lógica de veredicto** (implementada en `_expected_framework()` de
+`checklist_rules.py` — espejo de la matriz):
 
-**ORQ:**
-- ORQ + tipo REST (WebFlux) → ✅ **PASS** (cualquier cantidad de ops). Diálogo: *"Es ORQ, va REST+WebFlux via deploymentType:orquestador. ¿Está OK? Sí, está OK."*
-- ORQ + tipo SOAP → **HIGH** (mal-clasificado). Diálogo: *"Es ORQ → siempre va WebFlux. Se migró como SOAP → está mal-clasificado."*
+- Si `actualFramework == expectedFramework` → ✅ **PASS**.
+  Diálogo: *"Es <sourceType> con <key-param>, corresponde <expected>. Se
+  migró como <actual>. Coincide → OK."*
 
-**Hallazgo documentado:** existen servicios BUS (IIB) con 1 op migrados historicamente como SOAP. Bajo la matriz MCP oficial, esto es **mal-clasificado** (BUS+invocaBancs siempre va REST+WebFlux). Esos casos legacy NO se reclasifican retroactivamente por costo vs beneficio si ya estan en produccion. Los futuros servicios BUS deben usar REST+WebFlux (via `invocaBancs: true`).
+- Si `actualFramework != expectedFramework` → **HIGH** (mal-clasificado).
+  Diálogo obligatorio indicando la **regla violada**:
+  *"Es <sourceType> con <key-param> → según **Regla N MCP** debió ir
+  <expected>. Se migró como <actual> → está mal-clasificado. Ver
+  `bank-mcp-matrix.md` §Regla N."*
+
+**Ejemplos conversacionales** (sin listar todos los casos — la matriz canónica
+está en `bank-mcp-matrix.md`):
+
+- *BUS + invocaBancs=true migrado como SOAP* → HIGH: *"Regla 1: invocaBancs=true
+  fuerza webflux+rest, ignora projectType/framework. Migrado como SOAP → mal."*
+- *WAS + 2 ops migrado como WebFlux* → HIGH: *"Regla 3: 2+ ops SOAP requiere
+  MVC + spring-web-service. Migrado como WebFlux → mal (caso wstecnicos0006)."*
+- *ORQ migrado sin `lib-event-logs`* → HIGH: *"Regla 2: deploymentType=orquestador
+  obliga webflux+rest **y** lib-event-logs. Falta la dependencia."*
+
+**Hallazgo histórico documentado:** existen servicios BUS (IIB) con 1 op
+migrados en el pasado como SOAP. Bajo la matriz MCP oficial actual, esto es
+**mal-clasificado** (BUS con invocaBancs siempre va REST+WebFlux — Regla 1).
+Esos casos legacy NO se reclasifican retroactivamente si ya están en producción;
+los nuevos servicios BUS deben usar REST+WebFlux.
 
 **Guardar en el contexto del reporte:** `sourceType`, `invocaBancs`, `projectType`, `goldStandard`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
 
@@ -1065,7 +1096,11 @@ grep -r "UndertowServletWebServerFactory\|UndertowReactiveWebServerFactory" \
 
 Si aparece `UndertowServletWebServerFactory` en un proyecto SOAP + BUS → **esperado** (Spring WS requiere servlet); el `webflux` starter se usa solo para el `WebClient` outbound. Este híbrido es el **patrón BUS oficial** del banco.
 
-**Nota:** bug historico del MCP Fabrics: algunos scaffolds iniciales no incluian webflux en los servicios que lo requerian (ORQ o BUS+invocaBancs). Se arregla agregando la dependencia manualmente.
+**Nota histórica (archivada 2026-04-23):** el MCP Fabrics tenía un bug donde
+algunos scaffolds iniciales no incluían webflux en servicios que lo requerían
+(ORQ o BUS+invocaBancs). Corregido desde Apr-2026; si aparece en un scaffold
+nuevo, agregar `spring-boot-starter-webflux` manualmente y reportar al team
+MCP. Para la matriz completa ver canonical `bank-mcp-matrix.md`.
 
 ### Check 8.6 — `jaxws-rt` presente en servicios SOAP [MCP gap]
 
@@ -1340,7 +1375,12 @@ grep -rn "@BancsService" <PATH>/src/main/java/com/pichincha/sp/infrastructure/ou
 
 Aplica únicamente cuando `build.gradle` incluye `spring-boot-starter-data-jpa` (tipicamente proyectos con `DB_USAGE: YES` en el ANALISIS, independiente de si la fuente legacy era IIB o WAS). Si no hay JPA starter, saltar todo el bloque.
 
-Nota sobre la matriz: la elección REST vs SOAP se decide por cantidad de operaciones del WSDL, no por presencia de BD. Este bloque audita los detalles de la capa de persistencia **dentro** del prompt que se haya usado (usualmente SOAP+MVC, que es donde JPA vive natural; si aparece en REST+WebFlux hay que chequear el flag `ATTENTION_NEEDED_REST_WITH_DB`).
+Nota sobre la matriz: la elección REST vs SOAP se decide por la **matriz MCP
+oficial** (ver canonical `bank-mcp-matrix.md` — 5 parámetros + 3 reglas de
+override), NO por presencia de BD ni por sólo el conteo de ops. Este bloque
+audita los detalles de la capa de persistencia **dentro** del prompt que se
+haya usado (usualmente SOAP+MVC, que es donde JPA vive natural; si aparece en
+REST+WebFlux hay que chequear el flag `ATTENTION_NEEDED_REST_WITH_DB`).
 
 ### Check 13.1 — JPA + WebFlux NO conviven
 
@@ -1731,7 +1771,8 @@ servicios concretos. Las reglas son abstractas y viven en este checklist.
 | 2026-04-16 | `error.backend` desde el catálogo oficial `sqb-cfg-codigosBackend-config/codigosBackend.xml`, NO hardcodeado como `"00000"`. Varios servicios antiguos tienen ese bug — no replicar. → Check 5.4. |
 | 2026-04-17 | `log.info` reservado para eventos de contrato; diagnóstico a `log.debug`. Origen: feedback del equipo [FB-JA]. → Checks 2.6 y 2.7. |
 | 2026-04-17 | Patrones del `HeaderRequestValidator` externalizados a `HeaderValidationProperties` (`@ConfigurationProperties`, ConfigMap de OpenShift). Validator convertido en `@Component` inyectable, no `final class` estática. Origen: feedback del equipo [FB-JA]. → Check 4.6. |
-| 2026-04-18 | Matriz oficial formalizada: 1 op → REST + WebFlux, 2+ ops → SOAP + Spring MVC para WAS. BUS+invocaBancs y ORQ siempre → REST + WebFlux. La presencia de BD se trata como tecnología agregada dentro del prompt elegido, no como criterio para saltar a otro. → BLOQUE 0. |
+| 2026-04-18 | Matriz MCP formalizada (ver canonical **`bank-mcp-matrix.md`**, única fuente de verdad). La presencia de BD se trata como tecnología agregada dentro del prompt elegido, no como criterio para saltar a otro. → BLOQUE 0. |
+| 2026-04-23 | **Matriz MCP extraída a `bank-mcp-matrix.md`** como única fuente (v0.23.15). Se elimina de este archivo la frase ambigua del changelog previo — sin calificar tecnología — que causó mal-clasificación de `wstecnicos0006` (WAS 2 ops migrado como WebFlux en vez de SOAP+MVC). Todos los bloques que antes replicaban la matriz referencian ahora al canonical. |
 | 2026-04-20 | BPTPSRE PDFs incorporados. **Estructura de error oficial** con 8 campos (`mensajeNegocio` lo gestiona DataPower — NUNCA el servicio). **Patrones IIB** de config: `GestionarRecursoXML` y `GestionarRecursoConfigurable`. **Patrones WAS** de config: `.properties` en `/apps/proy/OMNICANALIDAD_SERVICIOS/conf/` + clases `Propiedad.java`, `ErrorTipo.java`, `ServicioExcepcion`. **Librerías WebFlux opcionales**: `mdw-dm-lib-audit-log-reactive` y `mdw-dm-lib-stratio-connector`. → BLOQUE 15. |
 
 **Politica canonica:** las reglas se expresan en abstracto. Si un proyecto
