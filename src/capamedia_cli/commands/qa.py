@@ -265,6 +265,7 @@ def _write_vscode_cmd_settings(workspace: Path) -> Path:
         "path": "C:\\Windows\\System32\\cmd.exe",
         "args": [],
     }
+    data["chat.tools.terminal.terminalProfile.windows"] = "Command Prompt"
 
     path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return path
@@ -307,6 +308,7 @@ def _prompt_text(
         "- No uses PowerShell. No ejecutes `powershell.exe`, `pwsh`, `Get-Content`, `Select-String` ni scripts `.ps1`.\n"
         "- No uses Bash como requisito; este workspace esta preparado para `cmd.exe`.\n"
         "- Para leer archivos usa `type`, para listar usa `dir`, para variables usa `set VAR=valor`.\n"
+        "- Si Copilot muestra `Cannot create process` con `powershell.exe`, avisa que el usuario debe correr `capamedia qa prepare`, cerrar/reabrir VS Code y reintentar. No sigas insistiendo con PowerShell.\n"
         "- No modifiques `legacy/`.\n"
         "- No modifiques `TRAMAS.txt`; es el oraculo de respuestas legacy.\n"
         "- No inventes respuestas esperadas. Si una trama no permite identificar request o expected, marca BLOCKED y pregunta.\n"
@@ -374,7 +376,13 @@ def _prompt_text(
         "type .capamedia\\qa\\results\\<case-id>.response.xml\n"
         "```\n"
         "\n"
-        "Si el terminal intenta abrir PowerShell y falla, no sigas intentando PowerShell. Usa el perfil `Command Prompt` de VS Code o pide al usuario reabrir la carpeta despues de correr `capamedia qa prepare`.\n"
+        "Si el terminal intenta abrir PowerShell y falla, no sigas intentando PowerShell. Usa el perfil `Command Prompt` de VS Code. Este workspace debe tener `chat.tools.terminal.terminalProfile.windows = Command Prompt` en `.vscode/settings.json`; si no esta, pide ejecutar `capamedia qa prepare` y reabrir VS Code.\n"
+        "\n"
+        "## Fallback si Copilot no puede crear procesos\n"
+        "\n"
+        "Si la VDI bloquea la herramienta de terminal de Copilot por GPO/antivirus, no inventes resultados.\n"
+        "Pide al usuario ejecutar manualmente los comandos `cmd.exe` necesarios en una ventana externa de Command Prompt y pegar el output en el chat.\n"
+        "Mientras tanto, podes usar lectura/edicion de archivos desde VS Code para preparar fixes, pero no podes declarar PASS sin evidencia de `curl.exe` o build.\n"
         "\n"
         "## Criterio de cierre\n"
         "\n"

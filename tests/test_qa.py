@@ -48,6 +48,7 @@ def test_qa_pack_generates_copilot_prompt_and_cmd_contract(tmp_path: Path) -> No
     assert settings.exists()
     settings_content = settings.read_text(encoding="utf-8")
     assert "terminal.integrated.defaultProfile.windows" in settings_content
+    assert "chat.tools.terminal.terminalProfile.windows" in settings_content
     assert "Command Prompt" in settings_content
     assert "cmd.exe" in settings_content
 
