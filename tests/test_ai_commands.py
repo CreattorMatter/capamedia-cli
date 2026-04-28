@@ -17,6 +17,7 @@ from capamedia_cli.commands.ai import (
 )
 from capamedia_cli.commands.batch import BatchRow
 from capamedia_cli.core.engine import EngineResult
+from capamedia_cli.core.gitignore_policy import DEPLOYMENT_GITIGNORE_ENTRIES
 
 runner = CliRunner()
 
@@ -200,7 +201,12 @@ def test_process_doublecheck_workspace_writes_structured_state(tmp_path: Path) -
     assert "architectureReview" in fake.inputs[0].prompt
     assert "application/input/port" in fake.inputs[0].prompt
     assert "@SpringBootTest" in fake.inputs[0].prompt
+    assert ".capamedia/" in fake.inputs[0].prompt
+    assert ".sonarlint/connectedMode.json" in fake.inputs[0].prompt
     props_text = props.read_text(encoding="utf-8")
     assert "org.gradle.java.home" not in props_text
     assert "org.gradle.jvmargs=-Xmx2g" in props_text
+    gitignore_text = (project / ".gitignore").read_text(encoding="utf-8")
+    for entry in DEPLOYMENT_GITIGNORE_ENTRIES:
+        assert entry in gitignore_text
     assert (workspace / ".capamedia" / "batch-state" / "doublecheck.json").exists()

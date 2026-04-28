@@ -1519,6 +1519,14 @@ grep -rEn "(token|password|secret).*=.*['\"][A-Za-z0-9_-]{20,}" <PATH>/.sonarlin
 
 Si hay match -> **HIGH** (CRITICAL). Acción: rotar el token en SonarCloud inmediatamente y purgar del historial git. SonarLint guarda tokens cifrados en el secret store del IDE — NUNCA en el repo.
 
+### Check 14.6 — `.gitignore` excluye artefactos CapaMedia/AI
+
+```bash
+grep -E '^(\.capamedia/|\.codex/|\.claude/|\.cursor/|\.windsurf/|\.opencode/|\.github/prompts/|\.vscode/|\.idea/|\.mcp\.json|FABRICS_PROMPT_\*\.md|QA_STATUS\.md|TRAMAS\.txt)$' <PATH>/.gitignore
+```
+
+Faltantes -> **HIGH**. Acción: agregar al `.gitignore` del proyecto migrado el bloque de higiene CapaMedia/AI para que esos artefactos locales no se suban a Azure DevOps. Excepción explícita: `.sonarlint/connectedMode.json` NO se ignora porque debe quedar versionado.
+
 ---
 
 ## BLOQUE 15 — Estructura de error oficial y librerías opcionales

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from capamedia_cli.commands.init import scaffold_project
+from capamedia_cli.core.gitignore_policy import DEPLOYMENT_GITIGNORE_ENTRIES
 
 
 def test_init_scaffolds_sonarlint_example_and_readme(tmp_path: Path, monkeypatch) -> None:
@@ -57,3 +58,5 @@ def test_init_scaffolds_sonarlint_example_and_readme(tmp_path: Path, monkeypatch
     assert "!.sonarlint/connectedMode.json" in gitignore
     assert "!.sonarlint/connectedMode.example.json" in gitignore
     assert "!.sonarlint/README.md" in gitignore
+    for entry in DEPLOYMENT_GITIGNORE_ENTRIES:
+        assert entry in gitignore

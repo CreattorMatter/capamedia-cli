@@ -32,6 +32,7 @@ from rich.prompt import Confirm
 from capamedia_cli import __version__
 from capamedia_cli.adapters import ALL_HARNESSES, get_adapter, resolve_harnesses
 from capamedia_cli.core.canonical import DATA_ROOT, load_canonical_assets
+from capamedia_cli.core.gitignore_policy import DEPLOYMENT_GITIGNORE_ENTRIES
 
 console = Console()
 
@@ -82,8 +83,6 @@ def _update_gitignore(target_dir: Path) -> None:
     gi = target_dir / ".gitignore"
     lines = [
         "# CapaMedia CLI - NO commitear secrets",
-        ".mcp.json",
-        ".capamedia/",
         "legacy/",
         "umps/",
         "tx/",
@@ -93,7 +92,9 @@ def _update_gitignore(target_dir: Path) -> None:
         "ANALISIS_*.md",
         "COMPLEXITY_*.md",
         "CHECKLIST_*.md",
-        "FABRICS_PROMPT*.md",
+        "",
+        "# CapaMedia/AI local artifacts - do not deploy to Azure DevOps",
+        *DEPLOYMENT_GITIGNORE_ENTRIES,
         "",
         "# SonarLint: versionar binding compartido, ignorar cache local",
         ".sonarlint/*",

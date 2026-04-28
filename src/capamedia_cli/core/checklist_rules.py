@@ -14,6 +14,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from capamedia_cli.core.gitignore_policy import (
+    DEPLOYMENT_GITIGNORE_ENTRIES,
+    format_deployment_gitignore_block,
+    missing_deployment_gitignore_entries,
+)
+
 # -- Result dataclass -------------------------------------------------------
 
 
@@ -86,6 +92,39 @@ def _read_or_empty(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _deployment_gitignore_check(ctx: CheckContext) -> CheckResult:
+    gitignore = ctx.migrated_path / ".gitignore"
+    if not gitignore.exists():
+        missing = list(DEPLOYMENT_GITIGNORE_ENTRIES)
+        detail = ".gitignore faltante en el proyecto migrado"
+    else:
+        missing = missing_deployment_gitignore_entries(_read_or_empty(gitignore))
+        detail = f"faltan entradas: {', '.join(missing)}" if missing else ""
+
+    if missing:
+        return CheckResult(
+            "14.6",
+            "Block 14",
+            ".gitignore excluye artefactos CapaMedia/AI",
+            "fail",
+            severity="high",
+            detail=detail,
+            suggested_fix=(
+                "Agregar al .gitignore del proyecto migrado este bloque:\n"
+                f"{format_deployment_gitignore_block()}\n"
+                "No ignorar .sonarlint/connectedMode.json: ese binding si se versiona."
+            ),
+        )
+
+    return CheckResult(
+        "14.6",
+        "Block 14",
+        ".gitignore excluye artefactos CapaMedia/AI",
+        "pass",
+        detail="artefactos locales CapaMedia/AI ignorados para Azure DevOps",
+    )
 
 
 def _expected_framework(
@@ -821,6 +860,7 @@ def run_block_14(ctx: CheckContext) -> list[CheckResult]:
     # 14.1 - Existe
     if not _file_exists(binding):
         results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "fail", severity="high", detail="archivo faltante", suggested_fix="Bindar en VS Code y Share Configuration"))
+        results.append(_deployment_gitignore_check(ctx))
         return results
     results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "pass"))
 
@@ -829,6 +869,7 @@ def run_block_14(ctx: CheckContext) -> list[CheckResult]:
         data = json.loads(_read_or_empty(binding))
     except json.JSONDecodeError:
         results.append(CheckResult("14.2", "Block 14", "connectedMode.json valido", "fail", severity="high", detail="JSON invalido"))
+        results.append(_deployment_gitignore_check(ctx))
         return results
     if data.get("sonarCloudOrganization") == "bancopichinchaec":
         results.append(CheckResult("14.2", "Block 14", "org = bancopichinchaec", "pass"))
@@ -863,6 +904,7 @@ def run_block_14(ctx: CheckContext) -> list[CheckResult]:
             CheckResult("14.4", "Block 14", ".sonarlint/connectedMode.json no gitignored", "pass")
         )
 
+    results.append(_deployment_gitignore_check(ctx))
     return results
 
 

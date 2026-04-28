@@ -52,6 +52,10 @@ from capamedia_cli.core.engine import (
     engine_from_env,
     select_engine,
 )
+from capamedia_cli.core.gitignore_policy import (
+    DEPLOYMENT_GITIGNORE_ENTRIES,
+    ensure_deployment_gitignore,
+)
 from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 from capamedia_cli.core.scheduler import BatchScheduler
 from capamedia_cli.core.self_correction import (
@@ -599,6 +603,9 @@ def _build_batch_migrate_prompt(
         - Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`;
           las rutas locales de JDK rompen Azure DevOps/Linux. Si necesitas Java 21,
           usa `JAVA_HOME` del entorno del proceso.
+        - Verifica que el `.gitignore` del proyecto migrado ignore artefactos
+          locales CapaMedia/AI que no van a Azure DevOps: {", ".join(DEPLOYMENT_GITIGNORE_ENTRIES)}.
+          No ignores `.sonarlint/connectedMode.json`; ese binding si debe versionarse.
         - Trata `gradle architectureReview` como gate del banco. No reportes
           `build_status=green` si queda score < 7, `BLOQUEAR PR: SI`, o
           observaciones de arquitectura/tests. Corrige paquetes
@@ -815,6 +822,7 @@ def _process_migrate_workspace(
         )
 
     remove_committed_gradle_java_home(migrated_project)
+    ensure_deployment_gitignore(migrated_project)
 
     if resume and state_result.get("status") == "ok" and stage_ok(state, "migrate"):
         check_is_done = (not run_check) or stage_ok(state, "check")
@@ -884,6 +892,7 @@ def _process_migrate_workspace(
                     eres = engine.run_headless(einput)
             finally:
                 remove_committed_gradle_java_home(migrated_project)
+                ensure_deployment_gitignore(migrated_project)
         finally:
             if scheduler is not None:
                 scheduler.release(service)

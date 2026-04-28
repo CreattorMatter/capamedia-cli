@@ -22,6 +22,7 @@ from capamedia_cli.commands.batch import (
     _write_markdown_report,
 )
 from capamedia_cli.core.engine import EngineResult
+from capamedia_cli.core.gitignore_policy import DEPLOYMENT_GITIGNORE_ENTRIES
 
 
 class _FakeEngine:
@@ -203,6 +204,8 @@ def test_build_batch_migrate_prompt_contains_workspace_context(tmp_path: Path) -
     assert "architectureReview" in prompt
     assert "application/input/port" in prompt
     assert "@SpringBootTest" in prompt
+    assert ".capamedia/" in prompt
+    assert ".sonarlint/connectedMode.json" in prompt
 
 
 def test_migrate_output_schema_is_codex_strict_compatible() -> None:
@@ -278,6 +281,9 @@ def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:
     props_text = props.read_text(encoding="utf-8")
     assert "org.gradle.java.home" not in props_text
     assert "org.gradle.jvmargs=-Xmx2g" in props_text
+    gitignore_text = (project / ".gitignore").read_text(encoding="utf-8")
+    for entry in DEPLOYMENT_GITIGNORE_ENTRIES:
+        assert entry in gitignore_text
 
 
 def test_process_migrate_service_reports_openai_schema_error(tmp_path: Path) -> None:

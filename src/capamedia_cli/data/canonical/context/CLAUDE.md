@@ -24,6 +24,8 @@ Migracion de servicios legacy a Java 21 + Spring Boot + arquitectura hexagonal O
 
 **SonarLint local:** todo proyecto migrado debe tener `.sonarlint/connectedMode.json` versionado apuntando a la organización `bancopichinchaec` en SonarCloud. Setup detallado en `configuracion-claude-code/sonarlint/README.md`. Validado por la checklist post-migración (BLOQUE 14).
 
+**Higiene de `.gitignore`:** el repo que se sube a Azure DevOps NO debe versionar artefactos locales de CapaMedia/IA (`.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`). Estos deben estar ignorados en el `.gitignore` del proyecto migrado. Excepción importante: `.sonarlint/connectedMode.json` SI se versiona.
+
 **Estructura de error oficial (PDF BPTPSRE):** el bloque `<error>` tiene 8 campos. `mensajeNegocio` lo setea DataPower (NUNCA el servicio — pasar null). `recurso` = `<artifactId>/<método>`. `componente` tiene reglas diferentes para IIB (`<SERVICIO>` / `ApiClient` / `TX\d{6}`) vs WAS (`<SERVICIO>` / `<MÉTODO>` / `<VALOR_ARCHIVO_CONFIG>`). Validado por checklist BLOQUE 15.
 
 **Librerías internas opcionales (solo WebFlux/REST):**

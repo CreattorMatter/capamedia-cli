@@ -42,6 +42,10 @@ from capamedia_cli.core.batch_state import (
 from capamedia_cli.core.canonical import CANONICAL_ROOT
 from capamedia_cli.core.engine import Engine, EngineInput, engine_from_env, select_engine
 from capamedia_cli.core.frontmatter import parse_frontmatter
+from capamedia_cli.core.gitignore_policy import (
+    DEPLOYMENT_GITIGNORE_ENTRIES,
+    ensure_deployment_gitignore,
+)
 from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 from capamedia_cli.core.self_correction import (
     build_correction_appendix,
@@ -213,6 +217,7 @@ def _build_doublecheck_prompt(
         "- Ejecuta `capamedia checklist` y respeta sus autofixes/logs.\n"
         "- No ejecutes `capamedia ai migrate`, `capamedia batch migrate`, `/migrate` ni `capamedia review`.\n"
         "- Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`; rompe CI si apunta a un JDK local.\n"
+        f"- Verifica que el `.gitignore` del proyecto migrado ignore artefactos locales CapaMedia/AI que no van a Azure DevOps: {', '.join(DEPLOYMENT_GITIGNORE_ENTRIES)}. No ignores `.sonarlint/connectedMode.json`.\n"
         "- Trata `gradle architectureReview` como gate: si hay score < 7, `BLOQUEAR PR: SI`, "
         "u observaciones de arquitectura/tests, corregilo o devolve `status=blocked`.\n"
         "- Verifica layout peer-review-compatible: `application/input/port`, "
@@ -275,6 +280,7 @@ def _process_doublecheck_workspace(
         return BatchRow(service, "fail", detail, fields)
 
     remove_committed_gradle_java_home(migrated_project)
+    ensure_deployment_gitignore(migrated_project)
 
     if resume and state_result.get("status") == "ok" and stage_ok(state, "doublecheck"):
         saved_fields = state_result.get("fields", {})
@@ -318,6 +324,7 @@ def _process_doublecheck_workspace(
         eres = engine.run_headless(einput)
     finally:
         remove_committed_gradle_java_home(migrated_project)
+        ensure_deployment_gitignore(migrated_project)
     elapsed = eres.duration_seconds or (time.perf_counter() - started)
 
     stdout_path.write_text(eres.stdout, encoding="utf-8")

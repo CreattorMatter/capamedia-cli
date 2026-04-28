@@ -1,4 +1,4 @@
-# capamedia-cli - v0.23.17
+# capamedia-cli - v0.23.18
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -315,6 +315,7 @@ capamedia-cli/
 - [x] v0.3.7 - Fabrics como gate duro + `batch watch`
 - [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
 - [x] v0.23.16 - Codex first-class: GPT-5.5, `xhigh`, batch default Codex, `--reasoning-effort`
+- [x] v0.23.18 - higiene de `.gitignore` en migrate/doublecheck/checklist para no subir artefactos CapaMedia/AI a Azure DevOps
 - [x] v0.23.17 - `capamedia ai migrate/doublecheck` como flujo portable multi-IA
 - [ ] v0.4.0 - integracion con Jira / Azure Boards / Confluence / Slack
 

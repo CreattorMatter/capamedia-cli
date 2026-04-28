@@ -102,6 +102,11 @@ Fix esperado:
 - agregar integration smoke test con `@SpringBootTest` y la herramienta del
   stack (`MockMvc`, `WebTestClient` o `MockWebServiceClient`)
 - mantener unit tests con Mockito para logica de dominio/aplicacion
+- asegurar que el `.gitignore` del proyecto migrado ignore artefactos locales
+  que no van a Azure DevOps: `.capamedia/`, `.codex/`, `.claude/`,
+  `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`,
+  `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`.
+  No ignorar `.sonarlint/connectedMode.json`.
 
 ## Paso 3 — Interpretar el resultado
 
@@ -191,5 +196,8 @@ o abrir el PR si no hay residuales HIGH.
 5. **No aceptar peer review rojo.** Si `architectureReview` reporta
    `BLOQUEAR PR: SI`, score bajo, u observaciones de arquitectura/tests,
    corregirlo o marcar `status=blocked`; nunca reportar PR_READY.
-6. **Informativo, no destructivo.** Todo cambio del autofix queda en
+6. **No ensuciar Azure DevOps.** `.capamedia/` y los harnesses/prompts locales
+   de IA deben quedar en `.gitignore`; `.sonarlint/connectedMode.json` es la
+   excepcion versionable.
+7. **Informativo, no destructivo.** Todo cambio del autofix queda en
    `.capamedia/autofix/<ts>.log` para trazabilidad.

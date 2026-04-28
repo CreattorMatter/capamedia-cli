@@ -98,7 +98,7 @@ Los bloques están documentados en el prompt canónico `prompts.checklist-rules`
 - **BLOQUE 10** — SOAP specifics (si aplica)
 - **BLOQUE 11-12** — REST specifics (si aplica)
 - **BLOQUE 13** — WAS+DB (HikariCP config, ddl-auto validate, open-in-view false, @Transactional en service boundary)
-- **BLOQUE 14** — SonarLint binding (.sonarlint/connectedMode.json, org=bancopichinchaec, projectKey no placeholder)
+- **BLOQUE 14** — SonarLint binding (.sonarlint/connectedMode.json, org=bancopichinchaec, projectKey no placeholder) + higiene de `.gitignore` para artefactos locales CapaMedia/AI
 
 ## Paso 4 — Generar reporte
 

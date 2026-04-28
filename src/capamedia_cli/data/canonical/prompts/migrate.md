@@ -142,3 +142,4 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 5. **Secrets vía `${CCC_*}` env vars.**
 6. **Código en inglés**, documentación en inglés.
 7. **DB no cambia REST/SOAP.** WAS REST/MVC con DB usa HikariCP+JPA+Oracle. Si un caso BUS/ORQ WebFlux trae DB propia, escalar o aislar el bloqueo con R2DBC/`Schedulers.boundedElastic()`; nunca meter HikariCP+JPA en el request path de WebFlux.
+8. **Higiene de `.gitignore` antes de cerrar:** el `.gitignore` del proyecto migrado debe ignorar `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md` y `TRAMAS.txt`. No ignorar `.sonarlint/connectedMode.json`.
