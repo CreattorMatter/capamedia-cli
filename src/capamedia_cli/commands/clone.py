@@ -20,12 +20,14 @@ puede clonarlo manual una vez.
 from __future__ import annotations
 
 import os
+import re as _clone_re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -37,8 +39,6 @@ from capamedia_cli.core.dossier import (
     render_dossier_prompt_appendix,
     write_dossier,
 )
-import yaml
-
 from capamedia_cli.core.legacy_analyzer import analyze_legacy
 
 console = Console()
@@ -63,9 +63,6 @@ def _azure_url(project_key: str, repo_name: str) -> str:
 # Regex para normalizar nombres de servicios con padding de 4 digitos.
 # Convencion Banco Pichincha: todos los servicios terminan en 4 digitos
 # (wsclientes0076, wstecnicos0008, orq0027, umpclientes0023, etc.).
-# Si el user tipea menos digitos (ej wsclientes76), se auto-padea a 4.
-import re as _clone_re
-
 _SERVICE_NAME_PADDING_RE = _clone_re.compile(r"^([a-z][a-z]*?)(\d{1,3})$", _clone_re.IGNORECASE)
 
 
@@ -135,7 +132,7 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
     for project_key, pattern in AZURE_FALLBACK_PATTERNS:
         repo_name = pattern.format(svc=svc)
         dest = dest_root / "legacy" / repo_name
-        ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+        ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
         if ok:
             return (dest, project_key, repo_name)
     return (None, "", "")
@@ -166,7 +163,7 @@ def _resolve_ump_repo(
     for project_key, pattern in patterns:
         repo_name = pattern.format(ump=ump)
         dest = dest_root / "umps" / repo_name
-        ok, err = _git_clone(
+        ok, _err = _git_clone(
             repo_name, dest, project_key=project_key, shallow=shallow
         )
         if ok:
@@ -185,7 +182,29 @@ class TxCloneResult:
     error: str = ""
 
 
-def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bool = False) -> tuple[bool, str]:
+@dataclass
+class MigratedCloneResult:
+    """Resultado de clonar un repo migrado desde tpl-middleware."""
+
+    namespace: str
+    repo_name: str
+    status: str  # "cloned" | "already_present" | "not_found" | "error"
+    path: Path | None = None
+    branch: str = ""
+    error: str = ""
+
+
+MIGRATED_NAMESPACES = ("tnd", "tpr", "csg", "tmp", "tia", "tct")
+DEFAULT_BRANCH_NAMES = {"main", "master"}
+
+
+def _git_clone(
+    repo_name: str,
+    dest: Path,
+    project_key: str = "bus",
+    shallow: bool = False,
+    no_single_branch: bool = False,
+) -> tuple[bool, str]:
     """Clone a repo from Azure DevOps. Returns (success, error_msg).
 
     `project_key` debe ser "bus" | "config" segun donde vive el repo.
@@ -197,6 +216,8 @@ def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bo
     cmd = ["git", "clone"]
     if shallow:
         cmd += ["--depth", "1"]
+        if no_single_branch:
+            cmd += ["--no-single-branch"]
     cmd += [url, str(dest)]
     git_env = build_azure_git_env()
     try:
@@ -215,6 +236,140 @@ def _git_clone(repo_name: str, dest: Path, project_key: str = "bus", shallow: bo
         return (False, "timeout")
     except FileNotFoundError:
         return (False, "git no disponible en PATH")
+
+
+def _list_remote_branches(repo_path: Path) -> list[str]:
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "for-each-ref",
+                "refs/remotes/origin",
+                "--format=%(refname:short)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    branches: list[str] = []
+    for raw in result.stdout.splitlines():
+        branch = raw.strip()
+        if not branch or branch == "origin/HEAD":
+            continue
+        if branch.startswith("origin/"):
+            branch = branch.removeprefix("origin/")
+        branches.append(branch)
+    return sorted(set(branches))
+
+
+def _checkout_branch(repo_path: Path, branch: str) -> tuple[bool, str]:
+    clean_branch = branch.removeprefix("origin/").strip()
+    if not clean_branch:
+        return (False, "branch vacio")
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "checkout", "-B", clean_branch, f"origin/{clean_branch}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if result.returncode == 0:
+        return (True, "")
+    return (False, (result.stderr or result.stdout or "git checkout failed").strip())
+
+
+def _auto_checkout_migrated_branch(repo_path: Path, requested_branch: str | None) -> tuple[str, str, str]:
+    """Checkout de rama para repos migrados.
+
+    Returns: (branch, mode, error). mode: explicit | auto | default | ambiguous.
+    """
+    if requested_branch:
+        ok, err = _checkout_branch(repo_path, requested_branch)
+        return (requested_branch, "explicit", "" if ok else err)
+
+    branches = _list_remote_branches(repo_path)
+    non_default = [b for b in branches if b not in DEFAULT_BRANCH_NAMES]
+    feature_branches = [b for b in non_default if b.startswith("feature/")]
+
+    candidate = ""
+    if len(non_default) == 1:
+        candidate = non_default[0]
+    elif len(feature_branches) == 1:
+        candidate = feature_branches[0]
+
+    if candidate:
+        ok, err = _checkout_branch(repo_path, candidate)
+        return (candidate, "auto", "" if ok else err)
+
+    if non_default:
+        return ("", "ambiguous", f"multiples ramas candidatas: {', '.join(non_default[:8])}")
+    return ("", "default", "")
+
+
+def _clone_migrated_repos(
+    service_name: str,
+    workspace: Path,
+    *,
+    shallow: bool = False,
+    namespace: str | None = None,
+    branch: str | None = None,
+) -> list[MigratedCloneResult]:
+    """Clone migrated middleware repos under `destino/`.
+
+    If namespace is omitted, tries every known namespace and keeps every repo
+    that exists. This supports services already migrated under `tnd`, `tia`,
+    `tpr`, `csg`, `tmp`, or `tct`.
+    """
+    namespaces = [namespace.lower()] if namespace else list(MIGRATED_NAMESPACES)
+    results: list[MigratedCloneResult] = []
+    svc = service_name.lower()
+
+    for ns in namespaces:
+        repo_name = f"{ns}-msa-sp-{svc}"
+        dest = workspace / "destino" / repo_name
+        was_present = dest.exists() and any(dest.iterdir())
+        ok, err = _git_clone(
+            repo_name,
+            dest,
+            project_key="middleware",
+            shallow=shallow,
+            no_single_branch=True,
+        )
+        if not ok:
+            status = (
+                "not_found"
+                if "not found" in err.lower()
+                or "does not exist" in err.lower()
+                or "repository not found" in err.lower()
+                or "404" in err
+                else "error"
+            )
+            results.append(MigratedCloneResult(ns, repo_name, status, error=err))
+            continue
+
+        checkout_branch = ""
+        checkout_error = ""
+        if branch or not was_present:
+            checkout_branch, _mode, checkout_error = _auto_checkout_migrated_branch(dest, branch)
+
+        results.append(
+            MigratedCloneResult(
+                ns,
+                repo_name,
+                "already_present" if was_present else "cloned",
+                path=dest,
+                branch=checkout_branch,
+                error=checkout_error,
+            )
+        )
+    return results
 
 
 def _resolve_legacy_repo_name(service_name: str) -> str:
@@ -676,6 +831,136 @@ def clone_service(
         console.print("  [cyan]capamedia fabrics generate[/cyan]  (desde este mismo workspace)")
     else:
         console.print("  [cyan]capamedia fabrics generate[/cyan]  (desde este mismo workspace)")
+
+
+def clone_migrated_service(
+    service_name: Annotated[
+        str,
+        typer.Argument(help="Nombre del servicio (ej: wsclientes0076, wstecnicos0006)"),
+    ],
+    workspace: Annotated[
+        Path | None,
+        typer.Option(
+            "--workspace",
+            "-w",
+            help="Carpeta raiz del workspace (default: CWD)",
+        ),
+    ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--namespace",
+            "-n",
+            help="Namespace migrado a clonar. Si se omite, prueba tnd/tpr/csg/tmp/tia/tct.",
+        ),
+    ] = None,
+    branch: Annotated[
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Rama del repo migrado a dejar checked out (ej: feature/dev-BTHCCC-5077).",
+        ),
+    ] = None,
+    shallow: Annotated[
+        bool,
+        typer.Option("--shallow", help="Clone superficial (--depth 1) para ahorrar tiempo"),
+    ] = False,
+    skip_tx: Annotated[
+        bool,
+        typer.Option("--skip-tx", help="No clonar los repos de TX individuales del clone base"),
+    ] = False,
+    deep_scan: Annotated[
+        bool,
+        typer.Option("--deep-scan", help="Ejecutar deep-scan igual que `capamedia clone`"),
+    ] = False,
+    init: Annotated[
+        bool,
+        typer.Option("--init", help="Ejecutar init automatico igual que `capamedia clone --init`"),
+    ] = False,
+    init_ai: Annotated[
+        str,
+        typer.Option("--init-ai", help="Harness AI para el init automatico. Solo se usa si --init esta activo."),
+    ] = "claude",
+) -> None:
+    """Clona legacy/UMPs/TX y tambien el repo migrado existente en tpl-middleware."""
+    ws = workspace or Path.cwd()
+    ws.mkdir(parents=True, exist_ok=True)
+
+    original_name = service_name
+    service_name, was_padded = normalize_service_name(service_name)
+    if was_padded:
+        console.print(
+            f"[yellow]Tip:[/yellow] [cyan]{original_name}[/cyan] -> "
+            f"[cyan]{service_name}[/cyan] (auto-padded a 4 digitos)"
+        )
+
+    console.print(
+        Panel.fit(
+            f"[bold]CapaMedia clone-migrated[/bold]\n"
+            f"Servicio: [cyan]{service_name}[/cyan]\n"
+            f"Workspace: [cyan]{ws}[/cyan]",
+            border_style="cyan",
+        )
+    )
+
+    console.print("\n[bold]A. Clone base legacy + UMPs + TX[/bold]")
+    clone_service(
+        service_name,
+        workspace=ws,
+        shallow=shallow,
+        skip_tx=skip_tx,
+        deep_scan=deep_scan,
+        init=init,
+        init_ai=init_ai,
+    )
+
+    console.print("\n[bold]B. Clonando repos migrados desde tpl-middleware[/bold]")
+    results = _clone_migrated_repos(
+        service_name,
+        ws,
+        shallow=shallow,
+        namespace=namespace,
+        branch=branch,
+    )
+
+    found = [r for r in results if r.status in {"cloned", "already_present"}]
+    table = Table(title="Migrados detectados", title_style="bold cyan")
+    table.add_column("Namespace", style="cyan")
+    table.add_column("Repo")
+    table.add_column("Status", style="bold")
+    table.add_column("Branch")
+    table.add_column("Path / detalle")
+
+    for r in results:
+        if r.status == "cloned":
+            status = "[green]clonado[/green]"
+        elif r.status == "already_present":
+            status = "[cyan]existente[/cyan]"
+        elif r.status == "not_found":
+            status = "[yellow]no existe[/yellow]"
+        else:
+            status = "[red]error[/red]"
+        detail = str(r.path) if r.path else r.error[:90]
+        if r.error and r.path:
+            detail = f"{detail} ({r.error[:80]})"
+        table.add_row(r.namespace, r.repo_name, status, r.branch or "-", detail)
+    console.print(table)
+
+    if not found:
+        console.print(
+            "\n[red]FAIL[/red] no se encontro ningun repo migrado en tpl-middleware "
+            "para este servicio. Si conoces el namespace exacto, reintenta con "
+            "`--namespace <tnd|tpr|csg|tmp|tia|tct>`."
+        )
+        raise typer.Exit(1)
+
+    console.print("\n[bold]Workspace listo:[/bold]")
+    console.print(f"  Legacy : [cyan]{ws / 'legacy'}[/cyan]")
+    console.print(f"  Migrado: [cyan]{ws / 'destino'}[/cyan]")
+    console.print("\n[bold]Siguiente paso sugerido:[/bold]")
+    console.print("  [cyan]capamedia ai doublecheck --engine codex[/cyan]")
+    console.print("  [cyan]capamedia review[/cyan]")
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ Comandos disponibles:
   capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
   capamedia ai doublecheck - corre el doble check AI post-migracion
   capamedia qa pack        - prepara QA de equivalencia funcional para Copilot
+  capamedia clone-migrated - clona legacy + repos migrados existentes
   capamedia doctor         - diagnostico del CLI y el entorno
   capamedia upgrade        - agrega o actualiza harnesses en un proyecto ya inicializado
 
@@ -110,6 +111,8 @@ app.command("check-install")(check_install.check_install)
 app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
+app.command("clone-migrated")(clone.clone_migrated_service)
+app.command("clon-migrado")(clone.clone_migrated_service)
 app.command("adopt")(adopt_cmd.adopt)  # v0.23.11: adopt workspaces no-canonicos
 app.command("info")(info_cmd.info)    # v0.23.12: dashboard de pendientes
 app.command("check")(check.check_project)

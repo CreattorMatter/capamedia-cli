@@ -53,3 +53,29 @@ def test_clone_command_mentions_init_flag_in_help() -> None:
     assert result.exit_code == 0
     assert "--init" in result.output
     assert "Claude Code" in result.output or "claude" in result.output.lower()
+
+
+def test_clone_migrated_command_wired_in_cli() -> None:
+    """`capamedia clone-migrated` trae clone base + repos migrados."""
+    from typer.testing import CliRunner
+
+    from capamedia_cli.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["clone-migrated", "--help"])
+    assert result.exit_code == 0
+    assert "--namespace" in result.output
+    assert "--branch" in result.output
+    assert "migrado" in result.output.lower() or "migrated" in result.output.lower()
+
+
+def test_clon_migrado_alias_wired_in_cli() -> None:
+    """Alias en espanol para el comando solicitado oralmente."""
+    from typer.testing import CliRunner
+
+    from capamedia_cli.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["clon-migrado", "--help"])
+    assert result.exit_code == 0
+    assert "--branch" in result.output

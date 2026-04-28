@@ -7,7 +7,12 @@ from pathlib import Path
 
 import yaml
 
-from capamedia_cli.commands.clone import _git_clone, _write_properties_report
+from capamedia_cli.commands.clone import (
+    MIGRATED_NAMESPACES,
+    _clone_migrated_repos,
+    _git_clone,
+    _write_properties_report,
+)
 from capamedia_cli.core.legacy_analyzer import LegacyAnalysis, PropertiesReference
 
 
@@ -33,6 +38,80 @@ def test_git_clone_uses_env_auth_when_pat_is_present(tmp_path: Path, monkeypatch
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["GCM_INTERACTIVE"] == "Never"
     assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+
+def test_clone_migrated_repos_tries_known_namespaces(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[str, Path, str, bool, bool]] = []
+
+    def fake_git_clone(
+        repo_name: str,
+        dest: Path,
+        project_key: str = "bus",
+        shallow: bool = False,
+        no_single_branch: bool = False,
+    ) -> tuple[bool, str]:
+        calls.append((repo_name, dest, project_key, shallow, no_single_branch))
+        if repo_name == "csg-msa-sp-wsclientes0076":
+            dest.mkdir(parents=True)
+            (dest / "build.gradle").write_text("plugins {}", encoding="utf-8")
+            return (True, "")
+        return (False, "repository not found")
+
+    monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
+    monkeypatch.setattr(
+        "capamedia_cli.commands.clone._auto_checkout_migrated_branch",
+        lambda repo_path, requested_branch: ("feature/dev-BTHCCC-5961", "auto", ""),
+    )
+
+    results = _clone_migrated_repos("wsclientes0076", tmp_path, shallow=True)
+
+    assert [call[0] for call in calls] == [
+        f"{ns}-msa-sp-wsclientes0076" for ns in MIGRATED_NAMESPACES
+    ]
+    assert all(call[2] == "middleware" for call in calls)
+    assert all(call[3] is True for call in calls)
+    assert all(call[4] is True for call in calls)
+
+    cloned = [r for r in results if r.status == "cloned"]
+    assert len(cloned) == 1
+    assert cloned[0].repo_name == "csg-msa-sp-wsclientes0076"
+    assert cloned[0].path == tmp_path / "destino" / "csg-msa-sp-wsclientes0076"
+    assert cloned[0].branch == "feature/dev-BTHCCC-5961"
+
+
+def test_clone_migrated_repos_respects_namespace_and_branch(tmp_path: Path, monkeypatch) -> None:
+    branches: list[str | None] = []
+
+    def fake_git_clone(
+        repo_name: str,
+        dest: Path,
+        project_key: str = "bus",
+        shallow: bool = False,
+        no_single_branch: bool = False,
+    ) -> tuple[bool, str]:
+        dest.mkdir(parents=True)
+        (dest / "build.gradle").write_text("plugins {}", encoding="utf-8")
+        return (True, "")
+
+    def fake_checkout(repo_path: Path, requested_branch: str | None) -> tuple[str, str, str]:
+        branches.append(requested_branch)
+        return (requested_branch or "", "explicit", "")
+
+    monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
+    monkeypatch.setattr("capamedia_cli.commands.clone._auto_checkout_migrated_branch", fake_checkout)
+
+    results = _clone_migrated_repos(
+        "wstecnicos0006",
+        tmp_path,
+        namespace="tnd",
+        branch="feature/dev-BTHCCC-5953",
+    )
+
+    assert len(results) == 1
+    assert results[0].repo_name == "tnd-msa-sp-wstecnicos0006"
+    assert results[0].status == "cloned"
+    assert results[0].branch == "feature/dev-BTHCCC-5953"
+    assert branches == ["feature/dev-BTHCCC-5953"]
 
 
 # ---------------------------------------------------------------------------
