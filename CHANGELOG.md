@@ -4,6 +4,14 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.30] - 2026-04-29
+
+### Added - Slash command `/edge-cases`
+
+- Nuevo prompt canonico `edge-cases.md`, renderizado por Claude Code como `.claude/commands/edge-cases.md`.
+- El comando guia el cierre de Discovery edge cases: lee reportes, WSDL/XSD locales, migrado y legacy; implementa o prueba faltantes; actualiza trazabilidad y repite checklist hasta cerrar Block 22.
+- La guia preserva la higiene del repo: WSDL/XSD Discovery viven en `.capamedia/`, no en `destino/*/src/test/resources/discovery`.
+
 ## [0.23.29] - 2026-04-29
 
 ### Fixed - Discovery sin ensuciar el repo migrado

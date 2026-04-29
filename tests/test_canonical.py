@@ -43,6 +43,22 @@ def test_doublecheck_slash_command_exists(tmp_path: Path) -> None:
     assert dc.frontmatter.get("type") == "prompt"
 
 
+def test_edge_cases_slash_command_exists() -> None:
+    """`/edge-cases` debe existir como prompt canonical para Claude Code."""
+    assets = load_canonical_assets()
+    names = {a.name for a in assets["prompt"]}
+    assert "edge-cases" in names, (
+        "/edge-cases debe existir como prompt canonical para que se genere "
+        ".claude/commands/edge-cases.md al correr `capamedia init`"
+    )
+
+    edge_cases = next(a for a in assets["prompt"] if a.name == "edge-cases")
+    assert edge_cases.description
+    assert edge_cases.frontmatter.get("type") == "prompt"
+    assert ".capamedia/discovery" in edge_cases.body
+    assert "capamedia checklist ./destino/<namespace>-msa-sp-<servicio>" in edge_cases.body
+
+
 def test_init_scaffolds_doublecheck_in_claude_commands(tmp_path: Path, monkeypatch) -> None:
     """v0.23.0: `capamedia init --ai claude` escribe
     `.claude/commands/doublecheck.md` al workspace para que `/doublecheck`
@@ -63,6 +79,28 @@ def test_init_scaffolds_doublecheck_in_claude_commands(tmp_path: Path, monkeypat
     )
     content = dc_file.read_text(encoding="utf-8")
     assert "doublecheck" in content.lower() or "doble check" in content.lower()
+
+
+def test_init_scaffolds_edge_cases_in_claude_commands(tmp_path: Path, monkeypatch) -> None:
+    """`capamedia init --ai claude` escribe `.claude/commands/edge-cases.md`."""
+    from capamedia_cli.commands.init import scaffold_project
+
+    monkeypatch.chdir(tmp_path)
+    scaffold_project(
+        target_dir=tmp_path,
+        service_name="wsfooXXXX",
+        harnesses=["claude"],
+    )
+
+    edge_file = tmp_path / ".claude" / "commands" / "edge-cases.md"
+    assert edge_file.exists(), (
+        "Despues de init, .claude/commands/edge-cases.md debe existir para "
+        "que /edge-cases sea un slash command visible en Claude Code"
+    )
+    content = edge_file.read_text(encoding="utf-8")
+    assert "DISCOVERY_EDGE_CASES" in content
+    assert ".capamedia/discovery" in content
+    assert "Block 22" in content
 
 
 def test_full_prompts_are_loaded() -> None:
