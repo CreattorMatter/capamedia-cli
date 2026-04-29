@@ -8,7 +8,7 @@ Comandos disponibles:
   capamedia fabrics        - gestiona el MCP Fabrics (setup y generate)
   capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
   capamedia ai doublecheck - corre el doble check AI post-migracion
-  capamedia documentacion  - genera documentacion de servicio para Google Docs
+  capamedia documentacion  - genera documentacion de servicio para Confluence
   capamedia qa pack        - prepara QA de equivalencia funcional para Copilot
   capamedia clone-migrated - clona legacy + repos migrados existentes
   capamedia doctor         - diagnostico del CLI y el entorno

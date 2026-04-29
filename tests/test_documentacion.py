@@ -40,7 +40,63 @@ def _make_workspace(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (resources / "service.wsdl").write_text(
-        """<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" targetNamespace="http://bpichincha.com/servicios">
+        """<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="http://bpichincha.com/servicios">
+  <wsdl:types>
+    <xsd:schema targetNamespace="http://bpichincha.com/servicios">
+      <xsd:element name="ActualizarContactoTransaccional31">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="headerIn">
+              <xsd:complexType>
+                <xsd:sequence>
+                  <xsd:element name="empresa" type="xsd:string"/>
+                  <xsd:element name="canal" type="xsd:string"/>
+                  <xsd:element name="medio" type="xsd:string"/>
+                  <xsd:element name="aplicacion" type="xsd:string"/>
+                  <xsd:element name="tipoTransaccion" type="xsd:string"/>
+                  <xsd:element name="usuario" type="xsd:string"/>
+                  <xsd:element name="idioma" type="xsd:string"/>
+                  <xsd:element name="ip" type="xsd:string"/>
+                  <xsd:element name="bancs" minOccurs="0">
+                    <xsd:complexType>
+                      <xsd:sequence>
+                        <xsd:element name="teller" type="xsd:string"/>
+                        <xsd:element name="terminal" type="xsd:string"/>
+                        <xsd:element name="institucion" type="xsd:string"/>
+                      </xsd:sequence>
+                    </xsd:complexType>
+                  </xsd:element>
+                </xsd:sequence>
+              </xsd:complexType>
+            </xsd:element>
+            <xsd:element name="bodyIn">
+              <xsd:complexType>
+                <xsd:sequence>
+                  <xsd:element name="cif" type="xsd:string"/>
+                  <xsd:element name="contactosTransaccionales">
+                    <xsd:complexType>
+                      <xsd:sequence>
+                        <xsd:element name="contactosTransaccional">
+                          <xsd:complexType>
+                            <xsd:sequence>
+                              <xsd:element name="tipo" type="xsd:string"/>
+                              <xsd:element name="email" type="xsd:string" minOccurs="0"/>
+                              <xsd:element name="celular" type="xsd:string"/>
+                              <xsd:element name="activar" type="xsd:boolean"/>
+                            </xsd:sequence>
+                          </xsd:complexType>
+                        </xsd:element>
+                      </xsd:sequence>
+                    </xsd:complexType>
+                  </xsd:element>
+                </xsd:sequence>
+              </xsd:complexType>
+            </xsd:element>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:schema>
+  </wsdl:types>
   <wsdl:portType name="WSClientes9999Port">
     <wsdl:operation name="ActualizarContactoTransaccional31"/>
   </wsdl:portType>
@@ -48,8 +104,12 @@ def _make_workspace(tmp_path: Path) -> Path:
 """,
         encoding="utf-8",
     )
+    (tests / "happy.xml").write_text(
+        "<headerIn><canal>02</canal><medio>020001</medio><aplicacion>00114</aplicacion><tipoTransaccion>201006701</tipoTransaccion></headerIn>",
+        encoding="utf-8",
+    )
     (tests / "CustomerServiceTest.java").write_text(
-        "class CustomerServiceTest { @org.junit.jupiter.api.Test void cifVacioRetornaError() {} }\n",
+        "class CustomerServiceTest { @org.junit.jupiter.api.Test void cifVacioRetornaError() {} @org.junit.jupiter.api.Test void normalizaTelefonoOk() {} }\n",
         encoding="utf-8",
     )
     (workspace / "COMPLEXITY_wsclientes9999.md").write_text(
@@ -70,14 +130,18 @@ def test_build_service_documentation_collects_project_evidence(tmp_path: Path) -
     assert doc.migrated_name == "tnd-msa-sp-wsclientes9999"
     assert doc.spring_boot_version == "3.5.13"
     assert doc.gradle_version == "8.14"
-    assert doc.framework == "Spring WebFlux"
+    assert doc.framework == "WebFlux"
     assert doc.operations == ["ActualizarContactoTransaccional31"]
     assert doc.namespace == "http://bpichincha.com/servicios"
+    assert {field.name for field in doc.body_fields} >= {"cif", "contactosTransaccionales"}
+    assert doc.happy_path is not None
+    assert "020001" in doc.happy_path.curl
+    assert "<cif>4667888</cif>" in doc.happy_path.curl
     assert "067186" in doc.tx_codes
     assert {var.name for var in doc.env_vars} >= {"CCC_BANCS_BASE_URL", "CCC_BANCS_CONNECT_TIMEOUT"}
 
 
-def test_render_documentation_outputs_google_docs_friendly_tables(tmp_path: Path) -> None:
+def test_render_documentation_outputs_confluence_tables_and_happy_path(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     migrated = workspace / "destino" / "tnd-msa-sp-wsclientes9999"
     doc = build_service_documentation(start=workspace, migrated=migrated)
@@ -85,21 +149,29 @@ def test_render_documentation_outputs_google_docs_friendly_tables(tmp_path: Path
     html = render_html(doc)
     markdown = render_markdown(doc)
 
-    assert "<table>" in html
+    assert 'class="confluenceTable"' in html
+    assert 'ac:name="info"' in html
     assert "Referencias del Proyecto" in html
+    assert "Adaptador entrada REST" in html
     assert "Configurar credenciales para Azure Artifacts" in html
     assert "Generar clases desde WSDL" in html
+    assert "No aplica" in html
     assert "CCC_BANCS_BASE_URL" in html
     assert "Params (entrada bodyIn)" in html
-    assert "Cada contactosTransaccional" in html
-    assert "Ejemplo de request" in html
+    assert "Curl del Happy Path (ambiente OpenShift)" in html
+    assert "https://tnd-msa-sp-wsclientes9999-enp.apps.ocptest.uiotest.bpichinchatest.test/IntegrationBus/soap/WSClientes9999" in html
+    assert "020001" in html
+    assert "&lt;cif&gt;4667888&lt;/cif&gt;" in html
+    assert "Análisis del happy path" in html
     assert "Validaciones de Entrada" in html
     assert "Operaciones BANCS" in html
     assert "Normalizaciones" in html
+    assert "Pendiente" in html
     assert "TX 067186" in html
     assert "TX 067186 - Request" in html
-    assert "TX 067186 - Response (Query)" in html
-    assert "| # | Variable | Descripción | Valor por defecto | Fuente |" in markdown
+    assert "TX 067186 - Response" in html
+    assert "Curl del Happy Path (ambiente OpenShift)" in markdown
+    assert "020001" in markdown
 
 
 def test_documentacion_command_writes_html(tmp_path: Path) -> None:
@@ -123,4 +195,4 @@ def test_documentacion_command_writes_html(tmp_path: Path) -> None:
     assert output.exists()
     text = output.read_text(encoding="utf-8")
     assert "WSClientes9999 - Documentación de Servicio" in text
-    assert "Google Docs" in result.stdout
+    assert "Confluence" in result.stdout

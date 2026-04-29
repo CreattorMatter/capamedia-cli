@@ -4,6 +4,14 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.26] - 2026-04-29
+
+### Changed - Documentacion Confluence con happy path real
+
+- `capamedia documentacion` ahora genera HTML compatible con Confluence: macro informativa, headings H1/H2/H3, `<pre>` para codigo y tablas `confluenceTable`.
+- El documento incluye diagrama ASCII, casos de prueba textuales con estado inicial `Pendiente` y un unico curl de happy path apuntando a OpenShift Test.
+- El curl se deriva del WSDL/XSD, tests, legacy y configuracion; los datos no encontrados se marcan como `[VERIFICAR]`.
+
 ## [0.23.25] - 2026-04-29
 
 ### Fixed - Paridad documental con Word WSClientes0020

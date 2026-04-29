@@ -1,4 +1,4 @@
-# capamedia-cli - v0.23.25
+# capamedia-cli - v0.23.26
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -23,7 +23,7 @@ install -> check-install -> auth bootstrap -> init -> fabrics setup
           clone -> fabrics generate -> ai migrate -> ai doublecheck -> review
                                       |
                                       v
-                            documentacion -> Google Docs HTML
+                            documentacion -> Confluence HTML
                                       |
                                       v
                          batch pipeline / batch migrate / batch watch
@@ -317,6 +317,7 @@ capamedia-cli/
 - [x] v0.3.6 - `resume` + `retries` + agents/skills reales de Codex
 - [x] v0.3.7 - Fabrics como gate duro + `batch watch`
 - [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
+- [x] v0.23.26 - `capamedia documentacion` genera HTML Confluence con diagrama, casos textuales y curl happy path OpenShift derivado del WSDL/tests/legacy
 - [x] v0.23.25 - `capamedia documentacion` replica el esqueleto de encabezados del Word WSClientes0020
 - [x] v0.23.24 - Regla 8 BANCS endurecida: solo BUS/IIB + `invocaBancs=true`; WAS/ORQ/BUS sin BANCS quedan bloqueados si traen artefactos BANCS
 - [x] v0.23.23 - `capamedia documentacion` genera documentacion de servicio en HTML Google Docs friendly o Markdown

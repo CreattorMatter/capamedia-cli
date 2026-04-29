@@ -44,10 +44,10 @@ def generate_documentation(
     ] = None,
     output_format: Annotated[
         str,
-        typer.Option("--format", help="Formato de salida: html o md. HTML es importable en Google Docs."),
+        typer.Option("--format", help="Formato de salida: html o md. HTML es compatible con Confluence."),
     ] = "html",
 ) -> None:
-    """Genera documentacion de servicio en formato Google Docs friendly."""
+    """Genera documentacion de servicio en formato Confluence."""
     fmt = output_format.lower().strip()
     if fmt not in {"html", "md"}:
         console.print("[red]FAIL[/red] --format debe ser html o md")
@@ -80,4 +80,4 @@ def generate_documentation(
         )
     )
     if fmt == "html":
-        console.print("[dim]El HTML se puede subir/importar en Google Docs manteniendo headings y tablas.[/dim]")
+        console.print("[dim]El HTML usa headings, macros y tablas compatibles con Confluence.[/dim]")
