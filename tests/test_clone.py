@@ -11,6 +11,7 @@ from capamedia_cli.commands.clone import (
     MIGRATED_NAMESPACES,
     _clone_migrated_repos,
     _git_clone,
+    _resolve_azure_repo,
     _write_properties_report,
 )
 from capamedia_cli.core.legacy_analyzer import LegacyAnalysis, PropertiesReference
@@ -112,6 +113,44 @@ def test_clone_migrated_repos_respects_namespace_and_branch(tmp_path: Path, monk
     assert results[0].status == "cloned"
     assert results[0].branch == "feature/dev-BTHCCC-5953"
     assert branches == ["feature/dev-BTHCCC-5953"]
+
+
+def test_resolve_azure_repo_supports_was_split_repos(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[str, Path, str]] = []
+
+    def fake_git_clone(
+        repo_name: str,
+        dest: Path,
+        project_key: str = "bus",
+        shallow: bool = False,
+        no_single_branch: bool = False,
+    ) -> tuple[bool, str]:
+        calls.append((repo_name, dest, project_key))
+        if repo_name in {
+            "wsclientes0154-aplicacion",
+            "wsclientes0154-infraestructura",
+        }:
+            dest.mkdir(parents=True)
+            return (True, "")
+        return (False, "repository not found")
+
+    monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
+
+    path, project_key, repo_name = _resolve_azure_repo(
+        "wsclientes0154", tmp_path, shallow=True
+    )
+
+    assert path == tmp_path / "legacy" / "_repo"
+    assert project_key == "was"
+    assert repo_name == "wsclientes0154-aplicacion + wsclientes0154-infraestructura"
+    assert [call[0] for call in calls] == [
+        "sqb-msa-wsclientes0154",
+        "ws-wsclientes0154-was",
+        "ms-wsclientes0154-was",
+        "wsclientes0154-aplicacion",
+        "wsclientes0154-infraestructura",
+    ]
+    assert all(call[2] == "was" for call in calls[-2:])
 
 
 # ---------------------------------------------------------------------------

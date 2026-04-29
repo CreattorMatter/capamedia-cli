@@ -2,7 +2,9 @@
 
 Trae solo lo especifico del servicio:
   CWD/
-    legacy/sqb-msa-<servicio>/            (codigo legacy IIB o WAS)
+    legacy/sqb-msa-<servicio>/            (codigo legacy IIB)
+    legacy/_repo/<servicio>-aplicacion/   (codigo legacy WAS clasico)
+    legacy/_repo/<servicio>-infraestructura/
     umps/sqb-msa-umpclientes<NNNN>/       (dependencias directas)
     tx/sqb-cfg-<NNNNNN>-TX/               (contratos BANCS de cada TX invocado)
     COMPLEXITY_<servicio>.md              (reporte de analisis)
@@ -99,6 +101,8 @@ AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
     ("was", "ms-{svc}-was"),                 # WAS variante "ms"
 ]
 
+WAS_SPLIT_REPO_SUFFIXES = ("aplicacion", "infraestructura")
+
 
 # UMPs pueden vivir en distintos proyectos segun el tipo del servicio que las
 # consume:
@@ -148,6 +152,16 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
         ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
         if ok:
             return (dest, project_key, repo_name)
+    split_root = dest_root / "legacy" / "_repo"
+    split_repos: list[str] = []
+    for suffix in WAS_SPLIT_REPO_SUFFIXES:
+        repo_name = f"{svc}-{suffix}"
+        dest = split_root / repo_name
+        ok, _err = _git_clone(repo_name, dest, project_key="was", shallow=shallow)
+        if ok:
+            split_repos.append(repo_name)
+    if split_repos:
+        return (split_root, "was", " + ".join(split_repos))
     return (None, "", "")
 
 
