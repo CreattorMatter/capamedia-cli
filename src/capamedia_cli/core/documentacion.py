@@ -1,7 +1,7 @@
 """Confluence-compatible service documentation generator.
 
 The generator is deterministic: it reads the migrated project, legacy hints,
-Discovery, WSDL/XSD, tests and runtime config, then emits service
+Discovery, WSDL/XSD, service logic and runtime config, then emits service
 documentation in the WSClientes0020 format. Data not found in the inputs is
 marked as [VERIFICAR] instead of being invented.
 """
@@ -464,12 +464,30 @@ def _collect_tx_codes(migrated: Path | None, reports: str, discovery: DiscoveryE
     return sorted(values)
 
 
-def _humanize_test_name(name: str) -> str:
-    spaced = re.sub(r"(?<!^)([A-Z])", r" \1", name).replace("_", " ")
-    return spaced.strip().capitalize() or VERIFY
+def _append_test_case(tests: list[TestDoc], *, case: str, input_or_condition: str, expected: str) -> None:
+    normalized = case.lower()
+    if any(current.case.lower() == normalized for current in tests):
+        return
+    tests.append(
+        TestDoc(
+            test_id=f"TC-{len(tests) + 1:02d}",
+            case=case,
+            input_or_condition=input_or_condition,
+            expected=expected,
+        )
+    )
 
 
-def _collect_tests(migrated: Path | None, discovery: DiscoveryEntry | None, tx_codes: list[str]) -> tuple[list[TestDoc], list[str]]:
+def _collect_tests(
+    migrated: Path | None,
+    discovery: DiscoveryEntry | None,
+    tx_codes: list[str],
+    *,
+    reports: str,
+    operations: list[str],
+    header_fields: list[SchemaField],
+    body_fields: list[SchemaField],
+) -> tuple[list[TestDoc], list[str]]:
     test_classes: list[str] = []
     tests: list[TestDoc] = []
     if migrated is not None:
@@ -477,16 +495,72 @@ def _collect_tests(migrated: Path | None, discovery: DiscoveryEntry | None, tx_c
             rel = path.relative_to(migrated)
             source = str(rel).replace("\\", "/")
             test_classes.append(source)
-            text = _read(path)
-            for method in re.findall(r"(?:@Test\s+)?(?:public\s+)?void\s+([A-Za-z0-9_]+)\s*\(", text):
-                tests.append(
-                    TestDoc(
-                        test_id=f"TC-{len(tests) + 1:02d}",
-                        case=_humanize_test_name(method),
-                        input_or_condition=source,
-                        expected="Comportamiento esperado según test automatizado.",
-                    )
-                )
+    service_logic = ""
+    if migrated is not None:
+        service_logic = "\n".join(
+            _read(path)
+            for path in sorted((migrated / "src" / "main" / "java").rglob("*.java"))
+            if path.is_file()
+        )
+
+    operation = operations[0] if operations else VERIFY
+    if operation != VERIFY:
+        _append_test_case(
+            tests,
+            case=f"Happy path operacion {operation}",
+            input_or_condition="Contrato WSDL/XSD y logica del servicio",
+            expected="Debe devolver headerOut/bodyOut/error segun la logica funcional migrada.",
+        )
+
+    flattened_header = _flatten_fields(header_fields)
+    flattened_body = _flatten_fields(body_fields)
+    required_header = [field.name for field in flattened_header if not field.optional and not field.children]
+    required_body = [field.name for field in flattened_body if not field.optional and not field.children]
+    if required_header or required_body:
+        _append_test_case(
+            tests,
+            case="Validar campos obligatorios del contrato",
+            input_or_condition=(
+                "headerIn="
+                + (", ".join(required_header) or VERIFY)
+                + " | bodyIn="
+                + (", ".join(required_body) or VERIFY)
+            ),
+            expected="Debe rechazar faltantes sin depender de nombres de ServiceTest.",
+        )
+
+    logic_text = f"{reports}\n{service_logic}".lower()
+    field_names = {field.name.lower() for field in [*flattened_header, *flattened_body]}
+    if any(
+        token in logic_text
+        for token in ("validate", "validar", "valida ", "validator", "regla")
+    ):
+        _append_test_case(
+            tests,
+            case="Validar reglas funcionales del servicio",
+            input_or_condition="src/main/java y reportes de analisis",
+            expected="Debe ejecutar las reglas presentes en la logica del servicio migrado.",
+        )
+
+    if "cif" in logic_text or "cif" in field_names:
+        _append_test_case(
+            tests,
+            case="Validar CIF requerido y formato",
+            input_or_condition="bodyIn.CIF/cif",
+            expected="Debe aplicar la validacion definida por la logica del servicio.",
+        )
+
+    contact_tokens = ("telefono", "celular", "email", "correo")
+    if any(token in logic_text for token in contact_tokens) or any(
+        any(token in name for token in contact_tokens)
+        for name in field_names
+    ):
+        _append_test_case(
+            tests,
+            case="Normalizar datos de contacto",
+            input_or_condition="Campos de contacto presentes en bodyIn o reportes de analisis",
+            expected="Debe preservar el formato esperado por el backend y la respuesta SOAP.",
+        )
 
     if discovery is not None:
         for case in discovery.edge_cases:
@@ -507,6 +581,13 @@ def _collect_tests(migrated: Path | None, discovery: DiscoveryEntry | None, tx_c
                 input_or_condition=f"Invocación a ws-tx{tx}",
                 expected="Request, response, errores y timeouts trazados preservando código y mensaje BANCS.",
             )
+        )
+    if not tests:
+        _append_test_case(
+            tests,
+            case="Validar comportamiento funcional del servicio",
+            input_or_condition="Logica del servicio y contrato disponible",
+            expected="Debe completarse con evidencia funcional, no con nombres de ServiceTest.",
         )
     return tests[:80], test_classes
 
@@ -759,7 +840,15 @@ def build_service_documentation(
     wsdl_path, operations, namespace, header_fields, body_fields = _collect_wsdl_details(migrated_path, legacy_path)
     tx_codes = _collect_tx_codes(migrated_path, reports, discovery)
     env_vars = _collect_env_vars(migrated_path)
-    tests, test_classes = _collect_tests(migrated_path, discovery, tx_codes)
+    tests, test_classes = _collect_tests(
+        migrated_path,
+        discovery,
+        tx_codes,
+        reports=reports,
+        operations=operations,
+        header_fields=header_fields,
+        body_fields=body_fields,
+    )
     display_service = _display_service(service)
     endpoint = f"/IntegrationBus/soap/{display_service}" if service else "/IntegrationBus/soap/<Servicio>"
     happy_path = _build_happy_path(
@@ -964,7 +1053,7 @@ def render_html(doc: ServiceDocumentation) -> str:
     ]
     parts = [
         f"<h1>{html.escape(doc.service_name)} - Documentación de Servicio</h1>",
-        _info_macro(f"Documentación generada desde código, WSDL/XSD, configuración y pruebas. Todo dato no evidenciado queda marcado como {VERIFY}."),
+        _info_macro(f"Documentación generada desde código, WSDL/XSD, lógica del servicio y configuración. Todo dato no evidenciado queda marcado como {VERIFY}."),
         f"<p>{html.escape(doc.description)}</p>",
         "<h2>Referencias del Proyecto</h2>",
         _html_table(["#", "Tipo", "Recurso", "Descripción", "Enlace"], references),

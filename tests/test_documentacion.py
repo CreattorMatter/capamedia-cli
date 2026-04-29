@@ -15,8 +15,10 @@ from capamedia_cli.core.documentacion import (
 def _make_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "wsclientes9999"
     migrated = workspace / "destino" / "tnd-msa-sp-wsclientes9999"
+    main_java = migrated / "src" / "main" / "java" / "com" / "pichincha" / "sp" / "application"
     resources = migrated / "src" / "main" / "resources"
     tests = migrated / "src" / "test" / "java" / "com" / "pichincha" / "sp"
+    main_java.mkdir(parents=True)
     resources.mkdir(parents=True)
     tests.mkdir(parents=True)
     (workspace / "legacy" / "sqb-msa-wsclientes9999").mkdir(parents=True)
@@ -112,6 +114,10 @@ def _make_workspace(tmp_path: Path) -> Path:
         "class CustomerServiceTest { @org.junit.jupiter.api.Test void cifVacioRetornaError() {} @org.junit.jupiter.api.Test void normalizaTelefonoOk() {} }\n",
         encoding="utf-8",
     )
+    (main_java / "CustomerService.java").write_text(
+        "class CustomerService { void execute() { validarCif(); normalizarTelefono(); invocarTX067186(); } }\n",
+        encoding="utf-8",
+    )
     (workspace / "COMPLEXITY_wsclientes9999.md").write_text(
         "## Explicacion de la Logica de Negocio\n"
         "Valida CIF, normaliza telefono y llama TX067186.\n",
@@ -139,6 +145,14 @@ def test_build_service_documentation_collects_project_evidence(tmp_path: Path) -
     assert "<cif>4667888</cif>" in doc.happy_path.curl
     assert "067186" in doc.tx_codes
     assert {var.name for var in doc.env_vars} >= {"CCC_BANCS_BASE_URL", "CCC_BANCS_CONNECT_TIMEOUT"}
+    assert doc.test_classes == ["src/test/java/com/pichincha/sp/CustomerServiceTest.java"]
+    cases = {test.case for test in doc.tests}
+    assert "Cif vacio retorna error" not in cases
+    assert "Normaliza telefono ok" not in cases
+    assert any("CIF" in case for case in cases)
+    assert "Validar reglas funcionales del servicio" in cases
+    assert "Normalizar datos de contacto" in cases
+    assert any("TX067186" in case for case in cases)
 
 
 def test_render_documentation_outputs_confluence_tables_and_happy_path(tmp_path: Path) -> None:
@@ -168,6 +182,8 @@ def test_render_documentation_outputs_confluence_tables_and_happy_path(tmp_path:
     assert "Normalizaciones" in html
     assert "Pendiente" in html
     assert "TX 067186" in html
+    assert "Cif vacio retorna error" not in html
+    assert "Normaliza telefono ok" not in html
     assert "TX 067186 - Request" in html
     assert "TX 067186 - Response" in html
     assert "Curl del Happy Path (ambiente OpenShift)" in markdown
