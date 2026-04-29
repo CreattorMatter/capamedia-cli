@@ -5,7 +5,12 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from capamedia_cli.commands.discovery import _copy_spec_artifacts, _probe_spec_repo
+from capamedia_cli.commands.discovery import (
+    _copy_spec_artifacts,
+    _default_edge_case_report,
+    _local_spec_artifact_destination,
+    _probe_spec_repo,
+)
 from capamedia_cli.core.discovery import (
     DISCOVERY_WORKBOOK_NAME,
     DiscoveryEntry,
@@ -145,13 +150,15 @@ def test_probe_spec_repo_falls_back_to_service_suffix_and_copies_artifacts(tmp_p
         "WSReglas0010.wsdl",
     }
 
-    copied = _copy_spec_artifacts(probe, tmp_path / "migrated" / "src" / "test" / "resources" / "discovery" / "wsreglas0010")
+    destination = tmp_path / ".capamedia" / "discovery" / "wsreglas0010" / "specs"
+    copied = _copy_spec_artifacts(probe, destination)
 
     assert {path.name for path in copied} == {
         "GenericSOAP.xsd",
         "WSReglas0010_InlineSchema1.xsd",
         "WSReglas0010.wsdl",
     }
+    assert all(destination in path.parents for path in copied)
 
 
 def test_classify_edge_cases_detects_discovery_patterns() -> None:
@@ -185,7 +192,7 @@ def test_load_discovery_entry_by_service_and_render_markdown(tmp_path: Path) -> 
         "tx_description_validation",
     }
 
-    copied = tmp_path / "destino" / "tnd-msa-sp-wsclientes0028" / "src" / "test" / "resources" / "discovery" / "wsclientes0028" / "WSClientes0028.wsdl"
+    copied = tmp_path / ".capamedia" / "discovery" / "wsclientes0028" / "specs" / "WSClientes0028.wsdl"
     probe = DiscoverySpecProbe(
         status="ok",
         artifacts=[
@@ -201,7 +208,7 @@ def test_load_discovery_entry_by_service_and_render_markdown(tmp_path: Path) -> 
     assert "tnd-msa-sp-wsclientes0028" in markdown
     assert "Spec path resuelto" in markdown
     assert "GenericSOAP.xsd" in markdown
-    assert "src\\test\\resources" in markdown or "src/test/resources" in markdown
+    assert ".capamedia" in markdown
     assert "tx_description_validation" in markdown
     assert "<pendiente_validar>" in markdown
 
@@ -237,3 +244,20 @@ def test_detect_discovery_workspace_from_here_structure(tmp_path: Path) -> None:
     assert ctx.service_name == "wsclientes0028"
     assert ctx.legacy_path == legacy
     assert ctx.migrated_path == migrated
+
+
+def test_discovery_here_defaults_to_local_capamedia_artifacts(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy" / "sqb-msa-wsclientes0028"
+    migrated = tmp_path / "destino" / "tnd-msa-sp-wsclientes0028"
+    legacy.mkdir(parents=True)
+    migrated.mkdir(parents=True)
+
+    ctx = detect_discovery_workspace(migrated)
+    entry = DiscoveryEntry(service="WSClientes0028")
+
+    assert _local_spec_artifact_destination(ctx, entry) == (
+        tmp_path / ".capamedia" / "discovery" / "wsclientes0028" / "specs"
+    )
+    assert _default_edge_case_report(ctx, entry) == (
+        tmp_path / ".capamedia" / "reports" / "discovery-edge-cases-wsclientes0028.md"
+    )

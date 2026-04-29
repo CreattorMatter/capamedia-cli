@@ -2140,8 +2140,8 @@ def run_block_22(ctx: CheckContext) -> list[CheckResult]:
                 detail="sin decision/coverage explicita: " + ", ".join(high_pending),
                 suggested_fix=(
                     "Para cada edge case HIGH, documentar en MIGRATION_REPORT.md "
-                    "o DISCOVERY_EDGE_CASES.md la decision, archivo(s) tocados y "
-                    "prueba asociada. No dejar PENDIENTE/TBD."
+                    "o .capamedia/reports/discovery-edge-cases-*.md la decision, "
+                    "archivo(s) tocados y prueba asociada. No dejar PENDIENTE/TBD."
                 ),
             )
         )
@@ -2156,8 +2156,8 @@ def run_block_22(ctx: CheckContext) -> list[CheckResult]:
                 detail="sin decision/coverage explicita: " + ", ".join(medium_pending),
                 suggested_fix=(
                     "Para cada edge case de soporte, dejar trazabilidad en "
-                    "MIGRATION_REPORT.md o DISCOVERY_EDGE_CASES.md con decision, "
-                    "configuracion/test/handoff y estado final."
+                    "MIGRATION_REPORT.md o .capamedia/reports/discovery-edge-cases-*.md "
+                    "con decision, configuracion/test/handoff y estado final."
                 ),
             )
         )

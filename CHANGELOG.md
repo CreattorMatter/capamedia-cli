@@ -4,6 +4,14 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.29] - 2026-04-29
+
+### Fixed - Discovery sin ensuciar el repo migrado
+
+- `capamedia discovery edge-case --here` ya no copia WSDL/XSD a `destino/<repo>/src/test/resources/discovery`.
+- Los artefactos WSDL/XSD se materializan en `.capamedia/discovery/<servicio>/specs`, fuera del repo migrado oficial.
+- El reporte default ahora se genera en `.capamedia/reports/discovery-edge-cases-<servicio>.md`; Block 22 ya lee esa carpeta para mantener el loop de edge cases sin cambios versionables.
+
 ## [0.23.28] - 2026-04-29
 
 ### Fixed - Helm HPA averageValue oficial

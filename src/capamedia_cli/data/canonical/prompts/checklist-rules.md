@@ -1746,8 +1746,9 @@ grep -rnE "Discovery / edge cases|DISCOVERY_EDGE_CASES|LINK WSDL|edge_cases" \
 ```
 
 **PASS**: el reporte lista `spec_path`, `code_repo` y cada edge case detectado
-con evidencia, y `MIGRATION_REPORT.md` o `DISCOVERY_EDGE_CASES.md` contiene una
-decision explicita por codigo con archivo/test/handoff. No quedan
+con evidencia, y `MIGRATION_REPORT.md` o
+`.capamedia/reports/discovery-edge-cases-*.md` contiene una decision explicita
+por codigo con archivo/test/handoff. No quedan
 `PENDIENTE`, `TBD`, `<pendiente_validar>` ni `not_probed`.
 
 **HIGH**: Discovery tiene `LINK WSDL`/observaciones para el servicio pero el

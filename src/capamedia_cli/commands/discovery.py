@@ -21,6 +21,7 @@ from capamedia_cli.core.discovery import (
     DiscoveryEntry,
     DiscoverySpecArtifact,
     DiscoverySpecProbe,
+    DiscoveryWorkspaceContext,
     detect_discovery_workspace,
     find_discovery_workbook,
     load_discovery_entry,
@@ -173,6 +174,14 @@ def _copy_spec_artifacts(probe: DiscoverySpecProbe, destination: Path) -> list[P
     return copied
 
 
+def _local_spec_artifact_destination(context: DiscoveryWorkspaceContext, entry: DiscoveryEntry) -> Path:
+    return context.root / ".capamedia" / "discovery" / entry.service.lower() / "specs"
+
+
+def _default_edge_case_report(context: DiscoveryWorkspaceContext, entry: DiscoveryEntry) -> Path:
+    return context.root / ".capamedia" / "reports" / f"discovery-edge-cases-{entry.service.lower()}.md"
+
+
 def discovery_edge_cases(
     service_name: Annotated[
         str | None,
@@ -208,7 +217,7 @@ def discovery_edge_cases(
         bool,
         typer.Option(
             "--materialize-spec/--no-materialize-spec",
-            help="Copia WSDL/XSD encontrados a src/test/resources/discovery/<servicio> del migrado.",
+            help="Copia WSDL/XSD encontrados a .capamedia/discovery/<servicio>/specs, fuera del repo migrado.",
         ),
     ] = True,
     spec_root: Annotated[
@@ -298,22 +307,18 @@ def discovery_edge_cases(
                 )
             for artifact in probe.artifacts[:20]:
                 console.print(f"  - {artifact.kind}: {artifact.path}")
-            if materialize_spec and context and context.migrated_path:
-                service_key = entry.service.lower()
-                destination = context.migrated_path / "src" / "test" / "resources" / "discovery" / service_key
+            if materialize_spec and context:
+                destination = _local_spec_artifact_destination(context, entry)
                 copied_artifacts = _copy_spec_artifacts(probe, destination)
                 if copied_artifacts:
                     console.print(
-                        f"[green]OK[/green] {len(copied_artifacts)} WSDL/XSD copiado(s) al migrado: {destination}"
+                        f"[green]OK[/green] {len(copied_artifacts)} WSDL/XSD copiado(s) a cache local: {destination}"
                     )
         else:
             console.print(f"[yellow]SPEC {probe.status.upper()}[/yellow] {probe.error}")
 
     if output is None and here and context:
-        if context.migrated_path:
-            output = context.migrated_path / "DISCOVERY_EDGE_CASES.md"
-        else:
-            output = context.root / f"DISCOVERY_EDGE_CASES_{entry.service.lower()}.md"
+        output = _default_edge_case_report(context, entry)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
