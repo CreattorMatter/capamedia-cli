@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from openpyxl import Workbook
 
+from capamedia_cli.commands.discovery import _copy_spec_artifacts, _probe_spec_repo
 from capamedia_cli.core.discovery import (
     DISCOVERY_WORKBOOK_NAME,
+    DiscoveryEntry,
+    DiscoverySpecArtifact,
+    DiscoverySpecProbe,
     bundled_discovery_workbook,
     classify_edge_cases,
     detect_discovery_workspace,
@@ -13,7 +18,10 @@ from capamedia_cli.core.discovery import (
     load_discovery_entry,
     parse_azure_path,
     parse_azure_repo_name,
+    rank_spec_candidate,
     render_discovery_markdown,
+    service_suffix_key,
+    spec_parent_path,
 )
 
 
@@ -95,6 +103,57 @@ def test_parse_azure_repo_and_path() -> None:
     assert parse_azure_path(url) == "/sp - Soporte/tnd-msa-sp-wsclientes0028"
 
 
+def test_spec_path_fuzzy_helpers_handle_acronym_rename() -> None:
+    broken_path = "/sp - Soporte/mdw-msa-sp-wsreglas0010"
+
+    assert spec_parent_path(broken_path) == "sp - Soporte"
+    assert service_suffix_key(broken_path) == "wsreglas0010"
+    assert rank_spec_candidate("csg-msa-sp-wsreglas0010", "wsreglas0010", "mdw") > 0
+    assert rank_spec_candidate("csg-msa-sp-wsclientes0010", "wsreglas0010", "mdw") == 0
+
+
+def test_probe_spec_repo_falls_back_to_service_suffix_and_copies_artifacts(tmp_path: Path) -> None:
+    source_repo = tmp_path / "source-specs"
+    spec_dir = source_repo / "sp - Soporte" / "csg-msa-sp-wsreglas0010"
+    spec_dir.mkdir(parents=True)
+    for name in ("GenericSOAP.xsd", "WSReglas0010_InlineSchema1.xsd", "WSReglas0010.wsdl"):
+        (spec_dir / name).write_text("<xml/>", encoding="utf-8")
+
+    subprocess.run(["git", "init"], cwd=source_repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=source_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=source_repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=source_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "specs"], cwd=source_repo, check=True, capture_output=True, text=True)
+
+    entry = DiscoveryEntry(
+        service="WSReglas0010",
+        migrated_name="mdw-msa-sp-wsreglas0010",
+        acronym="mdw",
+        link_wsdl=source_repo.resolve().as_uri() + "?path=/sp%20-%20Soporte/mdw-msa-sp-wsreglas0010",
+        spec_repo="spec",
+        spec_path="/sp - Soporte/mdw-msa-sp-wsreglas0010",
+    )
+
+    probe = _probe_spec_repo(entry, tmp_path / "cache")
+
+    assert probe.status == "ok"
+    assert probe.requested_path == "/sp - Soporte/mdw-msa-sp-wsreglas0010"
+    assert probe.resolved_path == "/sp - Soporte/csg-msa-sp-wsreglas0010"
+    assert {artifact.path.name for artifact in probe.artifacts} == {
+        "GenericSOAP.xsd",
+        "WSReglas0010_InlineSchema1.xsd",
+        "WSReglas0010.wsdl",
+    }
+
+    copied = _copy_spec_artifacts(probe, tmp_path / "migrated" / "src" / "test" / "resources" / "discovery" / "wsreglas0010")
+
+    assert {path.name for path in copied} == {
+        "GenericSOAP.xsd",
+        "WSReglas0010_InlineSchema1.xsd",
+        "WSReglas0010.wsdl",
+    }
+
+
 def test_classify_edge_cases_detects_discovery_patterns() -> None:
     cases = classify_edge_cases(
         integrations="CE_EVENTOS\nUMPClientes0020 -> TX067050",
@@ -126,10 +185,23 @@ def test_load_discovery_entry_by_service_and_render_markdown(tmp_path: Path) -> 
         "tx_description_validation",
     }
 
-    markdown = render_discovery_markdown(entry)
+    copied = tmp_path / "destino" / "tnd-msa-sp-wsclientes0028" / "src" / "test" / "resources" / "discovery" / "wsclientes0028" / "WSClientes0028.wsdl"
+    probe = DiscoverySpecProbe(
+        status="ok",
+        artifacts=[
+            DiscoverySpecArtifact(path=tmp_path / "GenericSOAP.xsd", kind="xsd"),
+            DiscoverySpecArtifact(path=tmp_path / "WSClientes0028.wsdl", kind="wsdl"),
+        ],
+        resolved_path="/sp - Soporte/csg-msa-sp-wsclientes0028",
+        requested_path="/sp - Soporte/mdw-msa-sp-wsclientes0028",
+    )
+    markdown = render_discovery_markdown(entry, spec_probe=probe, copied_artifacts=[copied])
     assert "## Discovery / edge cases" in markdown
     assert "DISCOVERY_EDGE_CASES:" in markdown
     assert "tnd-msa-sp-wsclientes0028" in markdown
+    assert "Spec path resuelto" in markdown
+    assert "GenericSOAP.xsd" in markdown
+    assert "src\\test\\resources" in markdown or "src/test/resources" in markdown
     assert "tx_description_validation" in markdown
     assert "<pendiente_validar>" in markdown
 

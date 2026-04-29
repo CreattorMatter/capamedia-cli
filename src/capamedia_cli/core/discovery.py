@@ -61,6 +61,8 @@ class DiscoverySpecProbe:
     status: str
     repo_dir: Path | None = None
     artifacts: list[DiscoverySpecArtifact] = field(default_factory=list)
+    resolved_path: str = ""
+    requested_path: str = ""
     error: str = ""
 
 
@@ -156,6 +158,41 @@ def _text(value: object) -> str:
 def _service_from_text(text: str) -> str:
     match = _SERVICE_RE.search(text)
     return match.group(0).lower() if match else ""
+
+
+def service_suffix_key(value: str) -> str:
+    """Return the stable service key used for fuzzy spec lookup.
+
+    Azure spec folders can be renamed from one acronym to another, for example
+    `mdw-msa-sp-wsreglas0010` -> `csg-msa-sp-wsreglas0010`. The `ws...0000`
+    suffix is the durable identifier.
+    """
+    return _service_from_text(value)
+
+
+def spec_parent_path(spec_path: str) -> str:
+    """Return the parent folder that can be sparse-checked out for lookup."""
+    cleaned = spec_path.strip().strip("/")
+    if "/" not in cleaned:
+        return ""
+    return cleaned.rsplit("/", 1)[0]
+
+
+def rank_spec_candidate(candidate_name: str, service_key: str, acronym: str = "") -> int:
+    """Score a spec folder candidate for a service suffix.
+
+    Higher is better. Exact suffix match wins even if the acronym differs.
+    """
+    normalized_candidate = _norm(candidate_name)
+    normalized_service = _norm(service_key)
+    if not normalized_service or normalized_service not in normalized_candidate:
+        return 0
+    score = 80
+    if normalized_candidate.endswith(normalized_service):
+        score += 20
+    if acronym and _norm(acronym) and normalized_candidate.startswith(_norm(acronym)):
+        score += 5
+    return score
 
 
 def _find_child_containing_service(parent: Path, service_name: str) -> Path | None:
@@ -443,7 +480,12 @@ def load_discovery_entry(
     return None
 
 
-def render_discovery_markdown(entry: DiscoveryEntry) -> str:
+def render_discovery_markdown(
+    entry: DiscoveryEntry,
+    *,
+    spec_probe: DiscoverySpecProbe | None = None,
+    copied_artifacts: list[Path] | None = None,
+) -> str:
     lines: list[str] = []
     lines.append("## Discovery / edge cases")
     lines.append("")
@@ -453,7 +495,11 @@ def render_discovery_markdown(entry: DiscoveryEntry) -> str:
     lines.append(f"- **Tipo / Tecnologia:** `{entry.service_type or '?'} / {entry.technology or '?'}`")
     lines.append(f"- **Complejidad discovery:** `{entry.complexity or '?'}` (peso `{entry.service_weight or '?'}`)")
     lines.append(f"- **Spec repo:** `{entry.spec_repo or '?'}`")
-    lines.append(f"- **Spec path:** `{entry.spec_path or '?'}`")
+    resolved_spec_path = spec_probe.resolved_path if spec_probe and spec_probe.resolved_path else entry.spec_path
+    lines.append(f"- **Spec path:** `{resolved_spec_path or '?'}`")
+    if spec_probe and spec_probe.requested_path and spec_probe.resolved_path and spec_probe.requested_path != spec_probe.resolved_path:
+        lines.append(f"- **Spec path solicitado:** `{spec_probe.requested_path}`")
+        lines.append(f"- **Spec path resuelto:** `{spec_probe.resolved_path}`")
     lines.append(f"- **Code repo:** `{entry.code_repo or '?'}`")
     lines.append("")
 
@@ -476,8 +522,14 @@ def render_discovery_markdown(entry: DiscoveryEntry) -> str:
     lines.append("")
     lines.append("```text")
     lines.append("DISCOVERY_EDGE_CASES:")
-    lines.append(f"- spec_path: {entry.spec_path or '<not_provided>'}")
+    lines.append(f"- spec_path: {resolved_spec_path or '<not_provided>'}")
     lines.append(f"- code_repo: {entry.code_repo or '<not_provided>'}")
+    if spec_probe and spec_probe.artifacts:
+        artifact_names = ", ".join(artifact.path.name for artifact in spec_probe.artifacts)
+        lines.append(f"- spec_artifacts: {artifact_names}")
+    if copied_artifacts:
+        copied_names = ", ".join(str(path) for path in copied_artifacts)
+        lines.append(f"- copied_artifacts: {copied_names}")
     edge_codes = ", ".join(case.code for case in entry.edge_cases) or "<none>"
     lines.append(f"- edge_cases: {edge_codes}")
     lines.append("- test_case_source: not_probed")
@@ -497,6 +549,33 @@ def render_discovery_markdown(entry: DiscoveryEntry) -> str:
 
     if entry.edge_cases:
         lines.append("### Discovery edge-case coverage")
+        lines.append("")
+
+    if spec_probe:
+        lines.append("### Artefactos WSDL/XSD")
+        lines.append("")
+        lines.append(f"- Estado probe: `{spec_probe.status}`")
+        if spec_probe.requested_path:
+            lines.append(f"- Path solicitado: `{spec_probe.requested_path}`")
+        if spec_probe.resolved_path:
+            lines.append(f"- Path resuelto: `{spec_probe.resolved_path}`")
+        if spec_probe.error:
+            lines.append(f"- Error: `{spec_probe.error}`")
+        if spec_probe.artifacts:
+            lines.append("")
+            lines.append("| Archivo | Tipo | Origen |")
+            lines.append("|---|---|---|")
+            for artifact in spec_probe.artifacts:
+                lines.append(f"| `{artifact.path.name}` | `{artifact.kind}` | `{artifact.path}` |")
+        else:
+            lines.append("")
+            lines.append("No se materializaron artefactos WSDL/XSD.")
+        if copied_artifacts:
+            lines.append("")
+            lines.append("#### Copiados al servicio migrado")
+            lines.append("")
+            for path in copied_artifacts:
+                lines.append(f"- `{path}`")
         lines.append("")
         lines.append("| Codigo | Decision | Implementacion / test |")
         lines.append("|---|---|---|")

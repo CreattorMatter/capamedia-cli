@@ -228,6 +228,7 @@ def _discovery_report_files(workspace_root: Path, migrated_path: Path) -> list[P
             [
                 "MIGRATION_REPORT.md",
                 "README.md",
+                "DISCOVERY_EDGE_CASES*.md",
                 "CHECKLIST_*.md",
                 "src/test/**/*.java",
             ],

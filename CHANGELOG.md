@@ -4,6 +4,15 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.27] - 2026-04-29
+
+### Changed - Discovery specs resiliente por sufijo WS
+
+- `capamedia discovery edge-case --here` ahora activa el probe de specs, corrige paths rotos por cambio de acronimo (`mdw` vs `csg`) usando el sufijo estable del servicio, por ejemplo `wsreglas0010`.
+- El comando copia los `.wsdl/.xsd` encontrados a `src/test/resources/discovery/<servicio>/` dentro del proyecto migrado.
+- Con `--here`, si no se pasa `--output`, genera `DISCOVERY_EDGE_CASES.md` en el migrado para que el checklist lea los casos de borde.
+- Block 22 tambien lee `DISCOVERY_EDGE_CASES*.md` desde la raiz del proyecto migrado.
+
 ## [0.23.26] - 2026-04-29
 
 ### Changed - Documentacion Confluence con happy path real
