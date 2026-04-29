@@ -4,6 +4,14 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.25] - 2026-04-29
+
+### Fixed - Paridad documental con Word WSClientes0020
+
+- `capamedia documentacion` ahora emite el mismo esqueleto de encabezados H1/H2/H3 que el documento de referencia `WSClientes0020 - Documentación de Servicio`.
+- El generador separa las secciones de credenciales, WSDL, compilación, variables por categoría, ejecución, params/bodyIn, ejemplos request/response, casos de prueba y TX request/response.
+- Los tests validan los encabezados críticos para evitar que el formato vuelva a degradarse.
+
 ## [0.23.24] - 2026-04-29
 
 ### Fixed - BANCS condicionado por matriz MCP

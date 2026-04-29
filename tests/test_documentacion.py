@@ -87,9 +87,19 @@ def test_render_documentation_outputs_google_docs_friendly_tables(tmp_path: Path
 
     assert "<table>" in html
     assert "Referencias del Proyecto" in html
+    assert "Configurar credenciales para Azure Artifacts" in html
+    assert "Generar clases desde WSDL" in html
     assert "CCC_BANCS_BASE_URL" in html
+    assert "Params (entrada bodyIn)" in html
+    assert "Cada contactosTransaccional" in html
+    assert "Ejemplo de request" in html
+    assert "Validaciones de Entrada" in html
+    assert "Operaciones BANCS" in html
+    assert "Normalizaciones" in html
     assert "TX 067186" in html
-    assert "| # | Variable | Descripcion | Valor por defecto | Fuente |" in markdown
+    assert "TX 067186 - Request" in html
+    assert "TX 067186 - Response (Query)" in html
+    assert "| # | Variable | Descripción | Valor por defecto | Fuente |" in markdown
 
 
 def test_documentacion_command_writes_html(tmp_path: Path) -> None:
@@ -112,5 +122,5 @@ def test_documentacion_command_writes_html(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert output.exists()
     text = output.read_text(encoding="utf-8")
-    assert "WSClientes9999 - Documentacion de Servicio" in text
+    assert "WSClientes9999 - Documentación de Servicio" in text
     assert "Google Docs" in result.stdout

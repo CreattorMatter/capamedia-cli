@@ -198,7 +198,7 @@ def _description_from_sources(service_name: str, migrated_name: str, discovery: 
         )
     return (
         f"Microservicio {migrated_name or service_name} migrado a arquitectura hexagonal "
-        "para Banco Pichincha. Completar la descripcion funcional con evidencia del ANALISIS."
+        "para Banco Pichincha. Completar la descripción funcional con evidencia del ANALISIS."
     )
 
 
@@ -348,7 +348,7 @@ def _collect_tests(migrated: Path | None, discovery: DiscoveryEntry | None, tx_c
         tests.append(
             TestDoc(
                 test_id=f"TX-{tx}",
-                case=f"Operacion BANCS TX{tx}",
+                case=f"Operación BANCS TX{tx}",
                 input_or_condition=f"Invocacion a ws-tx{tx}",
                 expected="Request, response, errores y timeouts trazados",
                 status="Verificar cobertura",
@@ -422,8 +422,9 @@ def _md_table(headers: list[str], rows: list[list[str]]) -> str:
 
 def render_markdown(doc: ServiceDocumentation) -> str:
     discovery = doc.discovery
+    tx_label = f"TX{doc.tx_codes[0]}" if doc.tx_codes else "TX"
     lines: list[str] = [
-        f"# {doc.service_name} - Documentacion de Servicio",
+        f"# {doc.service_name} - Documentación de Servicio",
         "",
         f"# {doc.service_name}",
         f"## {doc.migrated_name}",
@@ -433,22 +434,22 @@ def render_markdown(doc: ServiceDocumentation) -> str:
         "## Referencias del Proyecto",
         "",
         _md_table(
-            ["#", "Tipo", "Recurso", "Descripcion", "Enlace"],
+            ["#", "Tipo", "Recurso", "Descripción", "Enlace"],
             [
-                ["1", "Repositorio", "Codigo fuente del servicio", doc.migrated_name, f"https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/{doc.migrated_name}"],
-                ["2", "Legacy", "Codigo fuente original", discovery.code_repo if discovery and discovery.code_repo else (doc.legacy_path.name if doc.legacy_path else "-"), discovery.link_code if discovery and discovery.link_code else "-"],
+                ["1", "Repositorio", "Código fuente del servicio", doc.migrated_name, f"https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/{doc.migrated_name}"],
+                ["2", "Legacy", "Código fuente original", discovery.code_repo if discovery and discovery.code_repo else (doc.legacy_path.name if doc.legacy_path else "-"), discovery.link_code if discovery and discovery.link_code else "-"],
                 ["3", "Spec", "Especificacion WSDL/casos", discovery.spec_path if discovery and discovery.spec_path else "-", discovery.link_wsdl if discovery and discovery.link_wsdl else "-"],
             ],
         ),
         "",
-        "## Tecnologias",
+        "## Tecnologías",
         "",
         f"- Lenguaje: {doc.java_version}",
-        f"- Construccion y gestion de dependencias: Gradle {doc.gradle_version or '(ver wrapper)'}",
+        f"- Construcción y gestión de dependencias: Gradle {doc.gradle_version or '(ver wrapper)'}",
         f"- Framework: {doc.spring_boot_version or 'Spring Boot'}",
         f"- Web: {doc.framework or 'Spring Boot'}",
         "- Arquitectura: Hexagonal (Ports & Adapters)",
-        "- Cobertura de codigo: JaCoCo minimo 75% de instrucciones",
+        "- Cobertura de código: JaCoCo mínimo 75% de instrucciones",
         "- Testing: JUnit 5 + Mockito",
         "",
         "## Arquitectura del Microservicio",
@@ -456,7 +457,7 @@ def render_markdown(doc: ServiceDocumentation) -> str:
         f"El microservicio `{doc.migrated_name}` expone `{doc.endpoint_path}` y aplica arquitectura hexagonal.",
         f"Origen legacy detectado: `{doc.source_kind or 'NO EVIDENCE'}`.",
         "",
-        "## Configuracion de Entorno de Desarrollo",
+        "## Configuración de Entorno de Desarrollo",
         "",
         "### Prerrequisitos",
         "",
@@ -465,26 +466,49 @@ def render_markdown(doc: ServiceDocumentation) -> str:
         "- Acceso a Azure Artifacts",
         "- Variables `ARTIFACT_USERNAME` y `ARTIFACT_TOKEN` configuradas",
         "",
-        "### Comandos base",
+        "### Configurar credenciales para Azure Artifacts",
+        "",
+        "```bash",
+        "export ARTIFACT_USERNAME=<usuario>",
+        "export ARTIFACT_TOKEN=<token>",
+        "```",
+        "",
+        "### Generar clases desde WSDL",
         "",
         "```bash",
         "./gradlew generateJavaFromWsdl",
+        "```",
+        "",
+        "### Compilar sin ejecutar tests",
+        "",
+        "```bash",
         "./gradlew clean build -x test",
-        "./gradlew test jacocoTestReport",
         "```",
         "",
         "## Variables dentro del Vault",
         "",
     ]
     vault_rows = [[v.name, v.description, v.source] for v in doc.env_vars if v.vault]
-    lines.append(_md_table(["Variable", "Descripcion", "Fuente"], vault_rows) if vault_rows else "No se detectaron variables de secreto por nombre.")
+    lines.append(_md_table(["Variable", "Descripción", "Fuente"], vault_rows) if vault_rows else "No se detectaron variables de secreto por nombre.")
     lines.extend(["", "## Variables en dev.yml y application.yml", ""])
     env_rows = [[str(i + 1), v.name, v.description, v.default or "(sin default)", v.source] for i, v in enumerate(doc.env_vars)]
-    lines.append(_md_table(["#", "Variable", "Descripcion", "Valor por defecto", "Fuente"], env_rows) if env_rows else "No se detectaron variables `${CCC_*}`.")
+    lines.append("Las siguientes variables se configuran en Helm y se referencian desde `application.yml`.")
+    phone_rows = [row for row in env_rows if "PHONE" in row[1] or "CEL" in row[1]]
+    bancs_rows = [row for row in env_rows if "BANCS" in row[1] and "CIRCUIT_BREAKER" not in row[1]]
+    cb_rows = [row for row in env_rows if "CIRCUIT_BREAKER" in row[1] or "RESILIENCE" in row[1]]
+    log_rows = [row for row in env_rows if "LOG" in row[1] or "PAYLOAD" in row[1] or "TRACE" in row[1]]
+    lines.extend(["", "### Normalización de Teléfono", ""])
+    lines.append(_md_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], phone_rows) if phone_rows else "No se detectaron variables específicas de teléfono.")
+    lines.extend(["", f"### Servicio Bancs API Client ({tx_label})", ""])
+    lines.append(_md_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], bancs_rows) if bancs_rows else "No se detectaron variables Bancs.")
+    lines.extend(["", "### Circuit Breaker (Resilience4j)", ""])
+    lines.append(_md_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], cb_rows) if cb_rows else "No se detectaron variables de circuit breaker.")
+    lines.extend(["", "### Logging", ""])
+    lines.append(_md_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], log_rows) if log_rows else "No se detectaron variables de logging.")
     lines.extend(
         [
             "",
-            "## Como Ejecutar",
+            "## Cómo Ejecutar",
             "",
             "### Ejecutar localmente",
             "",
@@ -496,56 +520,102 @@ def render_markdown(doc: ServiceDocumentation) -> str:
             "- Health: `http://localhost:8080/actuator/health`",
             f"- Endpoint SOAP: `http://localhost:8080{doc.endpoint_path}`",
             "",
+            "### Ejecutar en puerto alternativo (si 8080 está en uso)",
+            "",
+            "```bash",
+            "./gradlew bootRun --args='--server.port=8081'",
+            "```",
+            "",
+            "### Verificar que el servicio está activo",
+            "",
+            "```bash",
+            "curl http://localhost:8080/actuator/health",
+            "```",
+            "",
             "## API Endpoints",
             "",
             f"### SOAP - POST {doc.endpoint_path}",
             "",
             f"- Endpoint: `http://localhost:8080{doc.endpoint_path}`",
-            "- Metodo: POST - Content-Type: `text/xml`, `application/xml` o `application/soap+xml`",
+            "- Método: POST - Content-Type: `text/xml`, `application/xml` o `application/soap+xml`",
             f"- Namespace: `{doc.namespace or 'NO EVIDENCE'}`",
             f"- Operaciones: `{', '.join(doc.operations) if doc.operations else 'NO EVIDENCE'}`",
+            "",
+            "### Params (entrada bodyIn)",
+            "",
+            _md_table(
+                ["#", "Campo", "Tipo", "Obligatorio", "Descripción"],
+                [["1", "bodyIn", "object", "Si", "Estructura de entrada segun WSDL/XSD legacy."]],
+            ),
+            "",
+            "### Cada contactosTransaccional",
+            "",
+            _md_table(
+                ["#", "Campo", "Tipo", "Obligatorio", "Descripción"],
+                [["1", "<campo>", "string", "NO EVIDENCE", "Completar desde ANALISIS/WSDL cuando aplique."]],
+            ),
             "",
             "### Endpoints Consumidos",
             "",
         ]
     )
-    tx_rows = [[str(i + 1), f"Bancs TX{tx}", f"ws-tx{tx}", "Operacion BANCS detectada en codigo/reportes"] for i, tx in enumerate(doc.tx_codes)]
-    lines.append(_md_table(["#", "Servicio", "URL / Transaccion", "Descripcion"], tx_rows) if tx_rows else "No se detectaron TX BANCS.")
-    lines.extend(["", "## Explicacion de la Logica de Negocio", ""])
+    tx_rows = [[str(i + 1), f"Bancs TX{tx}", f"ws-tx{tx}", "Operación BANCS detectada en código/reportes"] for i, tx in enumerate(doc.tx_codes)]
+    lines.append(_md_table(["#", "Servicio", "URL / Transacción", "Descripción"], tx_rows) if tx_rows else "No se detectaron TX BANCS.")
+    lines.extend(["", "## Explicación de la Lógica de Negocio", ""])
     if doc.report_excerpt:
         lines.append(doc.report_excerpt)
     else:
         lines.append(doc.description)
     if discovery and discovery.edge_cases:
         lines.extend(["", "### Discovery edge cases", ""])
-        lines.append(_md_table(["Codigo", "Severidad", "Evidencia"], [[case.code, case.severity, case.evidence] for case in discovery.edge_cases]))
+        lines.append(_md_table(["Código", "Severidad", "Evidencia"], [[case.code, case.severity, case.evidence] for case in discovery.edge_cases]))
     lines.extend(
         [
             "",
             "## Resultado de la API",
             "",
-            "La operacion retorna HTTP 200 para respuestas de negocio y estructura `<error>` para codigos funcionales. Los errores tecnicos inesperados deben seguir el manejo definido por el stack migrado.",
+            "La operación retorna HTTP 200 para respuestas de negocio y estructura `<error>` para códigos funcionales. Los errores técnicos inesperados deben seguir el manejo definido por el stack migrado.",
+            "",
+            "### Ejemplo de request",
+            "",
+            "```xml",
+            "<soapenv:Envelope>",
+            "  <soapenv:Body>",
+            "    <!-- Request segun WSDL/XSD legacy -->",
+            "  </soapenv:Body>",
+            "</soapenv:Envelope>",
+            "```",
+            "",
+            "### Ejemplo de response",
+            "",
+            "```xml",
+            "<soapenv:Envelope>",
+            "  <soapenv:Body>",
+            "    <!-- Response segun contrato migrado -->",
+            "  </soapenv:Body>",
+            "</soapenv:Envelope>",
+            "```",
             "",
             "## Estructura del Resultado de la API",
             "",
-            "### error - Resultado de la Operacion",
+            "### error - Resultado de la Operación",
             "",
             _md_table(
-                ["#", "Campo", "Descripcion"],
+                ["#", "Campo", "Descripción"],
                 [
-                    ["1", "codigo", "Codigo de resultado o error."],
-                    ["2", "mensaje", "Mensaje tecnico/funcional."],
+                    ["1", "codigo", "Código de resultado o error."],
+                    ["2", "mensaje", "Mensaje técnico/funcional."],
                     ["3", "mensajeNegocio", "Campo reservado para DataPower; no poblar con valor real."],
                     ["4", "tipo", "INFO, ERROR o FATAL segun estructura oficial."],
-                    ["5", "recurso", f"{doc.service_name}/<Operacion>."],
-                    ["6", "componente", "Servicio, metodo o TX segun origen del error."],
-                    ["7", "backend", "Codigo backend oficial."],
+                    ["5", "recurso", f"{doc.service_name}/<Operación>."],
+                    ["6", "componente", "Servicio, método o TX según origen del error."],
+                    ["7", "backend", "Código backend oficial."],
                 ],
             ),
             "",
             "## Pruebas",
             "",
-            "Las pruebas se ejecutan con JUnit 5 y la cobertura minima requerida es 75% de instrucciones.",
+            "Las pruebas se ejecutan con JUnit 5 y la cobertura mínima requerida es 75% de instrucciones.",
         ]
     )
     if doc.test_classes:
@@ -553,13 +623,21 @@ def render_markdown(doc: ServiceDocumentation) -> str:
         lines.extend(f"- `{klass}`" for klass in doc.test_classes)
     lines.extend(["", "## Casos de Pruebas", ""])
     test_rows = [[t.test_id, t.case, t.input_or_condition, t.expected, t.status] for t in doc.tests]
-    lines.append(_md_table(["ID", "Caso", "Entrada/Condicion", "Resultado esperado", "Estado"], test_rows) if test_rows else "No se detectaron pruebas automaticas ni edge cases Discovery.")
+    validation_rows = [row for row in test_rows if "valid" in row[1].lower() or "cif" in row[1].lower() or row[0].startswith("EC-")]
+    tx_test_rows = [row for row in test_rows if row[0].startswith("TX-") or "bancs" in row[1].lower()]
+    normalization_rows = [row for row in test_rows if "normal" in row[1].lower() or "telefono" in row[1].lower() or "email" in row[1].lower()]
+    lines.extend(["", "### Validaciones de Entrada", ""])
+    lines.append(_md_table(["ID", "Caso", "Entrada", "Resultado esperado", "Estado"], validation_rows) if validation_rows else "No se detectaron tests específicos de validación de entrada.")
+    lines.extend(["", "### Operaciones BANCS", ""])
+    lines.append(_md_table(["ID", "Caso", "Condición", "Resultado esperado", "Estado"], tx_test_rows) if tx_test_rows else "No se detectaron tests específicos de operaciones BANCS.")
+    lines.extend(["", "### Normalizaciones", ""])
+    lines.append(_md_table(["ID", "Caso", "Entrada", "Resultado esperado", "Estado"], normalization_rows) if normalization_rows else "No se detectaron tests específicos de normalización.")
     lines.extend(["", "## TX BANCS - Mapeo de Campos", ""])
     if doc.tx_codes:
         for tx in doc.tx_codes:
             lines.extend(
                 [
-                    f"### TX {tx} - Request/Response",
+                    f"### TX {tx} - Request",
                     "",
                     _md_table(
                         ["Campo", "Valor", "Fijo/Dinamico"],
@@ -567,6 +645,17 @@ def render_markdown(doc: ServiceDocumentation) -> str:
                             ["transactionId", tx, "Fijo"],
                             ["request", "Mapeo segun ANALISIS/WSDL/TX", "Dinamico"],
                             ["response", "Mapeo segun respuesta BANCS", "Dinamico"],
+                        ],
+                    ),
+                    "",
+                    f"### TX {tx} - Response (Query)",
+                    "",
+                    _md_table(
+                        ["Campo BANCS", "Descripción"],
+                        [
+                            ["codigo", "Código de respuesta BANCS."],
+                            ["mensaje", "Mensaje de respuesta BANCS."],
+                            ["body", "Estructura segun TX y Core Adapter."],
                         ],
                     ),
                     "",
@@ -623,61 +712,105 @@ def _markdown_to_html_fragment(markdown: str) -> str:
 
 def render_html(doc: ServiceDocumentation) -> str:
     discovery = doc.discovery
+    tx_label = f"TX{doc.tx_codes[0]}" if doc.tx_codes else "TX"
     vault_rows = [[v.name, v.description, v.source] for v in doc.env_vars if v.vault]
     env_rows = [[str(i + 1), v.name, v.description, v.default or "(sin default)", v.source] for i, v in enumerate(doc.env_vars)]
-    tx_rows = [[str(i + 1), f"Bancs TX{tx}", f"ws-tx{tx}", "Operacion BANCS detectada en codigo/reportes"] for i, tx in enumerate(doc.tx_codes)]
+    tx_rows = [[str(i + 1), f"Bancs TX{tx}", f"ws-tx{tx}", "Operación BANCS detectada en código/reportes"] for i, tx in enumerate(doc.tx_codes)]
     test_rows = [[t.test_id, t.case, t.input_or_condition, t.expected, t.status] for t in doc.tests]
+    phone_rows = [row for row in env_rows if "PHONE" in row[1] or "CEL" in row[1]]
+    bancs_rows = [row for row in env_rows if "BANCS" in row[1] and "CIRCUIT_BREAKER" not in row[1]]
+    cb_rows = [row for row in env_rows if "CIRCUIT_BREAKER" in row[1] or "RESILIENCE" in row[1]]
+    log_rows = [row for row in env_rows if "LOG" in row[1] or "PAYLOAD" in row[1] or "TRACE" in row[1]]
+    validation_rows = [
+        row for row in test_rows
+        if "valid" in row[1].lower() or "cif" in row[1].lower() or row[0].startswith("EC-")
+    ]
+    tx_test_rows = [row for row in test_rows if row[0].startswith("TX-") or "bancs" in row[1].lower()]
+    normalization_rows = [
+        row for row in test_rows
+        if "normal" in row[1].lower() or "telefono" in row[1].lower() or "email" in row[1].lower()
+    ]
 
     parts: list[str] = [
-        f"<h1>{html.escape(doc.service_name)} - Documentacion de Servicio</h1>",
+        f"<h1>{html.escape(doc.service_name)} - Documentación de Servicio</h1>",
         f"<h1>{html.escape(doc.service_name)}</h1>",
         f"<h2>{html.escape(doc.migrated_name)}</h2>",
         f"<p>{html.escape(doc.description)}</p>",
         "<h2>Referencias del Proyecto</h2>",
         _html_table(
-            ["#", "Tipo", "Recurso", "Descripcion", "Enlace"],
+            ["#", "Tipo", "Recurso", "Descripción", "Enlace"],
             [
-                ["1", "Repositorio", "Codigo fuente del servicio", doc.migrated_name, f"https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/{doc.migrated_name}"],
-                ["2", "Legacy", "Codigo fuente original", discovery.code_repo if discovery and discovery.code_repo else (doc.legacy_path.name if doc.legacy_path else "-"), discovery.link_code if discovery and discovery.link_code else "-"],
+                ["1", "Repositorio", "Código fuente del servicio", doc.migrated_name, f"https://dev.azure.com/BancoPichinchaEC/tpl-middleware/_git/{doc.migrated_name}"],
+                ["2", "Legacy", "Código fuente original", discovery.code_repo if discovery and discovery.code_repo else (doc.legacy_path.name if doc.legacy_path else "-"), discovery.link_code if discovery and discovery.link_code else "-"],
                 ["3", "Spec", "Especificacion WSDL/casos", discovery.spec_path if discovery and discovery.spec_path else "-", discovery.link_wsdl if discovery and discovery.link_wsdl else "-"],
             ],
         ),
-        "<h2>Tecnologias</h2>",
+        "<h2>Tecnologías</h2>",
         "<ul>",
         f"<li>Lenguaje: {html.escape(doc.java_version)}</li>",
-        f"<li>Construccion y gestion de dependencias: Gradle {html.escape(doc.gradle_version or '(ver wrapper)')}</li>",
+        f"<li>Construcción y gestión de dependencias: Gradle {html.escape(doc.gradle_version or '(ver wrapper)')}</li>",
         f"<li>Framework: {html.escape(doc.spring_boot_version or 'Spring Boot')}</li>",
         f"<li>Web: {html.escape(doc.framework or 'Spring Boot')}</li>",
         "<li>Arquitectura: Hexagonal (Ports & Adapters)</li>",
-        "<li>Cobertura de codigo: JaCoCo minimo 75% de instrucciones</li>",
+        "<li>Cobertura de código: JaCoCo mínimo 75% de instrucciones</li>",
         "<li>Testing: JUnit 5 + Mockito</li>",
         "</ul>",
         "<h2>Arquitectura del Microservicio</h2>",
         f"<p>El microservicio <code>{html.escape(doc.migrated_name)}</code> expone <code>{html.escape(doc.endpoint_path)}</code> y aplica arquitectura hexagonal.</p>",
         f"<p>Origen legacy detectado: <code>{html.escape(doc.source_kind or 'NO EVIDENCE')}</code>.</p>",
-        "<h2>Configuracion de Entorno de Desarrollo</h2>",
+        "<h2>Configuración de Entorno de Desarrollo</h2>",
         "<h3>Prerrequisitos</h3>",
         "<ul><li>Java 21 instalado</li><li>Gradle wrapper del proyecto</li><li>Acceso a Azure Artifacts</li><li>Variables ARTIFACT_USERNAME y ARTIFACT_TOKEN configuradas</li></ul>",
-        "<h3>Comandos base</h3>",
-        "<pre><code>./gradlew generateJavaFromWsdl\n./gradlew clean build -x test\n./gradlew test jacocoTestReport</code></pre>",
+        "<h3>Configurar credenciales para Azure Artifacts</h3>",
+        "<pre><code>export ARTIFACT_USERNAME=&lt;usuario&gt;\nexport ARTIFACT_TOKEN=&lt;token&gt;</code></pre>",
+        "<h3>Generar clases desde WSDL</h3>",
+        "<pre><code>./gradlew generateJavaFromWsdl</code></pre>",
+        "<h3>Compilar sin ejecutar tests</h3>",
+        "<pre><code>./gradlew clean build -x test</code></pre>",
         "<h2>Variables dentro del Vault</h2>",
-        _html_table(["Variable", "Descripcion", "Fuente"], vault_rows) if vault_rows else "<p>No se detectaron variables de secreto por nombre.</p>",
+        _html_table(["Variable", "Descripción", "Fuente"], vault_rows) if vault_rows else "<p>No se detectaron variables de secreto por nombre.</p>",
         "<h2>Variables en dev.yml y application.yml</h2>",
-        _html_table(["#", "Variable", "Descripcion", "Valor por defecto", "Fuente"], env_rows) if env_rows else "<p>No se detectaron variables ${CCC_*}.</p>",
-        "<h2>Como Ejecutar</h2>",
+        "<p>Las siguientes variables se configuran en Helm y se referencian desde <code>application.yml</code>.</p>",
+        "<h3>Normalización de Teléfono</h3>",
+        _html_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], phone_rows)
+        if phone_rows else "<p>No se detectaron variables específicas de teléfono.</p>",
+        f"<h3>Servicio Bancs API Client ({html.escape(tx_label)})</h3>",
+        _html_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], bancs_rows)
+        if bancs_rows else "<p>No se detectaron variables Bancs.</p>",
+        "<h3>Circuit Breaker (Resilience4j)</h3>",
+        _html_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], cb_rows)
+        if cb_rows else "<p>No se detectaron variables de circuit breaker.</p>",
+        "<h3>Logging</h3>",
+        _html_table(["#", "Variable", "Descripción", "Valor por defecto", "Fuente"], log_rows)
+        if log_rows else "<p>No se detectaron variables de logging.</p>",
+        "<h2>Cómo Ejecutar</h2>",
         "<h3>Ejecutar localmente</h3>",
         "<pre><code>./gradlew bootRun\ncurl http://localhost:8080/actuator/health</code></pre>",
         "<p>Health: <code>http://localhost:8080/actuator/health</code></p>",
         f"<p>Endpoint SOAP: <code>http://localhost:8080{html.escape(doc.endpoint_path)}</code></p>",
+        "<h3>Ejecutar en puerto alternativo (si 8080 está en uso)</h3>",
+        "<pre><code>./gradlew bootRun --args='--server.port=8081'</code></pre>",
+        "<h3>Verificar que el servicio está activo</h3>",
+        "<pre><code>curl http://localhost:8080/actuator/health</code></pre>",
         "<h2>API Endpoints</h2>",
         f"<h3>SOAP - POST {html.escape(doc.endpoint_path)}</h3>",
         f"<p>Endpoint: <code>http://localhost:8080{html.escape(doc.endpoint_path)}</code></p>",
-        "<p>Metodo: POST - Content-Type: <code>text/xml</code>, <code>application/xml</code> o <code>application/soap+xml</code></p>",
+        "<p>Método: POST - Content-Type: <code>text/xml</code>, <code>application/xml</code> o <code>application/soap+xml</code></p>",
         f"<p>Namespace: <code>{html.escape(doc.namespace or 'NO EVIDENCE')}</code></p>",
         f"<p>Operaciones: <code>{html.escape(', '.join(doc.operations) if doc.operations else 'NO EVIDENCE')}</code></p>",
+        "<h3>Params (entrada bodyIn)</h3>",
+        _html_table(
+            ["#", "Campo", "Tipo", "Obligatorio", "Descripción"],
+            [["1", "bodyIn", "object", "Si", "Estructura de entrada segun WSDL/XSD legacy."]],
+        ),
+        "<h3>Cada contactosTransaccional</h3>",
+        _html_table(
+            ["#", "Campo", "Tipo", "Obligatorio", "Descripción"],
+            [["1", "<campo>", "string", "NO EVIDENCE", "Completar desde ANALISIS/WSDL cuando aplique."]],
+        ),
         "<h3>Endpoints Consumidos</h3>",
-        _html_table(["#", "Servicio", "URL / Transaccion", "Descripcion"], tx_rows) if tx_rows else "<p>No se detectaron TX BANCS.</p>",
-        "<h2>Explicacion de la Logica de Negocio</h2>",
+        _html_table(["#", "Servicio", "URL / Transacción", "Descripción"], tx_rows) if tx_rows else "<p>No se detectaron TX BANCS.</p>",
+        "<h2>Explicación de la Lógica de Negocio</h2>",
         f"<p>{html.escape(doc.report_excerpt or doc.description)}</p>",
     ]
     if discovery and discovery.edge_cases:
@@ -685,7 +818,7 @@ def render_html(doc: ServiceDocumentation) -> str:
             [
                 "<h3>Discovery edge cases</h3>",
                 _html_table(
-                    ["Codigo", "Severidad", "Evidencia"],
+                    ["Código", "Severidad", "Evidencia"],
                     [[case.code, case.severity, case.evidence] for case in discovery.edge_cases],
                 ),
             ]
@@ -693,23 +826,27 @@ def render_html(doc: ServiceDocumentation) -> str:
     parts.extend(
         [
             "<h2>Resultado de la API</h2>",
-            "<p>La operacion retorna HTTP 200 para respuestas de negocio y estructura &lt;error&gt; para codigos funcionales. Los errores tecnicos inesperados deben seguir el manejo definido por el stack migrado.</p>",
+            "<p>La operación retorna HTTP 200 para respuestas de negocio y estructura &lt;error&gt; para códigos funcionales. Los errores técnicos inesperados deben seguir el manejo definido por el stack migrado.</p>",
+            "<h3>Ejemplo de request</h3>",
+            "<pre><code>&lt;soapenv:Envelope&gt;\n  &lt;soapenv:Body&gt;\n    &lt;!-- Request segun WSDL/XSD legacy --&gt;\n  &lt;/soapenv:Body&gt;\n&lt;/soapenv:Envelope&gt;</code></pre>",
+            "<h3>Ejemplo de response</h3>",
+            "<pre><code>&lt;soapenv:Envelope&gt;\n  &lt;soapenv:Body&gt;\n    &lt;!-- Response segun contrato migrado --&gt;\n  &lt;/soapenv:Body&gt;\n&lt;/soapenv:Envelope&gt;</code></pre>",
             "<h2>Estructura del Resultado de la API</h2>",
-            "<h3>error - Resultado de la Operacion</h3>",
+            "<h3>error - Resultado de la Operación</h3>",
             _html_table(
-                ["#", "Campo", "Descripcion"],
+                ["#", "Campo", "Descripción"],
                 [
-                    ["1", "codigo", "Codigo de resultado o error."],
-                    ["2", "mensaje", "Mensaje tecnico/funcional."],
+                    ["1", "codigo", "Código de resultado o error."],
+                    ["2", "mensaje", "Mensaje técnico/funcional."],
                     ["3", "mensajeNegocio", "Campo reservado para DataPower; no poblar con valor real."],
                     ["4", "tipo", "INFO, ERROR o FATAL segun estructura oficial."],
-                    ["5", "recurso", f"{doc.service_name}/<Operacion>."],
-                    ["6", "componente", "Servicio, metodo o TX segun origen del error."],
-                    ["7", "backend", "Codigo backend oficial."],
+                    ["5", "recurso", f"{doc.service_name}/<Operación>."],
+                    ["6", "componente", "Servicio, método o TX según origen del error."],
+                    ["7", "backend", "Código backend oficial."],
                 ],
             ),
             "<h2>Pruebas</h2>",
-            "<p>Las pruebas se ejecutan con JUnit 5 y la cobertura minima requerida es 75% de instrucciones.</p>",
+            "<p>Las pruebas se ejecutan con JUnit 5 y la cobertura mínima requerida es 75% de instrucciones.</p>",
         ]
     )
     if doc.test_classes:
@@ -718,7 +855,15 @@ def render_html(doc: ServiceDocumentation) -> str:
     parts.extend(
         [
             "<h2>Casos de Pruebas</h2>",
-            _html_table(["ID", "Caso", "Entrada/Condicion", "Resultado esperado", "Estado"], test_rows) if test_rows else "<p>No se detectaron pruebas automaticas ni edge cases Discovery.</p>",
+            "<h3>Validaciones de Entrada</h3>",
+            _html_table(["ID", "Caso", "Entrada", "Resultado esperado", "Estado"], validation_rows)
+            if validation_rows else "<p>No se detectaron tests específicos de validación de entrada.</p>",
+            "<h3>Operaciones BANCS</h3>",
+            _html_table(["ID", "Caso", "Condición", "Resultado esperado", "Estado"], tx_test_rows)
+            if tx_test_rows else "<p>No se detectaron tests específicos de operaciones BANCS.</p>",
+            "<h3>Normalizaciones</h3>",
+            _html_table(["ID", "Caso", "Entrada", "Resultado esperado", "Estado"], normalization_rows)
+            if normalization_rows else "<p>No se detectaron tests específicos de normalización.</p>",
             "<h2>TX BANCS - Mapeo de Campos</h2>",
         ]
     )
@@ -726,13 +871,22 @@ def render_html(doc: ServiceDocumentation) -> str:
         for tx in doc.tx_codes:
             parts.extend(
                 [
-                    f"<h3>TX {html.escape(tx)} - Request/Response</h3>",
+                    f"<h3>TX {html.escape(tx)} - Request</h3>",
                     _html_table(
                         ["Campo", "Valor", "Fijo/Dinamico"],
                         [
                             ["transactionId", tx, "Fijo"],
                             ["request", "Mapeo segun ANALISIS/WSDL/TX", "Dinamico"],
                             ["response", "Mapeo segun respuesta BANCS", "Dinamico"],
+                        ],
+                    ),
+                    f"<h3>TX {html.escape(tx)} - Response (Query)</h3>",
+                    _html_table(
+                        ["Campo BANCS", "Descripción"],
+                        [
+                            ["codigo", "Código de respuesta BANCS."],
+                            ["mensaje", "Mensaje de respuesta BANCS."],
+                            ["body", "Estructura segun TX y Core Adapter."],
                         ],
                     ),
                 ]
@@ -747,7 +901,7 @@ def render_html(doc: ServiceDocumentation) -> str:
 <html>
 <head>
   <meta charset="utf-8">
-  <title>{html.escape(doc.service_name)} - Documentacion de Servicio</title>
+  <title>{html.escape(doc.service_name)} - Documentación de Servicio</title>
   <style>
     body {{ font-family: Arial, sans-serif; color: #172b4d; line-height: 1.45; }}
     h1 {{ color: #0c3b5f; font-size: 28px; margin-top: 28px; }}
