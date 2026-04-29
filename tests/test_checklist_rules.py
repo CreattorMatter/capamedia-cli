@@ -96,6 +96,26 @@ def _by_id(results, check_id: str):
     return next(r for r in results if r.id == check_id)
 
 
+def _write_helm_hpa_file(root: Path, file_name: str, average_value: str) -> None:
+    helm = root / "helm"
+    helm.mkdir(exist_ok=True)
+    (helm / file_name).write_text(
+        "livenessProbe:\n"
+        "  enabled: true\n"
+        "readinessProbe:\n"
+        "  enabled: true\n"
+        "hpa:\n"
+        "  metrics:\n"
+        "    - type: Resource\n"
+        "      resource:\n"
+        "        name: cpu\n"
+        "        target:\n"
+        "          type: AverageValue\n"
+        f"          averageValue: '{average_value}'\n",
+        encoding="utf-8",
+    )
+
+
 def test_block_1_passes_with_all_layers(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     ctx = CheckContext(migrated_path=root, legacy_path=None)
@@ -208,6 +228,46 @@ def test_block_7_passes_with_env_var(tmp_path: Path) -> None:
     results = run_block_7(ctx)
     secret_check = _by_id(results, "7.2")
     assert secret_check.status == "pass"
+
+
+def test_block_7_fails_hpa_average_value_400m(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    password: ${CCC_DB_PASSWORD}\n",
+        encoding="utf-8",
+    )
+    for env in ("dev.yml", "test.yml", "prod.yml"):
+        _write_helm_hpa_file(root, env, "400m")
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+
+    hpa_check = _by_id(results, "7.4")
+    assert hpa_check.status == "fail"
+    assert hpa_check.severity == "high"
+    assert "averageValue: '400m'" in hpa_check.detail
+    assert "debe ser '100m'" in hpa_check.detail
+    assert "helm\\dev.yml" in hpa_check.detail
+
+
+def test_block_7_passes_hpa_average_value_100m(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    password: ${CCC_DB_PASSWORD}\n",
+        encoding="utf-8",
+    )
+    for env in ("dev.yml", "test.yml", "prod.yml"):
+        _write_helm_hpa_file(root, env, "100m")
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+
+    hpa_check = _by_id(results, "7.4")
+    assert hpa_check.status == "pass"
 
 
 def test_block_14_detects_placeholder_projectkey(tmp_path: Path) -> None:

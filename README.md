@@ -1,4 +1,4 @@
-# capamedia-cli - v0.23.27
+# capamedia-cli - v0.23.28
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal OLA1.
 
@@ -317,6 +317,7 @@ capamedia-cli/
 - [x] v0.3.6 - `resume` + `retries` + agents/skills reales de Codex
 - [x] v0.3.7 - Fabrics como gate duro + `batch watch`
 - [x] v0.3.8 - bootstrap unattended, Azure PAT por env, Codex install/check, CI/release
+- [x] v0.23.28 - checklist oficial bloquea Helm HPA `averageValue` distinto de `100m` en `dev/test/prod`
 - [x] v0.23.27 - `capamedia discovery edge-case --here` corrige paths de specs por sufijo WS, trae WSDL/XSD y genera `DISCOVERY_EDGE_CASES.md` en el migrado
 - [x] v0.23.26 - `capamedia documentacion` genera HTML Confluence con diagrama, casos textuales y curl happy path OpenShift derivado del WSDL/tests/legacy
 - [x] v0.23.25 - `capamedia documentacion` replica el esqueleto de encabezados del Word WSClientes0020

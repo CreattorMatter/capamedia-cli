@@ -648,6 +648,10 @@ WAS services use the 3-part structure `<NOMBRE_SERVICIO>, <NOMBRE_MÉTODO>, <VAL
 
 **Rule 16 -- Production: `replicaCount >= 2`, `hpa.enabled: true`.**
 
+**Rule 16b -- Helm HPA CPU target:** `averageValue` MUST be `100m` in
+`helm/dev.yml`, `helm/test.yml`, and `helm/prod.yml`. NEVER leave the MCP
+default `400m`; the checklist blocks it as HIGH.
+
 **Rule 17 -- Java 21 everywhere** (NEVER 17, NEVER `latest` tag in FROM). Set `JAVA_HOME` to Java 21 before running `gradle test` or `gradle build`. If the machine has multiple JDKs, ensure Java 21 is active.
 
 **Rule 18 -- Route (OpenShift), NEVER Ingress (Kubernetes).**
@@ -2832,7 +2836,7 @@ hpa:
         name: cpu
         target:
           type: AverageValue
-          averageValue: 400m
+          averageValue: 100m
 
 volumes:
   - name: init-sh
@@ -2880,19 +2884,23 @@ grep "replicaCount" helm/prod.yml
 grep "minReplicas" helm/prod.yml
 # EXPECTED: >= 2
 
-# CHECK 5: Each CCC_* from application.yml exists in helm/dev.yml
+# CHECK 5: HPA averageValue oficial del banco
+grep "averageValue" helm/dev.yml helm/test.yml helm/prod.yml
+# EXPECTED: averageValue: 100m in every environment
+
+# CHECK 6: Each CCC_* from application.yml exists in helm/dev.yml
 for var in $(grep -oP 'CCC_\w+' src/main/resources/application.yml | sort -u); do
   grep -q "$var" helm/dev.yml || echo "MISSING in dev.yml: $var"
 done
 # EXPECTED: no MISSING
 
-# CHECK 6: Each CCC_* from application.yml exists in helm/prod.yml
+# CHECK 7: Each CCC_* from application.yml exists in helm/prod.yml
 for var in $(grep -oP 'CCC_\w+' src/main/resources/application.yml | sort -u); do
   grep -q "$var" helm/prod.yml || echo "MISSING in prod.yml: $var"
 done
 # EXPECTED: no MISSING
 
-# CHECK 7: configMap name matches nombre_msa
+# CHECK 8: configMap name matches nombre_msa
 grep "configmap-" helm/dev.yml helm/test.yml helm/prod.yml
 # EXPECTED: configmap-<nombre_msa>
 ```

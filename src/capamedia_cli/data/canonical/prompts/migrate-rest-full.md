@@ -359,6 +359,10 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 **Rule 16 — Production: `replicaCount >= 2`, `hpa.enabled: true`.**
 
+**Rule 16b — Helm HPA CPU target:** `averageValue` MUST be `100m` in
+`helm/dev.yml`, `helm/test.yml`, and `helm/prod.yml`. NEVER leave the MCP
+default `400m`; the checklist blocks it as HIGH.
+
 **Rule 17 — Java 21 everywhere** (NEVER 17, NEVER `latest` tag in FROM). Set `JAVA_HOME` to Java 21 before running `gradle test` or `gradle build`. If the machine has multiple JDKs, ensure Java 21 is active.
 
 **Rule 18 — Route (OpenShift), NEVER Ingress (Kubernetes).**
@@ -2865,7 +2869,7 @@ env:
 
 **Lookup `CCC_BANCS_BASE_URL`** from `prompts/tx-adapter-catalog.json` using the TX code.
 
-**Production MUST have:** `replicaCount >= 2`, `hpa.enabled: true`, probes enabled.
+**Production MUST have:** `replicaCount >= 2`, `hpa.enabled: true`, probes enabled. All environments MUST use `hpa.metrics[].resource.target.averageValue: 100m`.
 
 #### GATE 5 — Helm Verification
 
@@ -2881,6 +2885,10 @@ grep "replicaCount" helm/values-prod.yaml
 # CHECK 3: Probes are configured
 grep "livenessProbe" helm/values-dev.yaml
 # EXPECTED: present
+
+# CHECK 4: HPA averageValue oficial del banco
+grep "averageValue" helm/dev.yml helm/test.yml helm/prod.yml
+# EXPECTED: averageValue: 100m in every environment
 ```
 
 **If all pass:** Update `migration-context.json` with `bloque_05_helm_docker: "completado"`.

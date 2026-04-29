@@ -94,6 +94,13 @@ def _read_or_empty(path: Path) -> str:
         return ""
 
 
+def _relative_display(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root)).replace("/", "\\")
+    except ValueError:
+        return str(path)
+
+
 def _matrix_requires_bancs(ctx: CheckContext) -> bool:
     return (ctx.source_type or "").lower() in {"bus", "iib"} and ctx.has_bancs
 
@@ -849,6 +856,47 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
             results.append(CheckResult("7.3", "Block 7", "Helm probes en todos los values", "fail", severity="high", detail=f"falta en {', '.join(missing_probes)}"))
         else:
             results.append(CheckResult("7.3", "Block 7", "Helm probes en todos los values", "pass"))
+
+        # 7.4 - Helm HPA averageValue oficial del banco
+        hpa_files = [
+            helm_dir / name
+            for name in (
+                "dev.yml",
+                "test.yml",
+                "prod.yml",
+                "values-dev.yml",
+                "values-test.yml",
+                "values-prod.yml",
+                "values-dev.yaml",
+                "values-test.yaml",
+                "values-prod.yaml",
+            )
+            if (helm_dir / name).exists()
+        ]
+        wrong_hpa_values: list[str] = []
+        checked_hpa_values = 0
+        for f in hpa_files:
+            text = _read_or_empty(f)
+            for match in re.finditer(r"(?m)^\s*averageValue\s*:\s*[\"']?([^\"'\s#]+)", text):
+                checked_hpa_values += 1
+                value = match.group(1)
+                if value != "100m":
+                    rel = _relative_display(f, ctx.migrated_path)
+                    wrong_hpa_values.append(f"{rel} - averageValue: '{value}' -> debe ser '100m'")
+        if wrong_hpa_values:
+            results.append(
+                CheckResult(
+                    "7.4",
+                    "Block 7",
+                    "Helm HPA averageValue",
+                    "fail",
+                    severity="high",
+                    detail="; ".join(wrong_hpa_values),
+                    suggested_fix="Cambiar averageValue a 100m en helm/dev.yml, helm/test.yml y helm/prod.yml.",
+                )
+            )
+        elif checked_hpa_values:
+            results.append(CheckResult("7.4", "Block 7", "Helm HPA averageValue", "pass"))
 
     return results
 

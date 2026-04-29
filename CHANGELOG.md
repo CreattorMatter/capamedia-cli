@@ -4,6 +4,13 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.28] - 2026-04-29
+
+### Fixed - Helm HPA averageValue oficial
+
+- Block 7 del checklist ahora falla HIGH si `helm/dev.yml`, `helm/test.yml` o `helm/prod.yml` tienen `averageValue` distinto de `100m`.
+- Los prompts canonicos REST/SOAP y las reglas oficiales del banco ahora documentan `100m` como valor obligatorio y bloquean el default `400m`.
+
 ## [0.23.27] - 2026-04-29
 
 ### Changed - Discovery specs resiliente por sufijo WS

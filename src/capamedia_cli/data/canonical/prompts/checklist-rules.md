@@ -977,6 +977,20 @@ ls <PATH>/helm/dev.yml <PATH>/helm/test.yml <PATH>/helm/prod.yml 2>/dev/null
 
 Falta algún entorno → **MEDIUM**.
 
+### Check 7.5b — Helm HPA `averageValue` oficial [BANCO]
+
+```bash
+grep -n "averageValue" <PATH>/helm/dev.yml <PATH>/helm/test.yml <PATH>/helm/prod.yml
+```
+
+**Regla:** todo `hpa.metrics[].resource.target.averageValue` debe ser
+exactamente `100m` en los 3 entornos. El valor `400m` generado por scaffold/MCP
+NO es valido para la entrega bancaria.
+
+**Veredicto:**
+- `averageValue` distinto de `100m` en cualquier helm → **HIGH**.
+- Ejemplo de detalle esperado: `helm/dev.yml - averageValue: '400m' -> debe ser '100m'`.
+
 ### Check 7.6 — `@ConfigurationPropertiesScan` en Application.java
 
 ```bash

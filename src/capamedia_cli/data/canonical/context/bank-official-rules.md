@@ -689,6 +689,13 @@ pdb:
 hpa:
   minReplicas: 1
   maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: AverageValue
+          averageValue: 100m
 ```
 
 **NEVER**: omitir el `pdb:` block en `values-dev.yml` para SOAP. Es
@@ -702,6 +709,28 @@ aplica).
 Si el scaffold del MCP Fabrics no lo genera automaticamente, agregarlo
 manualmente al `helm/values-dev.yml`. Es parte del checklist oficial del
 banco (Block 16 — Helm & Kubernetes).
+
+---
+
+## Regla 9h.1 - Helm HPA `averageValue` oficial = `100m`
+
+**MUST**: en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, todo target
+CPU de HPA con `averageValue` debe ser exactamente `100m`:
+
+```yaml
+hpa:
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: AverageValue
+          averageValue: 100m
+```
+
+**NEVER**: dejar `averageValue: 400m` generado por el scaffold/MCP. El
+checklist oficial del CLI lo bloquea como HIGH en el Block 7 con el detalle:
+`helm/<env>.yml - averageValue: '400m' -> debe ser '100m'`.
 
 ---
 
