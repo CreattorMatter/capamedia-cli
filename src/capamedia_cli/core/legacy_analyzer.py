@@ -87,7 +87,7 @@ class LegacyAnalysis:
 # -- WSDL parsing (portType-only, skip binding) -----------------------------
 
 
-def _extract_portType_block(text: str) -> str:
+def _extract_portType_block(text: str) -> str:  # noqa: N802
     """Extract the text between <wsdl:portType> and </wsdl:portType>.
 
     Necesario porque `<wsdl:binding>` tambien tiene `<wsdl:operation>` y no
@@ -504,21 +504,53 @@ _UMP_REPO_PATTERNS_NON_WAS = [
 ]
 
 
+def _ump_name_variants(ump_name: str) -> list[str]:
+    raw = ump_name.strip()
+    lower = raw.lower()
+    variants: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in variants:
+            variants.append(value)
+
+    add(raw)
+    if raw[:3].lower() == "ump" and len(raw) > 3:
+        add("ump" + raw[3:])
+    add(lower)
+    return variants
+
+
+def _existing_child_case_insensitive(parent: Path, name: str) -> Path | None:
+    candidate = parent / name
+    if candidate.exists():
+        return candidate
+    if not parent.exists():
+        return None
+    try:
+        for child in parent.iterdir():
+            if child.name.lower() == name.lower():
+                return child
+    except OSError:
+        return None
+    return None
+
+
 def _find_ump_repo(umps_root: Path, ump_name: str, source_kind: str) -> Path | None:
     """Busca el repo de un UMP ya clonado en disco probando los 3 patterns
     conocidos. Respeta el `source_kind` para priorizar el patron mas probable.
 
     Returns el Path si existe, None si no.
     """
-    ump_lower = ump_name.lower()
     patterns = (
         _UMP_REPO_PATTERNS_WAS
         if source_kind == "was"
         else _UMP_REPO_PATTERNS_NON_WAS
     )
     for tmpl in patterns:
-        candidate = umps_root / tmpl.format(ump=ump_lower)
-        if candidate.exists():
+        for ump in _ump_name_variants(ump_name):
+            candidate = _existing_child_case_insensitive(umps_root, tmpl.format(ump=ump))
+            if candidate is None:
+                continue
             return candidate
     return None
 
@@ -783,7 +815,7 @@ def detect_properties_references(
                 entry.status = "SAMPLE_IN_REPO"
                 entry.sample_values = values
                 # keys_used ya viene del scan, pero completamos si estaba vacio
-                for k in values.keys():
+                for k in values:
                     if k not in entry.keys_used:
                         entry.keys_used.append(k)
 

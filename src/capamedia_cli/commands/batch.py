@@ -606,6 +606,12 @@ def _build_batch_migrate_prompt(
         - Verifica que el `.gitignore` del proyecto migrado ignore artefactos
           locales CapaMedia/AI que no van a Azure DevOps: {", ".join(DEPLOYMENT_GITIGNORE_ENTRIES)}.
           No ignores `.sonarlint/connectedMode.json`; ese binding si debe versionarse.
+        - Aplica la matriz BANCS antes de editar dependencias/config:
+          WAS -> MVC sin BANCS; ORQ -> WebFlux sin BANCS directo; BUS/IIB sin
+          invocaBancs -> sin BANCS; solo BUS/IIB con invocaBancs=true puede
+          tener lib-bnc-api-client, BancsService/BancsClientHelper,
+          bancs.webclients, CCC_BANCS_* o dependsOn lib-bnc-api-client.
+          Si el modo no corresponde, elimina esos artefactos en vez de agregarlos.
         - Trata `gradle architectureReview` como gate del banco. No reportes
           `build_status=green` si queda score < 7, `BLOQUEAR PR: SI`, o
           observaciones de arquitectura/tests. Corrige paquetes

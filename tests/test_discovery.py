@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from openpyxl import Workbook
+
+from capamedia_cli.core.discovery import (
+    DISCOVERY_WORKBOOK_NAME,
+    bundled_discovery_workbook,
+    classify_edge_cases,
+    detect_discovery_workspace,
+    find_discovery_workbook,
+    load_discovery_entry,
+    parse_azure_path,
+    parse_azure_repo_name,
+    render_discovery_markdown,
+)
+
+
+def test_bundled_discovery_workbook_exists() -> None:
+    workbook = bundled_discovery_workbook()
+
+    assert workbook is not None
+    assert workbook.name == DISCOVERY_WORKBOOK_NAME
+
+
+def _make_discovery(path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Validacion de servicios"
+    ws.append(
+        [
+            "Servicio",
+            "Nuevo nombre",
+            "TRIBU",
+            "ACRONIMO",
+            "Tecnologia",
+            "Tipo",
+            "Integraciones / Consume",
+            "Cache Adicional al config",
+            "Archivo o servicio de donde obtiene informacion para cache",
+            "Interaccion con proveedores externos",
+            "Metodos que expone",
+            "Peso del servicio",
+            "Complejidad del servicio",
+            "Observacion Discovery",
+            "LINK WSDL",
+            "LINK CODIGO",
+            "Consumen tecnologia deprecada",
+            "Peso",
+        ]
+    )
+    ws.append(
+        [
+            "WSClientes0028",
+            "tnd-msa-sp-wsclientes0028",
+            "TRIBU SEGMENTOS Y NEGOCIOS DIGITALES",
+            "tnd",
+            "Bus Omnicanalidad",
+            "WS",
+            "UMPClientes0020 -> TX067050\nServicio Configurable en WS y Ump",
+            "Uso de cache",
+            "configuraciones/000000001.xml",
+            "Ninguno",
+            "ActualizarCelularLocalizacion34\nActualizarEmailLocalizacion33",
+            "13",
+            "Bajo",
+            "Validar las descripciones de las tx.",
+            "specs",
+            "code",
+            "PCBG-999",
+            "Alta",
+        ]
+    )
+    ws["O2"].hyperlink = (
+        "https://dev.azure.com/BancoPichinchaEC/adi-especificaciones-tecnicas/"
+        "_git/adi-doc-tecspec-tribu-integracion-apis?path=/sp%20-%20Soporte/"
+        "tnd-msa-sp-wsclientes0028"
+    )
+    ws["P2"].hyperlink = (
+        "https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/"
+        "_git/sqb-msa-wsclientes0028"
+    )
+    wb.save(path)
+
+
+def test_parse_azure_repo_and_path() -> None:
+    url = (
+        "https://dev.azure.com/BancoPichinchaEC/adi-especificaciones-tecnicas/"
+        "_git/adi-doc-tecspec-tribu-integracion-apis?version=GBmaster&"
+        "path=/sp%20-%20Soporte/tnd-msa-sp-wsclientes0028"
+    )
+
+    assert parse_azure_repo_name(url) == "adi-doc-tecspec-tribu-integracion-apis"
+    assert parse_azure_path(url) == "/sp - Soporte/tnd-msa-sp-wsclientes0028"
+
+
+def test_classify_edge_cases_detects_discovery_patterns() -> None:
+    cases = classify_edge_cases(
+        integrations="CE_EVENTOS\nUMPClientes0020 -> TX067050",
+        observations="No hay las fuentes de la UMPClientes0161. Validar las descripciones de las tx.",
+        cache="Persiste datos en cache Shared Row",
+    )
+
+    codes = {case.code for case in cases}
+    assert "mq_or_event" in codes
+    assert "same_name_bus_was_or_missing_source" in codes
+    assert "tx_description_validation" in codes
+    assert "cache_or_config_file" in codes
+
+
+def test_load_discovery_entry_by_service_and_render_markdown(tmp_path: Path) -> None:
+    xlsx = tmp_path / "discovery.xlsx"
+    _make_discovery(xlsx)
+
+    entry = load_discovery_entry(xlsx, "wsclientes0028")
+
+    assert entry is not None
+    assert entry.migrated_name == "tnd-msa-sp-wsclientes0028"
+    assert entry.spec_repo == "adi-doc-tecspec-tribu-integracion-apis"
+    assert entry.spec_path == "/sp - Soporte/tnd-msa-sp-wsclientes0028"
+    assert entry.code_repo == "sqb-msa-wsclientes0028"
+    assert "Consumen tecnologia deprecada: Alta" in entry.weight_flags
+    assert {case.code for case in entry.edge_cases} >= {
+        "cache_or_config_file",
+        "tx_description_validation",
+    }
+
+    markdown = render_discovery_markdown(entry)
+    assert "## Discovery / edge cases" in markdown
+    assert "DISCOVERY_EDGE_CASES:" in markdown
+    assert "tnd-msa-sp-wsclientes0028" in markdown
+    assert "tx_description_validation" in markdown
+    assert "<pendiente_validar>" in markdown
+
+
+def test_load_discovery_entry_by_migrated_name(tmp_path: Path) -> None:
+    xlsx = tmp_path / "discovery.xlsx"
+    _make_discovery(xlsx)
+
+    entry = load_discovery_entry(xlsx, "tnd-msa-sp-wsclientes0028")
+
+    assert entry is not None
+    assert entry.service == "WSClientes0028"
+
+
+def test_find_discovery_workbook_searches_ancestors(tmp_path: Path) -> None:
+    workbook = tmp_path / DISCOVERY_WORKBOOK_NAME
+    _make_discovery(workbook)
+    nested = tmp_path / "wsclientes0028" / "destino" / "tnd-msa-sp-wsclientes0028"
+    nested.mkdir(parents=True)
+
+    assert find_discovery_workbook(nested) == workbook
+
+
+def test_detect_discovery_workspace_from_here_structure(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy" / "sqb-msa-wsclientes0028"
+    migrated = tmp_path / "destino" / "tnd-msa-sp-wsclientes0028"
+    legacy.mkdir(parents=True)
+    migrated.mkdir(parents=True)
+
+    ctx = detect_discovery_workspace(migrated)
+
+    assert ctx.root == tmp_path
+    assert ctx.service_name == "wsclientes0028"
+    assert ctx.legacy_path == legacy
+    assert ctx.migrated_path == migrated

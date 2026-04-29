@@ -574,6 +574,8 @@ def review(
             project_path,
             description=bank_description,
             owner=bank_owner,
+            source_type=source_type,
+            has_bancs=has_bancs,
         )
         applied_by_rule = {r.rule: r.applied for r in bank_results}
         total_applied = sum(1 for r in bank_results if r.applied)

@@ -9,6 +9,7 @@ from capamedia_cli.commands.clone import (
     UMP_AZURE_FALLBACK_PATTERNS_IIB,
     UMP_AZURE_FALLBACK_PATTERNS_WAS,
     _resolve_ump_repo,
+    _ump_name_variants,
 )
 
 
@@ -73,6 +74,38 @@ def test_resolve_ump_for_iib_tries_sqb_msa_first(tmp_path: Path) -> None:
     assert calls[0] == ("bus", "sqb-msa-umpclientes0002")
 
 
+def test_ump_name_variants_preserve_legacy_camel_case() -> None:
+    assert _ump_name_variants("UMPClientes0020") == [
+        "UMPClientes0020",
+        "umpClientes0020",
+        "umpclientes0020",
+    ]
+
+
+def test_resolve_ump_for_iib_tries_mixed_case_repo_variant(tmp_path: Path) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_git_clone(repo_name, dest, *, project_key, shallow):
+        calls.append((project_key, repo_name))
+        if project_key == "bus" and repo_name == "sqb-msa-umpClientes0020":
+            dest.mkdir(parents=True, exist_ok=True)
+            return (True, "")
+        return (False, "not found")
+
+    with patch("capamedia_cli.commands.clone._git_clone", side_effect=fake_git_clone):
+        resolved, proj, repo = _resolve_ump_repo(
+            "UMPClientes0020", tmp_path, shallow=False, parent_kind="iib"
+        )
+
+    assert resolved is not None
+    assert proj == "bus"
+    assert repo == "sqb-msa-umpClientes0020"
+    assert calls[:2] == [
+        ("bus", "sqb-msa-UMPClientes0020"),
+        ("bus", "sqb-msa-umpClientes0020"),
+    ]
+
+
 def test_resolve_ump_falls_back_to_alternative_project(tmp_path: Path) -> None:
     """Si la UMP de un WAS no esta en ump-<ump>-was, probar ms-<ump>-was."""
     call_count = {"n": 0}
@@ -85,7 +118,7 @@ def test_resolve_ump_falls_back_to_alternative_project(tmp_path: Path) -> None:
         return (False, "not found")
 
     with patch("capamedia_cli.commands.clone._git_clone", side_effect=fake_git_clone):
-        resolved, proj, repo = _resolve_ump_repo(
+        resolved, _proj, repo = _resolve_ump_repo(
             "umptecnicos0023", tmp_path, shallow=False, parent_kind="was"
         )
 
@@ -118,7 +151,7 @@ def test_resolve_ump_iib_fallback_to_was_project(tmp_path: Path) -> None:
         return (False, "not found")
 
     with patch("capamedia_cli.commands.clone._git_clone", side_effect=fake_git_clone):
-        resolved, proj, repo = _resolve_ump_repo(
+        resolved, _proj, repo = _resolve_ump_repo(
             "umpshared0001", tmp_path, shallow=False, parent_kind="iib"
         )
     # Por fallback llega al patron WAS

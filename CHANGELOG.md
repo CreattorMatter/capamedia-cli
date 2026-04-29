@@ -4,6 +4,39 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.23.24] - 2026-04-29
+
+### Fixed - BANCS condicionado por matriz MCP
+
+- Regla 8 ya no agrega `lib-bnc-api-client` por defecto: solo se habilita para BUS/IIB con `invocaBancs=true`.
+- `capamedia check/review --bank-fix` pasan `source_type` + `has_bancs` al autofix, evitando falsos BANCS en WAS como `wsclientes0154`.
+- Block 0 agrega `0.2d` para bloquear artefactos BANCS activos cuando la matriz no los permite.
+- Migrate/doublecheck incorporan un flujo corto por tecnologia para evitar mezclar WAS/MVC con dependencias o configuracion BANCS.
+
+## [0.23.23] - 2026-04-29
+
+### Added - Documentacion de servicio Google Docs friendly
+
+- Nuevo comando `capamedia documentacion` para generar documentacion de servicio en HTML importable en Google Docs o Markdown.
+- El generador autodetecta workspace `destino/` + `legacy/`, lee Discovery, WSDL, `application.yml`, Helm, reportes `ANALISIS/COMPLEXITY/MIGRATION_REPORT` y tests.
+- La salida sigue el formato del documento de referencia `WSClientes0020 - Documentacion de Servicio`: referencias, tecnologias, arquitectura, variables, ejecucion, endpoints, logica, pruebas y mapeo TX.
+
+## [0.23.22] - 2026-04-29
+
+### Added - Discovery edge-case coverage loop
+
+- `BLOQUE 22` ahora se ejecuta en el checklist deterministico: exige que Discovery liste `spec_path`, `code_repo` y todos los edge-case codes.
+- Cada edge case requiere decision explicita sin `PENDIENTE`/`TBD`/`<pendiente_validar>`/`not_probed`, con archivo, test o handoff trazable.
+- Los prompts REST/SOAP obligan a cerrar `## Discovery edge-case coverage` en `MIGRATION_REPORT.md` antes de terminar.
+- `render_discovery_markdown()` genera un bloque `DISCOVERY_EDGE_CASES` machine-checkable y una tabla inicial de coverage pendiente.
+
+## [0.23.21] - 2026-04-29
+
+### Added - Discovery OLA empaquetado
+
+- El Excel `Discovery_Servicios_Complejidad OLA 1.xlsx` queda incluido en `capamedia-cli`.
+- `capamedia discovery edge-case --here` y `capamedia clone` leen la copia canonica empaquetada si no hay override local.
+
 ## [0.23.17] - 2026-04-24
 
 ### Added - Flujo AI portable para migrate y doublecheck

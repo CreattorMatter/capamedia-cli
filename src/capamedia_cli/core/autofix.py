@@ -375,15 +375,19 @@ def fix_bancs_exception_wrapping(root: Path, violation: Violation) -> AutofixRes
 def fix_remove_mensajeNegocio_setter(  # noqa: N802
     root: Path, violation: Violation
 ) -> AutofixResult:
-    """15.1 - Elimina llamadas `.setMensajeNegocio("...")` (HIGH).
+    """15.1 - Elimina llamadas `.setMensajeNegocio("...")` con valor real (HIGH).
 
     Por PDF BPTPSRE, mensajeNegocio lo setea DataPower; el microservicio no debe
-    poblarlo. Se eliminan lineas completas donde aparezca el setter.
+    poblar texto de negocio. `null` o `""` se preservan porque algunos contratos
+    SOAP necesitan emitir el slot vacio para que DataPower lo complete.
     """
     modified: list[Path] = []
     before_samples: list[str] = []
 
     pattern = re.compile(r"^\s*[\w.]+\.setMensajeNegocio\s*\([^;]*\)\s*;\s*$", re.MULTILINE)
+    allowed = re.compile(
+        r"setMensajeNegocio\s*\(\s*(?:\"\"|''|null|StringUtils\.EMPTY|EMPTY)\s*\)"
+    )
 
     for f in _iter_java_files(root):
         text = _read(f)
@@ -392,12 +396,20 @@ def fix_remove_mensajeNegocio_setter(  # noqa: N802
         hits = pattern.findall(text)
         if not hits:
             continue
-        new_text = pattern.sub("", text)
+        bad_hits = [h for h in hits if not allowed.search(h)]
+        if not bad_hits:
+            continue
+
+        def _replace(match: re.Match[str]) -> str:
+            line = match.group(0)
+            return line if allowed.search(line) else ""
+
+        new_text = pattern.sub(_replace, text)
         new_text = re.sub(r"\n{3,}", "\n\n", new_text)
         if new_text != text:
             _write(f, new_text)
             modified.append(f)
-            before_samples.extend(h.strip() for h in hits[:2])
+            before_samples.extend(h.strip() for h in bad_hits[:2])
 
     if not modified:
         return AutofixResult(applied=False, notes="no se encontro setMensajeNegocio(...)")

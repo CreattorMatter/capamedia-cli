@@ -239,7 +239,7 @@ Extract:
 
 For EACH UMP identified in the legacy ESQL (Step D), find its corresponding repo in the UMP folder and extract the BANCS TX codes:
 
-1. **Locate the UMP repo:** Match UMP name (e.g., `UMPClientes0002`) to repo folder (e.g., `sqb-msa-umpclientes0002`)
+1. **Locate the UMP repo:** Match UMP name (e.g., `UMPClientes0002`) to repo folder preserving the legacy casing when needed (try `sqb-msa-UMPClientes0002`, `sqb-msa-umpClientes0002`, then `sqb-msa-umpclientes0002`). Do not mark TX as `TBD` until these variants were checked.
 
 2. **Scan ESQL files** in the UMP repo. Look for patterns that reveal TX codes:
    - `BANCS_TRANSACTION_ID` or `transactionId` assignments
@@ -358,7 +358,43 @@ Two authoritative sources cross-reference each BANCS TX code to its Core Adapter
 
 2. **`prompts/Transacciones catalogadas Dominio_v1 (1).xlsx`** — human-readable source used by the domain/tribe team. If a TX is NOT in the JSON but IS in the XLSX, flag as `CATALOG_MISMATCH` so the JSON gets updated.
 
-**Expected output:** The TX Summary Table must populate `Core Adapter` column from the JSON. Note in "Uncertainties" any TX whose adapter was not found in either source.
+**Expected output:** The TX Summary Table must populate `Core Adapter` column from the JSON. Note in "Uncertainties" any TX whose adapter was not found in either source. Every TX used later in Java (`transactionId` / `@BancsService`) must match the `ws-txNNNNNN` key in `application.yml`.
+
+### Step E.6: Discovery OLA edge cases (canonical Discovery workbook)
+
+The canonical workbook is embedded in `capamedia-cli` with fixed name
+`Discovery_Servicios_Complejidad OLA 1.xlsx`. Workspace-local copies remain
+valid overrides: if the file is present in the workspace, `.capamedia/`,
+`discovery/`, an ancestor folder, or Downloads, that local copy may be used.
+Read the row for the current service and treat these columns as mandatory
+evidence:
+
+- `LINK WSDL`: Azure repo/path for the service specification under
+  `adi-doc-tecspec-tribu-integracion-apis`.
+- `LINK CODIGO`: legacy source repo URL.
+- `Observación Discovery`, `Integraciones / Consume`, `Metodos que expone`,
+  `Consumen tecnologia deprecada`.
+
+**Expected output:** add one compact block:
+
+```text
+DISCOVERY_EDGE_CASES:
+- spec_path: <LINK WSDL path>
+- code_repo: <LINK CODIGO repo>
+- edge_cases: <codes>
+- test_case_source: LINK WSDL inspected | blocked_by_permissions | not_provided
+```
+
+Use short, exact edge-case codes. Examples:
+`deprecated_or_repoint`, `mq_or_event`, `external_provider`,
+`cache_or_config_file`, `crypto_pdf_library`,
+`same_name_bus_was_or_missing_source`, `regulatory_or_external_datapower`,
+`tx_description_validation`, `conditional_routing`, `out_of_ola_dependency`,
+`missing_source_request`.
+
+**Rule:** if `LINK WSDL` exists, do not ignore it. Either inspect the spec path
+or explicitly mark why it could not be inspected. CLI shortcut:
+`capamedia discovery edge-case --here`.
 
 ### Step F: Parse deploy configuration (deploy-*-config.bat)
 

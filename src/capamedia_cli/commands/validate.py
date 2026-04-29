@@ -200,19 +200,17 @@ def validate_summary(
 
     console.print(table)
 
-    all_checks = (
-        [report.layers_check]
-        + list(report.wsdl_checks)
-        + [
-            report.controller_annotation_check,
-            report.service_annotation_check,
-            report.layer_navigation_check,
-            report.service_business_logic_check,
-            report.application_yml_check,
-            report.gradle_library_check,
-            report.catalog_info_check,
-        ]
-    )
+    all_checks = [
+        report.layers_check,
+        *report.wsdl_checks,
+        report.controller_annotation_check,
+        report.service_annotation_check,
+        report.layer_navigation_check,
+        report.service_business_logic_check,
+        report.application_yml_check,
+        report.gradle_library_check,
+        report.catalog_info_check,
+    ]
     passed = sum(1 for c in all_checks if c and c.passed)
     total = sum(1 for c in all_checks if c is not None)
     color = "green" if passed == total else "red"
@@ -249,10 +247,7 @@ def validate_sync(
         raise typer.Exit(code=2)
 
     target = _vendor_script_path()
-    if target.exists():
-        old_size = target.stat().st_size
-    else:
-        old_size = 0
+    old_size = target.stat().st_size if target.exists() else 0
     new_size = source.stat().st_size
 
     console.print(
@@ -307,6 +302,16 @@ def validate_auto_fix(
         bool,
         typer.Option("--dry-run", help="Solo mostrar que se haria, sin modificar"),
     ] = False,
+    requires_bancs: Annotated[
+        bool,
+        typer.Option(
+            "--requires-bancs",
+            help=(
+                "Habilita Regla 8 para agregar lib-bnc-api-client. "
+                "Usar solo en BUS/IIB con invocaBancs=true."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Aplica los 4 autofixes deterministas del script oficial (reglas 4, 7, 8, 9)."""
     from capamedia_cli.core.bank_autofix import run_bank_autofix
@@ -325,6 +330,7 @@ def validate_auto_fix(
             "[bold]validate-hexagonal auto-fix[/bold]\n"
             f"Proyecto: [cyan]{project_path}[/cyan]\n"
             f"Reglas: {rules_list or 'todas (4, 7, 8, 9)'}\n"
+            f"Regla 8 BANCS: {'ON' if requires_bancs else 'OFF'}\n"
             f"Dry run: {'SI' if dry_run else 'NO'}",
             border_style="cyan",
         )
@@ -342,6 +348,7 @@ def validate_auto_fix(
         rules=rules_list,
         description=description,
         owner=owner,
+        requires_bancs=requires_bancs,
     )
 
     table = Table(title="Bank autofix results", title_style="bold cyan")

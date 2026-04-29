@@ -5,7 +5,8 @@ ejemplos YES/NO. Aqui implementamos los fixes que se pueden aplicar sin AI:
 
 - Regla 4: `@BpLogger` faltante en metodos publicos de @Service
 - Regla 7: `${VAR:default}` en `application.yml` → `${VAR}` (excluye `optimus.web.*`)
-- Regla 8: `com.pichincha.bnc:lib-bnc-api-client:1.1.0` faltante en `build.gradle`
+- Regla 8: `com.pichincha.bnc:lib-bnc-api-client:1.1.0` solo para BUS/IIB
+  con invocaBancs=true; en WAS/ORQ/BUS sin BANCS no se agrega.
 - Regla 9: `catalog-info.yaml` con placeholders literales → esqueleto valido
 
 Regla 6 (Service sin utils) **NO** es autofixeable: requiere refactor semantico.
@@ -261,16 +262,26 @@ _LIBBNC_PRE_1_1_0_RE = re.compile(
 )
 
 
-def fix_add_libbnc_dependency(project_root: Path) -> BankAutofixResult:
-    """Normaliza `lib-bnc-api-client` a `1.1.0` estable y lo agrega si falta.
+def _requires_bancs_from_matrix(source_type: str | None, has_bancs: bool) -> bool:
+    """True solo para el caso oficial que requiere lib-bnc-api-client."""
+    return (source_type or "").lower() in {"bus", "iib"} and has_bancs
+
+
+def fix_add_libbnc_dependency(
+    project_root: Path,
+    *,
+    requires_bancs: bool | None = None,
+) -> BankAutofixResult:
+    """Normaliza `lib-bnc-api-client` a `1.1.0` estable y la agrega solo si aplica.
 
     Comportamiento:
       1. Si hay `1.1.0-alpha.*` / `1.1.0-SNAPSHOT` / `1.1.0.RELEASE` / etc.,
          lo reemplaza por `1.1.0` limpio (ahora que la estable esta
          liberada).
-      2. Si no hay ninguna version de la libreria, la inserta en
-         `dependencies { }` o crea el bloque.
-      3. Si ya esta `1.1.0` limpio, no toca.
+      2. Si la matriz dice BUS/IIB + invocaBancs=true y no hay ninguna version
+         de la libreria, la inserta en `dependencies { }` o crea el bloque.
+      3. Si la matriz dice WAS/ORQ/BUS sin BANCS, nunca agrega la libreria.
+      4. Si ya esta `1.1.0` limpio, no toca.
     """
     result = BankAutofixResult(rule="8", applied=False)
 
@@ -305,26 +316,39 @@ def fix_add_libbnc_dependency(project_root: Path) -> BankAutofixResult:
                 f"pre-release de lib-bnc-api-client normalizada(s) a 1.1.0"
             )
 
-        # Paso 2: si aun no esta la libreria, agregarla
+        # Paso 2: si aun no esta la libreria, agregarla solo cuando el
+        # contexto MCP la requiere. Sin contexto explicito se trabaja en modo
+        # conservador: normalizar si ya existe, pero no inventar BANCS.
         if REQUIRED_LIBRARY_PREFIX not in text:
-            # Insertar dentro del bloque `dependencies { ... }` si existe
-            m = re.search(r"dependencies\s*\{", text)
-            if not m:
-                text = text.rstrip() + "\n\ndependencies {\n" + _REQUIRED_DEP_LINE + "\n}\n"
-            else:
-                insert_pos = m.end()
-                text = text[:insert_pos] + "\n" + _REQUIRED_DEP_LINE + text[insert_pos:]
-            result.changes.append(
-                f"{gf.relative_to(project_root)}: +lib-bnc-api-client:1.1.0"
-            )
+            if requires_bancs is True:
+                # Insertar dentro del bloque `dependencies { ... }` si existe
+                m = re.search(r"dependencies\s*\{", text)
+                if not m:
+                    text = (
+                        text.rstrip()
+                        + "\n\ndependencies {\n"
+                        + _REQUIRED_DEP_LINE
+                        + "\n}\n"
+                    )
+                else:
+                    insert_pos = m.end()
+                    text = text[:insert_pos] + "\n" + _REQUIRED_DEP_LINE + text[insert_pos:]
+                result.changes.append(
+                    f"{gf.relative_to(project_root)}: +lib-bnc-api-client:1.1.0"
+                )
+            elif n_replaced == 0:
+                result.notes = (
+                    "Regla 8 omitida: lib-bnc-api-client solo aplica a "
+                    "BUS/IIB con invocaBancs=true; sin contexto explicito no se agrega"
+                )
 
         if text != original:
             gf.write_text(text, encoding="utf-8")
             result.files_modified.append(gf)
             result.applied = True
 
-    if not result.applied:
-        result.notes = "la libreria ya estaba en 1.1.0 estable"
+    if not result.applied and not result.notes:
+        result.notes = "la libreria ya estaba en 1.1.0 estable o no aplica por matriz"
     return result
 
 
@@ -356,7 +380,6 @@ spec:
   type: service
   owner: {owner}
   lifecycle: test
-  dependsOn:
 {depends_on_yaml}
 """
 
@@ -478,10 +501,13 @@ def fix_catalog_info_scaffold(
     owner_resolved = owner or _git_user_email(project_root) or "<SET-email-pichincha>"
     desc_resolved = description or f"Servicio {repo_name}"
 
-    bnc_libs = _detect_bnc_libs_in_gradle(project_root)
-    if not bnc_libs:
-        bnc_libs = ["lib-bnc-api-client"]  # minimo viable
-    depends_on = "\n".join(f"    - component:{lib}" for lib in bnc_libs)
+    detected_libs = _detect_bnc_libs_in_gradle(project_root)
+    if detected_libs:
+        depends_on = "  dependsOn:\n" + "\n".join(
+            f"    - component:{lib}" for lib in detected_libs
+        )
+    else:
+        depends_on = "  dependsOn: []"
 
     content = CATALOG_INFO_TEMPLATE.format(
         description=desc_resolved,
@@ -504,7 +530,7 @@ def fix_catalog_info_scaffold(
     result.changes.append(
         f"{target.relative_to(project_root)}: generado con "
         f"namespace=tnd-middleware, name=tpl-middleware, lifecycle=test, "
-        f"dependsOn={bnc_libs}"
+        f"dependsOn={detected_libs or '[]'}"
     )
     return result
 
@@ -736,12 +762,17 @@ def run_bank_autofix(
     rules: list[str] | None = None,
     description: str | None = None,
     owner: str | None = None,
+    source_type: str | None = None,
+    has_bancs: bool = False,
+    requires_bancs: bool | None = None,
 ) -> list[BankAutofixResult]:
     """Corre los 5 autofixes del banco. Devuelve resultados por regla.
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
     """
     wanted = set(rules) if rules else {"4", "6", "7", "8", "9"}
+    if requires_bancs is None:
+        requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
     results: list[BankAutofixResult] = []
     if "4" in wanted:
         results.append(fix_add_bplogger_to_service(project_root))
@@ -751,7 +782,9 @@ def run_bank_autofix(
     if "7" in wanted:
         results.append(fix_yml_remove_defaults(project_root))
     if "8" in wanted:
-        results.append(fix_add_libbnc_dependency(project_root))
+        results.append(
+            fix_add_libbnc_dependency(project_root, requires_bancs=requires_bancs)
+        )
     if "9" in wanted:
         results.append(
             fix_catalog_info_scaffold(

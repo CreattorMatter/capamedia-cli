@@ -94,6 +94,178 @@ def _read_or_empty(path: Path) -> str:
         return ""
 
 
+def _matrix_requires_bancs(ctx: CheckContext) -> bool:
+    return (ctx.source_type or "").lower() in {"bus", "iib"} and ctx.has_bancs
+
+
+def _active_bancs_artifacts(root: Path) -> list[str]:
+    """Detecta artefactos BANCS activos; ignora XSD/WSDL legacy embebidos."""
+    artifacts: list[str] = []
+
+    for gf in list(root.rglob("build.gradle")) + list(root.rglob("build.gradle.kts")):
+        if ".git" in gf.parts or "build" in gf.parts:
+            continue
+        if "lib-bnc-api-client" in _read_or_empty(gf):
+            artifacts.append(str(gf.relative_to(root)))
+
+    catalog = root / "catalog-info.yaml"
+    if "lib-bnc-api-client" in _read_or_empty(catalog):
+        artifacts.append("catalog-info.yaml")
+
+    lombok = root / "src" / "lombok.config"
+    if "BancsService" in _read_or_empty(lombok):
+        artifacts.append("src/lombok.config")
+
+    resources = root / "src"
+    for yml in list(resources.rglob("application*.yml")) + list(resources.rglob("application*.yaml")):
+        if ".git" in yml.parts or "legacy" in [p.lower() for p in yml.parts]:
+            continue
+        text = _read_or_empty(yml)
+        if re.search(r"(?m)^bancs\s*:", text) or "CCC_BANCS_" in text:
+            artifacts.append(str(yml.relative_to(root)))
+
+    src_java = root / "src" / "main" / "java"
+    for java in src_java.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts:
+            continue
+        text = _read_or_empty(java)
+        if (
+            "com.pichincha.bnc" in text
+            or "@BancsService" in text
+            or "BancsClientHelper" in text
+            or "BancsOperationException" in text
+        ):
+            artifacts.append(str(java.relative_to(root)))
+
+    return sorted(set(artifacts))
+
+
+def _allowed_mensaje_negocio_slot(line: str) -> bool:
+    """True when mensajeNegocio is intentionally emitted empty/null for the contract."""
+    return (
+        re.search(
+            r"setMensajeNegocio\s*\(\s*(?:\"\"|''|null|StringUtils\.EMPTY|EMPTY)\s*\)",
+            line,
+        )
+        is not None
+    )
+
+
+def _collect_tx_codes_from_yaml(text: str) -> set[str]:
+    return set(re.findall(r"\bws-tx(\d{6})\b", text, flags=re.IGNORECASE))
+
+
+def _collect_tx_codes_from_java(src_java: Path) -> set[str]:
+    codes: set[str] = set()
+    patterns = [
+        re.compile(r"\bws-tx(\d{6})\b", re.IGNORECASE),
+        re.compile(r"\btransactionId\s*\(\s*[\"'](\d{6})[\"']\s*\)", re.IGNORECASE),
+        re.compile(r"\bTRANSACTION_ID\b\s*=\s*[\"'](\d{6})[\"']", re.IGNORECASE),
+    ]
+    for java in src_java.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts or "test" in [p.lower() for p in java.parts]:
+            continue
+        text = _read_or_empty(java)
+        for pattern in patterns:
+            codes.update(pattern.findall(text))
+    return codes
+
+
+_HIGH_DISCOVERY_EDGE_CODES = {
+    "deprecated_or_repoint",
+    "mq_or_event",
+    "external_provider",
+    "same_name_bus_was_or_missing_source",
+    "tx_description_validation",
+    "missing_source_request",
+}
+
+_DISCOVERY_PENDING_RE = re.compile(
+    r"\b(pendiente|tbd|todo|not_probed|not_provided|sin\s+decision|no\s+evidence)\b|"
+    r"<pendiente_validar>",
+    re.IGNORECASE,
+)
+
+_DISCOVERY_COVERAGE_MARKERS = (
+    "decision",
+    "implemented",
+    "implementado",
+    "resuelto",
+    "validado",
+    "no aplica",
+    "blocked_by_permissions",
+    "archivo:",
+    "file:",
+    "test:",
+    "prueba:",
+)
+
+
+def _workspace_root_for_migrated(migrated_path: Path) -> Path:
+    if migrated_path.parent.name == "destino":
+        return migrated_path.parent.parent
+    return migrated_path
+
+
+def _token_present(text: str, token: str) -> bool:
+    return token.lower() in text.lower()
+
+
+def _discovery_report_files(workspace_root: Path, migrated_path: Path) -> list[Path]:
+    candidates: list[Path] = []
+    for root, patterns in (
+        (
+            workspace_root,
+            [
+                "COMPLEXITY_*.md",
+                "ANALISIS_*.md",
+                "DISCOVERY_EDGE_CASES*.md",
+                ".capamedia/reports/*.md",
+            ],
+        ),
+        (
+            migrated_path,
+            [
+                "MIGRATION_REPORT.md",
+                "README.md",
+                "CHECKLIST_*.md",
+                "src/test/**/*.java",
+            ],
+        ),
+    ):
+        for pattern in patterns:
+            candidates.extend(p for p in root.glob(pattern) if p.is_file())
+
+    seen: set[Path] = set()
+    files: list[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        files.append(candidate)
+    return files
+
+
+def _discovery_edge_case_status(text: str, code: str) -> str:
+    """Return covered, pending, or missing for a Discovery edge-case code."""
+    lowered = text.lower()
+    code_lower = code.lower()
+    positions = [match.start() for match in re.finditer(re.escape(code_lower), lowered)]
+    if not positions:
+        return "missing"
+
+    has_pending = False
+    for pos in positions:
+        window = lowered[max(0, pos - 500): pos + 500]
+        if _DISCOVERY_PENDING_RE.search(window):
+            has_pending = True
+            continue
+        if any(marker in window for marker in _DISCOVERY_COVERAGE_MARKERS):
+            return "covered"
+    return "pending" if has_pending else "missing"
+
+
 def _deployment_gitignore_check(ctx: CheckContext) -> CheckResult:
     gitignore = ctx.migrated_path / ".gitignore"
     if not gitignore.exists():
@@ -278,6 +450,44 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
             severity="high", detail=dialogo,
             suggested_fix="Reclasificar segun matriz: BUS+invocaBancs/ORQ -> REST+WebFlux, WAS 1op -> REST+MVC, WAS 2+ops -> SOAP+MVC",
         ))
+
+    # 0.2d - BANCS solo cuando la matriz lo permite.
+    src_known = (ctx.source_type or "").lower() in {"was", "orq", "bus", "iib"}
+    bancs_artifacts = _active_bancs_artifacts(ctx.migrated_path)
+    if src_known and not _matrix_requires_bancs(ctx) and bancs_artifacts:
+        results.append(
+            CheckResult(
+                "0.2d",
+                "Block 0",
+                "Artefactos BANCS vs matriz MCP",
+                "fail",
+                severity="high",
+                detail=(
+                    f"source={src_disp} · invocaBancs={bancs_disp}; "
+                    f"BANCS no aplica pero hay artefactos: {bancs_artifacts[:8]}"
+                ),
+                suggested_fix=(
+                    "Eliminar lib-bnc-api-client, dependsOn lib-bnc, "
+                    "lombok BancsService y configuracion bancs/CCC_BANCS. "
+                    "BANCS solo aplica a BUS/IIB con invocaBancs=true."
+                ),
+            )
+        )
+    elif src_known:
+        status_detail = (
+            "BANCS requerido por matriz"
+            if _matrix_requires_bancs(ctx)
+            else "sin artefactos BANCS activos"
+        )
+        results.append(
+            CheckResult(
+                "0.2d",
+                "Block 0",
+                "Artefactos BANCS vs matriz MCP",
+                "pass",
+                detail=status_detail,
+            )
+        )
 
     # 0.3 - Operation names match
     if legacy_wsdl:
@@ -681,6 +891,34 @@ def run_block_13(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("13.5", "Block 13", "open-in-view: false", "fail", severity="medium", detail="falta o es true"))
 
+    # 13.11 - WAS + Hikari must validate connections with SELECT 1.
+    if (ctx.source_type or "").lower() == "was":
+        if re.search(r"connection-test-query\s*:\s*SELECT\s+1\b", yml_text, re.IGNORECASE):
+            results.append(
+                CheckResult(
+                    "13.11",
+                    "Block 13",
+                    "WAS Hikari connection-test-query",
+                    "pass",
+                    detail="connection-test-query: SELECT 1 presente",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "13.11",
+                    "Block 13",
+                    "WAS Hikari connection-test-query",
+                    "fail",
+                    severity="high",
+                    detail="WAS con JPA/Hikari no define connection-test-query: SELECT 1",
+                    suggested_fix=(
+                        "Agregar bajo spring.datasource.hikari: "
+                        "`connection-test-query: SELECT 1`"
+                    ),
+                )
+            )
+
     return results
 
 
@@ -703,23 +941,44 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
     if not src_java.exists():
         return results
 
-    # 15.1 - mensajeNegocio NUNCA debe ser seteado desde el codigo
-    bad = _grep_files(src_java, r"setMensajeNegocio\s*\(\s*[\"']")
+    # 15.1 - mensajeNegocio no debe tener valor real desde el codigo.
+    # Empty/null is allowed to preserve the SOAP/DataPower slot when JAXB would
+    # otherwise omit the element.
+    hits = _grep_files(src_java, r"setMensajeNegocio\s*\(")
+    bad = [(f, ln, line) for f, ln, line in hits if not _allowed_mensaje_negocio_slot(line)]
+    empty_slots = [(f, ln, line) for f, ln, line in hits if _allowed_mensaje_negocio_slot(line)]
     if bad:
         results.append(
             CheckResult(
                 "15.1",
                 "Block 15",
-                "mensajeNegocio NO debe setearse desde el codigo",
+                "mensajeNegocio sin valor real desde el codigo",
                 "fail",
                 severity="high",
-                detail=f"{len(bad)} hit(s): el PDF oficial dice que mensajeNegocio lo setea DataPower",
-                suggested_fix="Dejar mensajeNegocio = null o no llamar al setter en el mapper",
+                detail=(
+                    f"{len(bad)} hit(s) con valor real: DataPower gestiona "
+                    "mensajeNegocio; el servicio solo puede emitir null/vacio."
+                ),
+                suggested_fix=(
+                    "No poblar mensajeNegocio con texto de negocio. Usar null o "
+                    '"" solo cuando el contrato SOAP requiere que el tag exista.'
+                ),
             )
         )
     else:
+        detail = (
+            f"{len(empty_slots)} setter(s) null/vacio aceptado(s) para preservar el slot SOAP"
+            if empty_slots
+            else ""
+        )
         results.append(
-            CheckResult("15.1", "Block 15", "mensajeNegocio NO se setea desde el codigo", "pass")
+            CheckResult(
+                "15.1",
+                "Block 15",
+                "mensajeNegocio sin valor real desde el codigo",
+                "pass",
+                detail=detail,
+            )
         )
 
     # 15.2 - recurso con formato <service>/<method>
@@ -1640,6 +1899,232 @@ def run_block_20(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+def run_block_21(ctx: CheckContext) -> list[CheckResult]:
+    """Block 21: TX detected in adapters must match application.yml webclients."""
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+    app_yml = ctx.migrated_path / "src" / "main" / "resources" / "application.yml"
+    if not src_java.exists() or not app_yml.exists():
+        return []
+
+    yml_codes = _collect_tx_codes_from_yaml(_read_or_empty(app_yml))
+    java_codes = _collect_tx_codes_from_java(src_java)
+    if not yml_codes and not java_codes:
+        return []
+
+    results: list[CheckResult] = []
+    missing_in_yml = sorted(java_codes - yml_codes)
+    unused_in_java = sorted(yml_codes - java_codes)
+    if missing_in_yml or unused_in_java:
+        details: list[str] = []
+        if missing_in_yml:
+            details.append(f"en Java y no en application.yml: {', '.join(missing_in_yml)}")
+        if unused_in_java:
+            details.append(f"en application.yml y no en adapters Java: {', '.join(unused_in_java)}")
+        results.append(
+            CheckResult(
+                "21.1",
+                "Block 21",
+                "TX mapping Java vs application.yml",
+                "fail",
+                severity="high",
+                detail="; ".join(details),
+                suggested_fix=(
+                    "Alinear cada `transactionId(\"NNNNNN\")` / `@BancsService(\"ws-txNNNNNN\")` "
+                    "con una entrada `bancs.webclients.ws-txNNNNNN` en application.yml. "
+                    "No adivinar TX: usar el ANALISIS/COMPLEXITY generado desde legacy+UMP."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "21.1",
+                "Block 21",
+                "TX mapping Java vs application.yml",
+                "pass",
+                detail=f"TX alineados: {', '.join(sorted(yml_codes))}",
+            )
+        )
+    return results
+
+
+def run_block_22(ctx: CheckContext) -> list[CheckResult]:
+    """Block 22: Discovery edge cases must be traced and covered."""
+    try:
+        from capamedia_cli.core.discovery import (
+            detect_discovery_workspace,
+            find_discovery_workbook,
+            load_discovery_entry,
+        )
+    except ImportError:
+        return []
+
+    workspace_root = _workspace_root_for_migrated(ctx.migrated_path)
+    discovery_ctx = detect_discovery_workspace(ctx.migrated_path)
+    service_name = discovery_ctx.service_name
+    if not service_name:
+        return []
+
+    workbook = find_discovery_workbook(workspace_root)
+    if workbook is None:
+        return []
+
+    results: list[CheckResult] = []
+    try:
+        entry = load_discovery_entry(workbook, service_name)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return [
+            CheckResult(
+                "22.0",
+                "Block 22",
+                "Discovery OLA legible",
+                "fail",
+                severity="medium",
+                detail=f"no se pudo leer Discovery para {service_name}: {exc}",
+                suggested_fix="Corregir el Excel Discovery canonico o pasar una copia valida con CAPAMEDIA_DISCOVERY_XLSX.",
+            )
+        ]
+
+    if entry is None:
+        return []
+
+    results.append(
+        CheckResult(
+            "22.0",
+            "Block 22",
+            "Discovery OLA row",
+            "pass",
+            detail=f"{entry.service} desde {workbook}",
+        )
+    )
+
+    report_files = _discovery_report_files(workspace_root, ctx.migrated_path)
+    report_text = "\n".join(_read_or_empty(path) for path in report_files)
+    if not report_text.strip():
+        results.append(
+            CheckResult(
+                "22.1",
+                "Block 22",
+                "Discovery presente en analisis/reporte",
+                "fail",
+                severity="high",
+                detail="no hay COMPLEXITY/ANALISIS/MIGRATION_REPORT con Discovery edge cases",
+                suggested_fix=(
+                    "Ejecutar `capamedia discovery edge-case --here --output "
+                    ".capamedia/reports/discovery-edge-cases.md` o regenerar "
+                    "COMPLEXITY/ANALISIS con la seccion DISCOVERY_EDGE_CASES."
+                ),
+            )
+        )
+        return results
+
+    missing_refs: list[str] = []
+    if entry.spec_path and not _token_present(report_text, entry.spec_path):
+        missing_refs.append(f"spec_path={entry.spec_path}")
+    if entry.code_repo and not _token_present(report_text, entry.code_repo):
+        missing_refs.append(f"code_repo={entry.code_repo}")
+
+    missing_codes = [
+        case.code for case in entry.edge_cases
+        if not _token_present(report_text, case.code)
+    ]
+    if missing_refs or missing_codes:
+        detail_parts = []
+        if missing_refs:
+            detail_parts.append("faltan refs: " + ", ".join(missing_refs))
+        if missing_codes:
+            detail_parts.append("faltan edge cases: " + ", ".join(missing_codes))
+        results.append(
+            CheckResult(
+                "22.1",
+                "Block 22",
+                "Discovery presente en analisis/reporte",
+                "fail",
+                severity="high",
+                detail="; ".join(detail_parts),
+                suggested_fix=(
+                    "El reporte debe listar spec_path, code_repo y todos los "
+                    "codigos de edge case detectados por Discovery."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "22.1",
+                "Block 22",
+                "Discovery presente en analisis/reporte",
+                "pass",
+                detail=f"{len(entry.edge_cases)} edge case(s) trazados en reporte",
+            )
+        )
+
+    if not entry.edge_cases:
+        results.append(
+            CheckResult(
+                "22.2",
+                "Block 22",
+                "Coverage de edge cases Discovery",
+                "pass",
+                detail="Discovery no detecto edge cases para este servicio",
+            )
+        )
+        return results
+
+    high_pending: list[str] = []
+    medium_pending: list[str] = []
+    for case in entry.edge_cases:
+        status = _discovery_edge_case_status(report_text, case.code)
+        if status == "covered":
+            continue
+        bucket = high_pending if case.code in _HIGH_DISCOVERY_EDGE_CODES else medium_pending
+        bucket.append(f"{case.code} ({status})")
+
+    if high_pending:
+        results.append(
+            CheckResult(
+                "22.2",
+                "Block 22",
+                "Coverage de edge cases Discovery",
+                "fail",
+                severity="high",
+                detail="sin decision/coverage explicita: " + ", ".join(high_pending),
+                suggested_fix=(
+                    "Para cada edge case HIGH, documentar en MIGRATION_REPORT.md "
+                    "o DISCOVERY_EDGE_CASES.md la decision, archivo(s) tocados y "
+                    "prueba asociada. No dejar PENDIENTE/TBD."
+                ),
+            )
+        )
+    elif medium_pending:
+        results.append(
+            CheckResult(
+                "22.2",
+                "Block 22",
+                "Coverage de edge cases Discovery",
+                "fail",
+                severity="medium",
+                detail="sin decision/coverage explicita: " + ", ".join(medium_pending),
+                suggested_fix=(
+                    "Para cada edge case de soporte, dejar trazabilidad en "
+                    "MIGRATION_REPORT.md o DISCOVERY_EDGE_CASES.md con decision, "
+                    "configuracion/test/handoff y estado final."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "22.2",
+                "Block 22",
+                "Coverage de edge cases Discovery",
+                "pass",
+                detail="todos los edge cases tienen decision/coverage sin pendientes",
+            )
+        )
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
@@ -1655,6 +2140,8 @@ ALL_BLOCKS = [
     ("Block 18", run_block_18),
     ("Block 19", run_block_19),
     ("Block 20", run_block_20),  # v0.23.0: ORQ -> migrado, no legacy
+    ("Block 21", run_block_21),  # v0.23.20: TX Java/YAML consistency
+    ("Block 22", run_block_22),  # v0.23.22: Discovery edge-case coverage loop
 ]
 
 

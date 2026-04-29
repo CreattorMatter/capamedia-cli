@@ -56,6 +56,27 @@ Verificar que el workspace este valido:
 
 Si falta `destino/` → abortar con mensaje claro.
 
+## Paso 1.5 - Matriz BANCS obligatoria
+
+Antes de aplicar autofixes, clasificar el proyecto con esta matriz. Esta regla
+manda sobre templates, ejemplos previos y sugerencias del modelo:
+
+```mermaid
+flowchart TD
+  A["source_type / tecnologia_origen"] --> B{tipo}
+  B -->|was| C["MVC. BANCS prohibido"]
+  B -->|orq| D["WebFlux REST + lib-event-logs. BANCS directo prohibido"]
+  B -->|bus/iib| E{invocaBancs?}
+  E -->|true| F["BANCS permitido y requerido: lib-bnc + BancsService"]
+  E -->|false| G["BANCS prohibido"]
+```
+
+Si el proyecto es WAS, ORQ o BUS/IIB sin `invocaBancs=true`, el doublecheck
+no debe agregar ni mantener `lib-bnc-api-client`, `BancsService`,
+`BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*` ni
+`dependsOn: lib-bnc-api-client`. Si aparecen, corregirlos o devolver
+`status=blocked`; nunca declararlo PR_READY.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash
@@ -70,6 +91,7 @@ Eso dispara internamente:
    - Regla 6: `StringUtils.*` → Java nativo, extraer records inner del Service
    - Regla 7: `${VAR:default}` → `${VAR}` limpio (preserva `optimus.web.*`)
    - Regla 8: normalizar `lib-bnc-api-client:1.1.0-alpha.*` → `1.1.0` estable
+     solo si la matriz permite BANCS (BUS/IIB + invocaBancs=true)
    - Regla 9: esqueleto inicial de `catalog-info.yaml`
    - Block 19: inyectar valores de `.capamedia/inputs/*.properties` a
      `application.yml` (si el owner ya entrego los archivos)

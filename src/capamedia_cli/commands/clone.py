@@ -97,10 +97,6 @@ AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
     ("bus", "sqb-msa-{svc}"),                # IIB tipico
     ("was", "ws-{svc}-was"),                 # WAS tipico
     ("was", "ms-{svc}-was"),                 # WAS variante "ms"
-    ("middleware", "tnd-msa-sp-{svc}"),     # gold REST/SOAP migrado
-    ("middleware", "tia-msa-sp-{svc}"),     # gold variante tia
-    ("middleware", "tpr-msa-sp-{svc}"),     # gold variante tpr
-    ("middleware", "csg-msa-sp-{svc}"),     # gold variante csg
 ]
 
 
@@ -120,6 +116,23 @@ UMP_AZURE_FALLBACK_PATTERNS_WAS: list[tuple[str, str]] = [
     ("was", "ms-{ump}-was"),                 # variante "ms"
     ("bus", "sqb-msa-{ump}"),                # fallback IIB (por si la UMP vive aun alla)
 ]
+
+
+def _ump_name_variants(ump_name: str) -> list[str]:
+    """Return UMP repo-name variants preserving the legacy reference casing."""
+    raw = ump_name.strip()
+    lower = raw.lower()
+    variants: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in variants:
+            variants.append(value)
+
+    add(raw)
+    if raw[:3].lower() == "ump" and len(raw) > 3:
+        add("ump" + raw[3:])
+    add(lower)
+    return variants
 
 
 def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tuple[Path | None, str, str]:
@@ -154,20 +167,25 @@ def _resolve_ump_repo(
 
     Returns: (path_clonado, project_key, repo_name) o (None, "", "").
     """
-    ump = ump_name.lower()
     patterns = (
         UMP_AZURE_FALLBACK_PATTERNS_WAS
         if parent_kind == "was"
         else UMP_AZURE_FALLBACK_PATTERNS_IIB
     )
+    tried: set[tuple[str, str]] = set()
     for project_key, pattern in patterns:
-        repo_name = pattern.format(ump=ump)
-        dest = dest_root / "umps" / repo_name
-        ok, _err = _git_clone(
-            repo_name, dest, project_key=project_key, shallow=shallow
-        )
-        if ok:
-            return (dest, project_key, repo_name)
+        for ump in _ump_name_variants(ump_name):
+            repo_name = pattern.format(ump=ump)
+            key = (project_key, repo_name)
+            if key in tried:
+                continue
+            tried.add(key)
+            dest = dest_root / "umps" / repo_name
+            ok, _err = _git_clone(
+                repo_name, dest, project_key=project_key, shallow=shallow
+            )
+            if ok:
+                return (dest, project_key, repo_name)
     return (None, "", "")
 
 
@@ -399,6 +417,7 @@ def _write_complexity_report(
     workspace: Path,
     tx_results: list[TxCloneResult],
     legacy_root: Path | None = None,
+    discovery_entry=None,
 ) -> Path:
     """Write COMPLEXITY_<service>.md with the deterministic analysis."""
     from capamedia_cli.core.caveats import (
@@ -437,6 +456,11 @@ def _write_complexity_report(
     lines.append(f"- **Framework recomendado:** `{analysis.framework_recommendation.upper()}`")
     lines.append(f"- **Complejidad:** `{analysis.complexity.upper()}`")
     lines.append("")
+
+    if discovery_entry is not None:
+        from capamedia_cli.core.discovery import render_discovery_markdown
+
+        lines.append(render_discovery_markdown(discovery_entry))
 
     # UMPs con columna de extraccion
     if analysis.umps:
@@ -609,6 +633,21 @@ def clone_service(
             "variables CE_*/CCC_*) y genera DOSSIER_<svc>.md para inyectar al FABRICS_PROMPT.",
         ),
     ] = False,
+    discovery_xlsx: Annotated[
+        Path | None,
+        typer.Option(
+            "--discovery-xlsx",
+            envvar="CAPAMEDIA_DISCOVERY_XLSX",
+            help=(
+                "Override del Excel Discovery OLA. Si falta, se busca el archivo "
+                "canonico en workspace/.capamedia/discovery/ancestros/paquete CLI/Downloads."
+            ),
+        ),
+    ] = None,
+    discovery_sheet: Annotated[
+        str,
+        typer.Option("--discovery-sheet", help="Hoja del Excel Discovery"),
+    ] = "Validacion de servicios",
     init: Annotated[
         bool,
         typer.Option(
@@ -746,7 +785,36 @@ def clone_service(
         console.print("\n[dim]5. No hay TX codes extraidos para clonar[/dim]")
 
     # --- Step 6: Report ---
-    report = _write_complexity_report(analysis, service_name, ws, tx_results, legacy_root=legacy_dest)
+    discovery_entry = None
+    from capamedia_cli.core.discovery import find_discovery_workbook, load_discovery_entry
+
+    resolved_discovery = find_discovery_workbook(ws, explicit=discovery_xlsx)
+    if resolved_discovery:
+        try:
+            discovery_entry = load_discovery_entry(
+                resolved_discovery,
+                service_name,
+                sheet_name=discovery_sheet,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            console.print(f"[yellow]Discovery:[/yellow] no se pudo leer {resolved_discovery}: {exc}")
+        if discovery_entry is None:
+            console.print(f"[yellow]Discovery:[/yellow] {service_name} no encontrado en {resolved_discovery}")
+        else:
+            console.print(
+                "[green]Discovery[/green] "
+                f"{len(discovery_entry.edge_cases)} edge case(s), "
+                f"spec path: {discovery_entry.spec_path or '?'}"
+            )
+
+    report = _write_complexity_report(
+        analysis,
+        service_name,
+        ws,
+        tx_results,
+        legacy_root=legacy_dest,
+        discovery_entry=discovery_entry,
+    )
     console.print(f"\n[bold]6. Reporte[/bold] escrito en [cyan]{report.name}[/cyan]")
 
     # --- Step 7: Deep-scan Azure DevOps (opcional, --deep-scan) ---

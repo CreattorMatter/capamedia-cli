@@ -705,6 +705,23 @@ banco (Block 16 — Helm & Kubernetes).
 
 ---
 
+## Regla 9i - WAS + JPA/Hikari requiere `connection-test-query: SELECT 1`
+
+**MUST**: si el origen legacy es **WAS** y el migrado tiene
+`spring-boot-starter-data-jpa`, `application.yml` debe declarar:
+
+```yaml
+spring:
+  datasource:
+    hikari:
+      connection-test-query: SELECT 1
+```
+
+Esta regla es exclusiva para WAS con BD/JPA. BUS/ORQ WebFlux sin JPA no deben
+agregarla.
+
+---
+
 ## Regla 11 - CSV `ConfigurablesBusOmniTest_Transfor` para IIB
 
 **Commit b55a794 del PromptCapaMedia (2026-04-21)**.

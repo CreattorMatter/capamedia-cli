@@ -97,8 +97,10 @@ Los bloques están documentados en el prompt canónico `prompts.checklist-rules`
 - **BLOQUE 9** — Tests y calidad (cobertura Jacoco, SonarLint)
 - **BLOQUE 10** — SOAP specifics (si aplica)
 - **BLOQUE 11-12** — REST specifics (si aplica)
-- **BLOQUE 13** — WAS+DB (HikariCP config, ddl-auto validate, open-in-view false, @Transactional en service boundary)
+- **BLOQUE 13** — WAS+DB (HikariCP config, `connection-test-query: SELECT 1`, ddl-auto validate, open-in-view false, @Transactional en service boundary)
 - **BLOQUE 14** — SonarLint binding (.sonarlint/connectedMode.json, org=bancopichinchaec, projectKey no placeholder) + higiene de `.gitignore` para artefactos locales CapaMedia/AI
+- **BLOQUE 21** — TX mapping Java vs `application.yml` (`transactionId` / `@BancsService` deben coincidir con `bancs.webclients.ws-txNNNNNN`)
+- **BLOQUE 22** — Discovery edge cases (`LINK WSDL`, observaciones, integraciones y casos de desborde no ignorados; cada codigo debe tener decision/archivo/test sin pendientes)
 
 ## Paso 4 — Generar reporte
 

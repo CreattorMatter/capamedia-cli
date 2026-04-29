@@ -219,6 +219,30 @@ def test_fix_remove_mensajenegocio_setter_deletes_calls(tmp_path: Path) -> None:
     assert "setMensaje" in text  # no confundir con mensajeNegocio
 
 
+def test_fix_remove_mensajenegocio_preserves_empty_slot(tmp_path: Path) -> None:
+    root = _make_root(tmp_path)
+    file = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/ErrorMapper.java"
+    )
+    _write(
+        file,
+        "package com.pichincha.sp.infrastructure;\n"
+        "public class ErrorMapper {\n"
+        "    public void map(Error e) {\n"
+        "        e.setMensajeNegocio(\"\");\n"
+        "        e.setMensaje(\"hola\");\n"
+        "    }\n"
+        "}\n",
+    )
+
+    result = fix_remove_mensajeNegocio_setter(root, _violation("15.1"))
+    text = file.read_text(encoding="utf-8")
+
+    assert result.applied is False
+    assert 'setMensajeNegocio("")' in text
+
+
 def test_fix_recurso_format_adds_service_slash_method(tmp_path: Path) -> None:
     root = _make_root(tmp_path, name="WSClientes0099")
     file = (

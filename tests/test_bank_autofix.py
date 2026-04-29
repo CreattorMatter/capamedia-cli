@@ -128,7 +128,7 @@ def test_yml_no_change_if_already_clean(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_libbnc_added_if_missing(tmp_path: Path) -> None:
+def test_libbnc_skipped_if_missing_without_bancs_context(tmp_path: Path) -> None:
     gradle = tmp_path / "build.gradle"
     gradle.write_text(
         "plugins { id 'java' }\n\n"
@@ -138,6 +138,21 @@ def test_libbnc_added_if_missing(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     result = fix_add_libbnc_dependency(tmp_path)
+    assert not result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "com.pichincha.bnc:lib-bnc-api-client" not in updated
+
+
+def test_libbnc_added_if_missing_when_bancs_required(tmp_path: Path) -> None:
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "plugins { id 'java' }\n\n"
+        "dependencies {\n"
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(tmp_path, requires_bancs=True)
     assert result.applied
     updated = gradle.read_text(encoding="utf-8")
     assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in updated
@@ -173,7 +188,7 @@ def test_libbnc_normalizes_alpha_to_stable(tmp_path: Path) -> None:
         "}\n",
         encoding="utf-8",
     )
-    result = fix_add_libbnc_dependency(tmp_path)
+    result = fix_add_libbnc_dependency(tmp_path, requires_bancs=True)
     assert result.applied
     updated = gradle.read_text(encoding="utf-8")
     assert "1.1.0-alpha" not in updated
@@ -310,12 +325,27 @@ def test_catalog_info_uses_placeholder_uuid_when_no_sonar(tmp_path: Path) -> Non
     assert "<SET-sonarcloud-UUID>" not in content
 
 
+def test_catalog_info_does_not_invent_libbnc_dependency(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "csg-msa-sp-wsclientes0154"
+    repo_dir.mkdir()
+    (repo_dir / "build.gradle").write_text(
+        "implementation 'com.pichincha.common:lib-trace-logger:1.4.0'\n",
+        encoding="utf-8",
+    )
+
+    result = fix_catalog_info_scaffold(repo_dir, owner="x@pichincha.com")
+    assert result.applied
+    content = (repo_dir / "catalog-info.yaml").read_text(encoding="utf-8")
+    assert "component:lib-trace-logger" in content
+    assert "component:lib-bnc-api-client" not in content
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
 
-def test_run_bank_autofix_runs_all_four(tmp_path: Path) -> None:
+def test_run_bank_autofix_does_not_add_bancs_without_context(tmp_path: Path) -> None:
     # Setup minimal project
     svc_dir = tmp_path / "src" / "main" / "java" / "pkg"
     svc_dir.mkdir(parents=True)
@@ -337,11 +367,24 @@ def test_run_bank_autofix_runs_all_four(tmp_path: Path) -> None:
     # 5 reglas, pero la 6 tiene 2 fixes -> 6 results
     assert len(results) == 6
     rules_applied = {r.rule for r in results if r.applied}
-    # Deberia aplicar al menos 4, 7, 8, 9 (la 6 depende de si hay StringUtils/records)
+    # Deberia aplicar 4, 7 y 9. La regla 8 queda en modo conservador:
+    # normaliza si existe, pero no inventa BANCS sin matriz BUS/IIB+invocaBancs.
     assert "4" in rules_applied
     assert "7" in rules_applied
-    assert "8" in rules_applied
     assert "9" in rules_applied
+    assert "8" not in rules_applied
+
+
+def test_run_bank_autofix_adds_bancs_for_iib_with_invoca_bancs(tmp_path: Path) -> None:
+    (tmp_path / "build.gradle").write_text("dependencies {}\n", encoding="utf-8")
+
+    results = run_bank_autofix(tmp_path, rules=["8"], source_type="iib", has_bancs=True)
+
+    assert len(results) == 1
+    assert results[0].applied
+    assert "lib-bnc-api-client:1.1.0" in (tmp_path / "build.gradle").read_text(
+        encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +532,6 @@ def test_run_bank_autofix_subset(tmp_path: Path) -> None:
     (tmp_path / "build.gradle").write_text(
         "dependencies {}\n", encoding="utf-8"
     )
-    results = run_bank_autofix(tmp_path, rules=["8"])
+    results = run_bank_autofix(tmp_path, rules=["8"], requires_bancs=True)
     assert len(results) == 1
     assert results[0].rule == "8"

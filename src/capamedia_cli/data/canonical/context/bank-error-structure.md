@@ -22,7 +22,7 @@ copiar ni reformular la tabla** en otro lado.
 | 1 | `codigo` | String numérico | Catálogo `errores.xml` del banco | **Servicio** (ver `bank-error-codes.md`) |
 | 2 | `tipo` | `INFO` \| `ERROR` \| `FATAL` | Clasificación por tipo de falla | **Servicio** |
 | 3 | `mensajeCliente` | Texto corto, user-facing | Mensaje del catálogo `errores.xml` | **Servicio** |
-| 4 | `mensajeNegocio` | Texto business | **Gestionado por DataPower** — en respuestas success del servicio va `null` o ausente | **DataPower** (NUNCA el servicio) |
+| 4 | `mensajeNegocio` | Texto business | **Gestionado por DataPower** — el servicio solo emite `null`, tag vacio o ausencia segun contrato | **DataPower** (NUNCA un valor real del servicio) |
 | 5 | `mensajeAplicacion` | Texto técnico / stacktrace resumido | Exception.getMessage() o detalle técnico | **Servicio** |
 | 6 | `backend` | String | Catálogo oficial `sqb-cfg-codigosBackend-config/codigosBackend.xml` | **Servicio** |
 | 7 | `momentoError` | ISO-8601 timestamp | `Instant.now().toString()` al momento del throw | **Servicio** |
@@ -34,29 +34,37 @@ copiar ni reformular la tabla** en otro lado.
 
 ## Regla maestra — `mensajeNegocio`
 
-**MUST**: el servicio **NUNCA** setea `mensajeNegocio`. Ese campo lo inserta
-**DataPower** en su capa de transformación, consultando reglas de negocio
-específicas del banco.
+**MUST**: el servicio **NUNCA** setea un valor real de negocio en
+`mensajeNegocio`. Ese campo lo completa **DataPower** en su capa de
+transformacion, consultando reglas de negocio especificas del banco.
 
 **NEVER**:
-- Poblar `mensajeNegocio` desde el código del microservicio migrado.
+- Poblar `mensajeNegocio` con texto desde el codigo del microservicio migrado.
 - Copiar el valor desde otro campo (ej. asignarle el `mensajeCliente`).
-- Enviarlo con string vacío `""` — debe ser `null` o estar ausente del payload.
+
+**OK**:
+- `setMensajeNegocio(null)` o no llamar al setter cuando el contrato permite
+  omitir el elemento.
+- `setMensajeNegocio("")` solo cuando la respuesta SOAP debe conservar el tag
+  vacio (`<mensajeNegocio/>`) para que DataPower tenga el slot que completa.
 
 ```java
 // ✘ NO — el servicio NUNCA setea mensajeNegocio
 error.setMensajeNegocio("Transacción exitosa");
 
-// ✔ OK — dejar null; DataPower lo completa si aplica
+// ✔ OK — null/ausente; DataPower lo completa si aplica
 Error error = Error.builder()
     .codigo("0")
     .tipo("INFO")
     .mensajeCliente("OK")
-    .mensajeNegocio(null)                // ← NULL siempre desde el servicio
+    .mensajeNegocio(null)
     .mensajeAplicacion(null)
     .backend("00045")
     .momentoError(Instant.now().toString())
     .build();
+
+// ✔ OK — SOAP/DataPower slot requerido por contrato
+error.setMensajeNegocio("");
 ```
 
 ## Tipos canónicos (`error.tipo`)
@@ -88,7 +96,7 @@ reforzada en commits post-2026-04-16 tras feedback del equipo.
   <codigo>0</codigo>
   <tipo>INFO</tipo>
   <mensajeCliente>OK</mensajeCliente>
-  <mensajeNegocio xsi:nil="true"/>        <!-- NUNCA setear desde el servicio -->
+  <mensajeNegocio/>                       <!-- tag vacio permitido; valor real NUNCA -->
   <mensajeAplicacion xsi:nil="true"/>
   <backend>00045</backend>
   <momentoError>2026-04-23T21:10:16.123Z</momentoError>
@@ -154,7 +162,7 @@ El validador del banco lo considera gap conocido en servicios antiguos
 1. **Antes de generar código de error mapping**, leer este canonical y
    `bank-error-codes.md`.
 2. **Usar un builder o record** con los 7 campos — nunca mezclar orden.
-3. **`mensajeNegocio` siempre `null`** en la salida del servicio.
+3. **`mensajeNegocio` siempre sin valor real**: `null`/ausente o `""` cuando el contrato SOAP exige tag vacio.
 4. **`backend`** resuelto desde el catálogo `codigosBackend.xml` (ver
    `reference_codigos_backend.md`: `bancs_app=00045`, `iib=00638`).
 5. **`momentoError`** generado al momento del throw con `Instant.now()`, no

@@ -1473,6 +1473,20 @@ grep -E "url:|username:|password:" <PATH>/src/main/resources/application.yml
 
 Si alguno es literal (no `${...}`) -> **HIGH**. Los secrets NUNCA se commitean — se referencian como `${CCC_DB_URL}`, `${CCC_DB_USER}`, `${CCC_DB_PASSWORD}` y los provee el banco antes del deploy.
 
+### Check 13.11 — WAS Hikari `connection-test-query: SELECT 1`
+
+Solo aplica si el origen legacy es **WAS** y el proyecto migrado tiene JPA/Hikari.
+
+```bash
+grep -rn "connection-test-query: SELECT 1" <PATH>/src/main/resources/application.yml
+```
+
+0 matches -> **HIGH**. Accion: agregar bajo `spring.datasource.hikari`:
+
+```yaml
+connection-test-query: SELECT 1
+```
+
 ---
 
 ## BLOQUE 14 — SonarLint binding (Connected Mode)
@@ -1673,6 +1687,72 @@ grep -rnE "TBD|pendiente_validar|Environment\\.cache|GestionarRecursoConfigurabl
 - Si queda `TBD` aunque el valor exista en el CSV local → **HIGH**.
 - Si el servicio deja nombres genéricos o env vars sin mapear los campos detectados en `ANALISIS_<ServiceName>.md` → **MEDIUM**.
 - Si todos los campos quedan resueltos con literal o `${CCC_*}` justificado → ✅ **PASS**.
+
+---
+
+## BLOQUE 21 — TX mapping Java vs `application.yml`
+
+Este bloque evita el fallo post-migracion donde el servicio compila pero invoca
+otro TX o deja un `ws-txNNNNNN` distinto entre adapter y configuracion.
+
+```bash
+# TX declarados en application.yml
+grep -rnE "ws-tx[0-9]{6}" <PATH>/src/main/resources/application.yml
+
+# TX usados por Java
+grep -rnE "transactionId\\(\"[0-9]{6}\"\\)|TRANSACTION_ID\\s*=\\s*\"[0-9]{6}\"|ws-tx[0-9]{6}" <PATH>/src/main/java/
+```
+
+**PASS**: el set de TX de Java coincide exactamente con el set de
+`bancs.webclients.ws-txNNNNNN` en `application.yml`.
+
+**HIGH**: hay TX en Java que no existen en YAML, o YAML declara TX que ningun
+adapter usa. Accion: volver al `ANALISIS/COMPLEXITY` generado desde
+legacy+UMP y al `tx-adapter-catalog.json`; no inventar ni reutilizar TX de
+otro servicio.
+
+---
+
+## BLOQUE 22 — Discovery edge cases / casos de desborde
+
+Este bloque aplica cuando el analisis uso
+`Discovery_Servicios_Complejidad OLA 1.xlsx` o cuando el reporte
+`COMPLEXITY_<servicio>.md` contiene seccion `Discovery / edge cases`.
+
+Fuente obligatoria si esta disponible:
+- `LINK WSDL`: repo/path `adi-doc-tecspec-tribu-integracion-apis` con WSDL/XSD,
+  request/response o casos de prueba del servicio.
+- `LINK CODIGO`: repo legacy real.
+- `Observación Discovery`, `Integraciones / Consume`, `Metodos que expone`,
+  `Consumen tecnologia deprecada`.
+
+```bash
+grep -rnE "Discovery / edge cases|DISCOVERY_EDGE_CASES|LINK WSDL|edge_cases" \
+  <WORKSPACE>/COMPLEXITY_*.md <WORKSPACE>/ANALISIS_*.md 2>/dev/null
+```
+
+**PASS**: el reporte lista `spec_path`, `code_repo` y cada edge case detectado
+con evidencia, y `MIGRATION_REPORT.md` o `DISCOVERY_EDGE_CASES.md` contiene una
+decision explicita por codigo con archivo/test/handoff. No quedan
+`PENDIENTE`, `TBD`, `<pendiente_validar>` ni `not_probed`.
+
+**HIGH**: Discovery tiene `LINK WSDL`/observaciones para el servicio pero el
+analisis no lo menciona, o hay edge cases `deprecated_or_repoint`,
+`mq_or_event`, `external_provider`, `same_name_bus_was_or_missing_source`,
+`tx_description_validation` o `missing_source_request` sin decision explicita,
+o con marcador pendiente.
+
+**MEDIUM**: edge cases de soporte (`cache_or_config_file`,
+`crypto_pdf_library`, `regulatory_or_external_datapower`,
+`conditional_routing`, `out_of_ola_dependency`) aparecen sin trazabilidad en
+configuracion, tests o handoff.
+
+Accion: ejecutar `capamedia discovery edge-case --here --probe-spec` desde el
+workspace del servicio. El CLI busca el Excel canonico
+`Discovery_Servicios_Complejidad OLA 1.xlsx` en el workspace, `.capamedia/`,
+`discovery/`, carpetas padre, la copia empaquetada en `capamedia-cli` o
+Downloads. Si Azure no permite leer el repo, dejar `blocked_by_permissions` y
+no inventar casos.
 
 ---
 

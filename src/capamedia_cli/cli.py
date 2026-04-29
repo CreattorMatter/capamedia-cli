@@ -8,6 +8,7 @@ Comandos disponibles:
   capamedia fabrics        - gestiona el MCP Fabrics (setup y generate)
   capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
   capamedia ai doublecheck - corre el doble check AI post-migracion
+  capamedia documentacion  - genera documentacion de servicio para Google Docs
   capamedia qa pack        - prepara QA de equivalencia funcional para Copilot
   capamedia clone-migrated - clona legacy + repos migrados existentes
   capamedia doctor         - diagnostico del CLI y el entorno
@@ -42,7 +43,9 @@ from capamedia_cli.commands import (
     check,
     check_install,
     clone,
+    discovery,
     doctor,
+    documentacion,
     fabrics,
     init,
     install,
@@ -113,6 +116,9 @@ app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("clone-migrated")(clone.clone_migrated_service)
 app.command("clon-migrado")(clone.clone_migrated_service)
+app.command("documentacion")(documentacion.generate_documentation)
+app.command("documentación", hidden=True)(documentacion.generate_documentation)
+app.command("documentation", hidden=True)(documentacion.generate_documentation)
 app.command("adopt")(adopt_cmd.adopt)  # v0.23.11: adopt workspaces no-canonicos
 app.command("info")(info_cmd.info)    # v0.23.12: dashboard de pendientes
 app.command("check")(check.check_project)
@@ -122,6 +128,7 @@ app.add_typer(review.app, name="review")
 app.add_typer(ai.app, name="ai", help="Etapas AI headless: migrate y doublecheck")
 app.add_typer(qa.app, name="qa", help="QA de equivalencia funcional con Copilot")
 app.add_typer(batch.app, name="batch", help="Procesar N servicios en paralelo")
+app.add_typer(discovery.app, name="discovery", help="Leer Discovery OLA y extraer edge cases")
 app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del banco")
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")
 app.add_typer(validate.app, name="validate-hexagonal", help="Validador oficial del banco (9 checks formales)")

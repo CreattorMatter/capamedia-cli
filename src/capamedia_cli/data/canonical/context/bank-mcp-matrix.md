@@ -111,6 +111,10 @@ Combinando las 3 reglas con los casos reales del banco:
 
 - **WAS siempre es `framework: mvc`**, nunca WebFlux. Aunque sea 1 op REST,
   el banco usa MVC con un `@RestController` sobre Tomcat (no Netty reactive).
+- **BANCS solo aplica a BUS/IIB con `invocaBancs: true`**. En WAS, ORQ y
+  BUS/IIB sin BANCS esta prohibido agregar o mantener `lib-bnc-api-client`,
+  `BancsService`, `BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*` o
+  `dependsOn: lib-bnc-api-client`.
 - **ORQ no invoca BANCS directamente**. Los servicios downstream migrados
   (`<ns>-msa-sp-<svc>` en `tpl-middleware`) son los que hablan con BANCS.
   Por eso `invocaBancs: false` para ORQ.

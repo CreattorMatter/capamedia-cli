@@ -5,12 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock
 
+from openpyxl import Workbook
+
 from capamedia_cli.core.checklist_rules import (
     CheckContext,
+    run_block_0,
     run_block_1,
     run_block_7,
+    run_block_13,
     run_block_14,
+    run_block_15,
+    run_block_21,
+    run_block_22,
 )
+from capamedia_cli.core.discovery import DISCOVERY_WORKBOOK_NAME
 from capamedia_cli.core.gitignore_policy import format_deployment_gitignore_block
 
 
@@ -22,6 +30,66 @@ def _make_migrated(tmp_path: Path) -> Path:
     (root / "src" / "main" / "java" / "com" / "pichincha" / "sp" / "infrastructure").mkdir(parents=True)
     (root / "src" / "main" / "resources").mkdir(parents=True)
     return root
+
+
+def _make_discovery_workbook(path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Validacion de servicios"
+    ws.append(
+        [
+            "Servicio",
+            "Nuevo nombre",
+            "TRIBU",
+            "ACRONIMO",
+            "Tecnologia",
+            "Tipo",
+            "Integraciones / Consume",
+            "Cache Adicional al config",
+            "Archivo o servicio de donde obtiene informacion para cache",
+            "Interaccion con proveedores externos",
+            "Metodos que expone",
+            "Peso del servicio",
+            "Complejidad del servicio",
+            "Observacion Discovery",
+            "LINK WSDL",
+            "LINK CODIGO",
+            "Consumen tecnologia deprecada",
+            "Peso",
+        ]
+    )
+    ws.append(
+        [
+            "WSClientes0028",
+            "tnd-msa-sp-wsclientes0028",
+            "TRIBU",
+            "tnd",
+            "Bus Omnicanalidad",
+            "WS",
+            "UMPClientes0020 -> TX067050",
+            "",
+            "",
+            "",
+            "ActualizarEmailLocalizacion33",
+            "13",
+            "Bajo",
+            "Validar las descripciones de las tx.",
+            "specs",
+            "code",
+            "",
+            "Alta",
+        ]
+    )
+    ws["O2"].hyperlink = (
+        "https://dev.azure.com/BancoPichinchaEC/adi-especificaciones-tecnicas/"
+        "_git/adi-doc-tecspec-tribu-integracion-apis?path=/sp%20-%20Soporte/"
+        "tnd-msa-sp-wsclientes0028"
+    )
+    ws["P2"].hyperlink = (
+        "https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/"
+        "_git/sqb-msa-wsclientes0028"
+    )
+    wb.save(path)
 
 
 def _by_id(results, check_id: str):
@@ -228,3 +296,276 @@ def test_block_14_fails_with_wrong_organization(tmp_path: Path) -> None:
     results = run_block_14(ctx)
     org_check = _by_id(results, "14.2")
     assert org_check.status == "fail"
+
+
+def test_block_0_rejects_bancs_artifacts_for_was(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    resources = root / "src/main/resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / "WSClientes0154.wsdl").write_text(
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<portType name="P"><operation name="op"/></portType></definitions>',
+        encoding="utf-8",
+    )
+    controller = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/rest/FooController.java"
+    )
+    controller.parent.mkdir(parents=True, exist_ok=True)
+    controller.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.rest;\n"
+        "import org.springframework.web.bind.annotation.RestController;\n"
+        "@RestController class FooController {}\n",
+        encoding="utf-8",
+    )
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0' }\n",
+        encoding="utf-8",
+    )
+    (root / "catalog-info.yaml").write_text(
+        "spec:\n  dependsOn:\n    - component:lib-bnc-api-client\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_0(ctx)
+    check = _by_id(results, "0.2d")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "BANCS no aplica" in check.detail
+
+
+def test_block_0_allows_bancs_artifacts_for_iib_with_bancs(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    resources = root / "src/main/resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / "WSClientes0006.wsdl").write_text(
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<portType name="P"><operation name="op"/></portType></definitions>',
+        encoding="utf-8",
+    )
+    controller = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/rest/FooController.java"
+    )
+    controller.parent.mkdir(parents=True, exist_ok=True)
+    controller.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.rest;\n"
+        "import org.springframework.web.bind.annotation.RestController;\n"
+        "@RestController class FooController {}\n",
+        encoding="utf-8",
+    )
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0' }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(
+        migrated_path=root,
+        legacy_path=None,
+        source_type="iib",
+        has_bancs=True,
+    )
+    results = run_block_0(ctx)
+    check = _by_id(results, "0.2d")
+
+    assert check.status == "pass"
+
+
+def test_block_13_requires_was_connection_test_query(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-jpa' }\n",
+        encoding="utf-8",
+    )
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    hikari:\n"
+        "      maximum-pool-size: ${CCC_DB_POOL_MAX}\n"
+        "  jpa:\n"
+        "    hibernate:\n"
+        "      ddl-auto: validate\n"
+        "    open-in-view: false\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_13(ctx)
+    check = _by_id(results, "13.11")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "connection-test-query: SELECT 1" in check.suggested_fix
+
+
+def test_block_13_accepts_was_connection_test_query(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-jpa' }\n",
+        encoding="utf-8",
+    )
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    hikari:\n"
+        "      maximum-pool-size: ${CCC_DB_POOL_MAX}\n"
+        "      connection-test-query: SELECT 1\n"
+        "  jpa:\n"
+        "    hibernate:\n"
+        "      ddl-auto: validate\n"
+        "    open-in-view: false\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_13(ctx)
+    check = _by_id(results, "13.11")
+
+    assert check.status == "pass"
+
+
+def test_block_15_allows_empty_mensaje_negocio_slot(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    mapper = root / "src/main/java/com/pichincha/sp/infrastructure/ErrorMapper.java"
+    mapper.write_text(
+        "package com.pichincha.sp.infrastructure;\n"
+        "class ErrorMapper { void map(Error e) { e.setMensajeNegocio(\"\"); } }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_15(ctx)
+    check = _by_id(results, "15.1")
+
+    assert check.status == "pass"
+    assert "aceptado" in check.detail
+
+
+def test_block_15_rejects_real_mensaje_negocio_value(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    mapper = root / "src/main/java/com/pichincha/sp/infrastructure/ErrorMapper.java"
+    mapper.write_text(
+        "package com.pichincha.sp.infrastructure;\n"
+        "class ErrorMapper { void map(Error e) { e.setMensajeNegocio(\"Cliente ok\"); } }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_15(ctx)
+    check = _by_id(results, "15.1")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_block_21_tx_mapping_passes_when_java_and_yaml_match(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "bancs:\n  webclients:\n    ws-tx067050:\n      base-url: ${CCC_BANCS_BASE_URL}\n",
+        encoding="utf-8",
+    )
+    adapter = root / "src/main/java/com/pichincha/sp/infrastructure/CustomerBancsAdapter.java"
+    adapter.write_text(
+        "package com.pichincha.sp.infrastructure;\n"
+        "class CustomerBancsAdapter { static final String TRANSACTION_ID = \"067050\"; }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, has_bancs=True)
+    results = run_block_21(ctx)
+    check = _by_id(results, "21.1")
+
+    assert check.status == "pass"
+
+
+def test_block_21_tx_mapping_fails_when_java_and_yaml_differ(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "bancs:\n  webclients:\n    ws-tx067050:\n      base-url: ${CCC_BANCS_BASE_URL}\n",
+        encoding="utf-8",
+    )
+    adapter = root / "src/main/java/com/pichincha/sp/infrastructure/CustomerBancsAdapter.java"
+    adapter.write_text(
+        "package com.pichincha.sp.infrastructure;\n"
+        "class CustomerBancsAdapter { void call() { request.transactionId(\"067051\"); } }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, has_bancs=True)
+    results = run_block_21(ctx)
+    check = _by_id(results, "21.1")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "067050" in check.detail
+    assert "067051" in check.detail
+
+
+def test_block_22_fails_when_discovery_report_is_missing(tmp_path: Path) -> None:
+    workspace = tmp_path / "wsclientes0028"
+    project = workspace / "destino" / "tnd-msa-sp-wsclientes0028"
+    (project / "src/main/java").mkdir(parents=True)
+    _make_discovery_workbook(workspace / DISCOVERY_WORKBOOK_NAME)
+
+    ctx = CheckContext(migrated_path=project, legacy_path=None)
+    results = run_block_22(ctx)
+    check = _by_id(results, "22.1")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "no hay" in check.detail
+
+
+def test_block_22_fails_when_edge_case_coverage_is_pending(tmp_path: Path) -> None:
+    workspace = tmp_path / "wsclientes0028"
+    project = workspace / "destino" / "tnd-msa-sp-wsclientes0028"
+    (project / "src/main/java").mkdir(parents=True)
+    _make_discovery_workbook(workspace / DISCOVERY_WORKBOOK_NAME)
+    (workspace / "COMPLEXITY_wsclientes0028.md").write_text(
+        "## Discovery / edge cases\n"
+        "- Spec path: /sp - Soporte/tnd-msa-sp-wsclientes0028\n"
+        "- Code repo: sqb-msa-wsclientes0028\n"
+        "DISCOVERY_EDGE_CASES:\n"
+        "- edge_cases: tx_description_validation\n"
+        "## Discovery edge-case coverage\n"
+        "| tx_description_validation | PENDIENTE | <pendiente_validar> |\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=project, legacy_path=None)
+    results = run_block_22(ctx)
+    check = _by_id(results, "22.2")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "tx_description_validation" in check.detail
+
+
+def test_block_22_passes_when_edge_case_has_decision_and_file_trace(tmp_path: Path) -> None:
+    workspace = tmp_path / "wsclientes0028"
+    project = workspace / "destino" / "tnd-msa-sp-wsclientes0028"
+    (project / "src/main/java").mkdir(parents=True)
+    _make_discovery_workbook(workspace / DISCOVERY_WORKBOOK_NAME)
+    (project / "MIGRATION_REPORT.md").write_text(
+        "## Discovery / edge cases\n"
+        "- Spec path: /sp - Soporte/tnd-msa-sp-wsclientes0028\n"
+        "- Code repo: sqb-msa-wsclientes0028\n"
+        "DISCOVERY_EDGE_CASES:\n"
+        "- edge_cases: tx_description_validation\n"
+        "## Discovery edge-case coverage\n"
+        "| Codigo | Decision | Implementacion / test |\n"
+        "|---|---|---|\n"
+        "| tx_description_validation | Decision: implemented | "
+        "File: src/test/java/CustomerAdapterTest.java |\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=project, legacy_path=None)
+    results = run_block_22(ctx)
+    report_check = _by_id(results, "22.1")
+    coverage_check = _by_id(results, "22.2")
+
+    assert report_check.status == "pass"
+    assert coverage_check.status == "pass"

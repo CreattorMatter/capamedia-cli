@@ -37,6 +37,18 @@ Leer `bank-mcp-matrix.md`, `COMPLEXITY_<servicio>.md` y
 `migration-context.json` en `destino/`. La matriz BPTPSRE manda sobre cualquier
 heuristica local:
 
+```mermaid
+flowchart TD
+  A["Leer tecnologia_origen / source_type"] --> B{source_type}
+  B -->|was| C["MVC. 1 op=REST, 2+ ops=SOAP. BANCS prohibido"]
+  B -->|orq| D["WebFlux REST + lib-event-logs. BANCS directo prohibido"]
+  B -->|bus/iib| E{invocaBancs?}
+  E -->|true| F["WebFlux REST. BANCS obligatorio permitido"]
+  E -->|false| G{"ops"}
+  G -->|1| H["WebFlux REST. BANCS prohibido"]
+  G -->|2+| I["MVC SOAP. BANCS prohibido"]
+```
+
 - Si `projectType=rest` + `webFramework=mvc` + `sourceKind=was` -> cargar
   `migrate-rest-full.md` en modo WAS REST/MVC.
 - Si `projectType=rest` + `webFramework=webflux` -> cargar
@@ -143,3 +155,4 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 6. **Código en inglés**, documentación en inglés.
 7. **DB no cambia REST/SOAP.** WAS REST/MVC con DB usa HikariCP+JPA+Oracle. Si un caso BUS/ORQ WebFlux trae DB propia, escalar o aislar el bloqueo con R2DBC/`Schedulers.boundedElastic()`; nunca meter HikariCP+JPA en el request path de WebFlux.
 8. **Higiene de `.gitignore` antes de cerrar:** el `.gitignore` del proyecto migrado debe ignorar `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md` y `TRAMAS.txt`. No ignorar `.sonarlint/connectedMode.json`.
+9. **BANCS no se infiere por nombre ni por template.** Solo BUS/IIB con `invocaBancs=true` puede agregar `lib-bnc-api-client`, `BancsService`, `BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*` o `dependsOn: lib-bnc-api-client`. En WAS, ORQ y BUS sin BANCS, esos artefactos son error de migracion y deben removerse.

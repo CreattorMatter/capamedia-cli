@@ -244,10 +244,13 @@ def check_project(
         if bank_fix:
             from capamedia_cli.core.bank_autofix import run_bank_autofix
 
+            bank_ctx = _build_context()
             bank_results = run_bank_autofix(
                 migrated_path,
                 description=bank_description,
                 owner=bank_owner,
+                source_type=bank_ctx.source_type,
+                has_bancs=bank_ctx.has_bancs,
             )
             applied = sum(1 for r in bank_results if r.applied)
             console.print(
