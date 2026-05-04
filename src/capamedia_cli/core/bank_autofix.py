@@ -353,6 +353,179 @@ def fix_add_libbnc_dependency(
 
 
 # ---------------------------------------------------------------------------
+# Regla 8b — `spring.autoconfigure.exclude` cuando lib-bnc-api-client esta en
+# el classpath pero el servicio NO invoca BANCS.
+#
+# Contexto: Regla 8 oficial fuerza la libreria en build.gradle como substring
+# match (validate_hexagonal.py). Si el servicio realmente no llama BANCS,
+# Spring Boot levanta WebClientAutoConfiguration al arranque y muere con:
+#   "At least one web client configuration must be provided under
+#    'bancs.webclients'"
+# El pod entra en CrashLoopBackOff. El fix es excluir las 3 auto-configs.
+# ---------------------------------------------------------------------------
+
+
+_BANCS_AUTOCONFIG_EXCLUSIONS = [
+    "com.pichincha.bnc.apiclient.autoconfigure.BancsClientAutoConfiguration",
+    "com.pichincha.bnc.apiclient.autoconfigure.BancsCircuitBreakerAutoConfiguration",
+    "com.pichincha.bnc.apiclient.autoconfigure.WebClientAutoConfiguration",
+]
+
+
+def _service_uses_bancs(project_root: Path) -> bool:
+    """True si el servicio realmente invoca BANCS.
+
+    Senales: imports de `com.pichincha.bnc.*`, anotaciones `@BancsService`,
+    helpers `BancsClientHelper`, o un bloque `bancs.webclients` declarado en
+    application.yml.
+    """
+    src_java = project_root / "src" / "main" / "java"
+    if src_java.exists():
+        for java in src_java.rglob("*.java"):
+            if "build" in java.parts or "test" in [p.lower() for p in java.parts]:
+                continue
+            try:
+                text = java.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if (
+                "com.pichincha.bnc" in text
+                or "@BancsService" in text
+                or "BancsClientHelper" in text
+            ):
+                return True
+
+    resources = project_root / "src" / "main" / "resources"
+    if resources.exists():
+        for yml in list(resources.rglob("application*.yml")) + list(
+            resources.rglob("application*.yaml")
+        ):
+            try:
+                text = yml.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if re.search(r"(?m)^\s{0,2}bancs\s*:\s*$", text) and re.search(
+                r"(?m)^\s+webclients\s*:", text
+            ):
+                return True
+    return False
+
+
+def _libbnc_in_classpath(project_root: Path) -> bool:
+    for gf in list(project_root.rglob("build.gradle")) + list(
+        project_root.rglob("build.gradle.kts")
+    ):
+        if "build" in gf.parts or ".git" in gf.parts:
+            continue
+        if "test" in [p.lower() for p in gf.parts]:
+            continue
+        try:
+            if "lib-bnc-api-client" in gf.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _yml_already_excludes_bancs(text: str) -> bool:
+    """True si los 3 auto-configs ya estan listados bajo
+    `spring.autoconfigure.exclude`. Se hace un match laxo por nombre simple."""
+    if "autoconfigure" not in text or "exclude" not in text:
+        return False
+    needles = (
+        "BancsClientAutoConfiguration",
+        "BancsCircuitBreakerAutoConfiguration",
+        "WebClientAutoConfiguration",
+    )
+    return all(needle in text for needle in needles)
+
+
+_SPRING_BLOCK_RE = re.compile(r"(?m)^spring\s*:\s*$")
+
+
+def _insert_autoconfigure_exclude_into_yml(text: str) -> str | None:
+    """Devuelve el yml con el bloque `spring.autoconfigure.exclude` insertado.
+
+    Si `spring:` ya existe, agrega `autoconfigure.exclude` adentro respetando
+    indentacion. Si no existe, prepende el bloque al inicio del archivo.
+    Devuelve None si ya esta presente y no hay nada que hacer.
+    """
+    if _yml_already_excludes_bancs(text):
+        return None
+
+    block = (
+        "  autoconfigure:\n"
+        "    # lib-bnc-api-client esta en el classpath por Regla 8 oficial,\n"
+        "    # pero este servicio NO invoca BANCS. Sin esta exclusion, las\n"
+        "    # auto-configs piden 'bancs.webclients' al arranque y el pod\n"
+        "    # entra en CrashLoopBackOff.\n"
+        "    exclude:\n"
+        + "\n".join(f"      - {fqn}" for fqn in _BANCS_AUTOCONFIG_EXCLUSIONS)
+        + "\n"
+    )
+
+    m = _SPRING_BLOCK_RE.search(text)
+    if not m:
+        return "spring:\n" + block + ("\n" + text if text and not text.startswith("\n") else text)
+
+    # Insertar el bloque inmediatamente despues del `spring:` header,
+    # preservando todo el contenido existente del bloque spring.
+    insert_pos = m.end()
+    if insert_pos < len(text) and text[insert_pos] != "\n":
+        return text[:insert_pos] + "\n" + block + text[insert_pos:]
+    return text[: insert_pos + 1] + block + text[insert_pos + 1 :]
+
+
+def fix_bancs_autoconfigure_exclude(project_root: Path) -> BankAutofixResult:
+    """Agrega `spring.autoconfigure.exclude` en application.yml cuando aplica.
+
+    Aplica si:
+      - `lib-bnc-api-client` esta en `build.gradle`, Y
+      - el codigo no usa BANCS (sin imports `com.pichincha.bnc.*`, sin
+        `@BancsService`, sin bloque `bancs.webclients` en `application.yml`), Y
+      - el `application.yml` aun no tiene la exclusion.
+
+    No toca `application-test.yml` ni perfiles de test.
+    """
+    result = BankAutofixResult(rule="8b", applied=False)
+
+    if not _libbnc_in_classpath(project_root):
+        result.notes = "lib-bnc-api-client no esta en build.gradle: no aplica"
+        return result
+
+    if _service_uses_bancs(project_root):
+        result.notes = "servicio invoca BANCS: no aplica"
+        return result
+
+    yml = project_root / "src" / "main" / "resources" / "application.yml"
+    if not yml.exists():
+        yml = project_root / "src" / "main" / "resources" / "application.yaml"
+    if not yml.exists():
+        result.notes = "no se encontro src/main/resources/application.yml"
+        return result
+
+    try:
+        text = yml.read_text(encoding="utf-8")
+    except OSError as e:
+        result.notes = f"no se pudo leer application.yml: {e}"
+        return result
+
+    new_text = _insert_autoconfigure_exclude_into_yml(text)
+    if new_text is None:
+        result.notes = "application.yml ya excluye las auto-configs BANCS"
+        return result
+
+    yml.write_text(new_text, encoding="utf-8")
+    result.applied = True
+    result.files_modified.append(yml)
+    result.changes.append(
+        f"{yml.relative_to(project_root)}: +spring.autoconfigure.exclude "
+        f"(BancsClient/BancsCircuitBreaker/WebClient AutoConfiguration)"
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Regla 9 — catalog-info.yaml
 # ---------------------------------------------------------------------------
 
@@ -770,7 +943,7 @@ def run_bank_autofix(
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
     """
-    wanted = set(rules) if rules else {"4", "6", "7", "8", "9"}
+    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9"}
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
     results: list[BankAutofixResult] = []
@@ -785,6 +958,8 @@ def run_bank_autofix(
         results.append(
             fix_add_libbnc_dependency(project_root, requires_bancs=requires_bancs)
         )
+    if "8b" in wanted:
+        results.append(fix_bancs_autoconfigure_exclude(project_root))
     if "9" in wanted:
         results.append(
             fix_catalog_info_scaffold(

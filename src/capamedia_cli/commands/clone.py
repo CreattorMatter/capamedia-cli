@@ -230,6 +230,38 @@ MIGRATED_NAMESPACES = ("tnd", "tpr", "csg", "tmp", "tia", "tct")
 DEFAULT_BRANCH_NAMES = {"main", "master"}
 
 
+def _git_error_tail(result: subprocess.CompletedProcess[str]) -> str:
+    output = result.stderr or result.stdout or ""
+    return output.strip().split("\n")[-1] if output else "unknown error"
+
+
+def _looks_like_auth_or_repo_visibility_error(error: str) -> bool:
+    lowered = error.lower()
+    return any(
+        token in lowered
+        for token in (
+            "tf401019",
+            "not found",
+            "repository not found",
+            "does not exist",
+            "no tienes permisos",
+            "no tiene permisos",
+            "authentication failed",
+            "could not read username",
+            "terminal prompts disabled",
+        )
+    )
+
+
+def _git_credential_manager_env() -> dict[str, str]:
+    """Allow cached Git Credential Manager auth without prompting interactively."""
+    return {
+        **os.environ,
+        "GCM_INTERACTIVE": "Never",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
 def _git_clone(
     repo_name: str,
     dest: Path,
@@ -263,7 +295,23 @@ def _git_clone(
         )
         if result.returncode == 0:
             return (True, "")
-        return (False, result.stderr.strip().split("\n")[-1] if result.stderr else "unknown error")
+        first_error = _git_error_tail(result)
+        if git_env and _looks_like_auth_or_repo_visibility_error(first_error):
+            retry = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+                env=_git_credential_manager_env(),
+            )
+            if retry.returncode == 0:
+                return (True, "")
+            return (
+                False,
+                f"{first_error} (retry sin CAPAMEDIA_AZDO_PAT: {_git_error_tail(retry)})",
+            )
+        return (False, first_error)
     except subprocess.TimeoutExpired:
         return (False, "timeout")
     except FileNotFoundError:

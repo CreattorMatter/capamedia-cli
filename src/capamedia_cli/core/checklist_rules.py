@@ -497,6 +497,61 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
+    # 0.2e - Si lib-bnc-api-client esta en classpath pero el servicio no usa
+    # BANCS, application.yml DEBE excluir las auto-configs. Sin esta exclusion,
+    # Spring Boot levanta WebClientAutoConfiguration al arranque, pide el bloque
+    # `bancs.webclients` y el pod entra en CrashLoopBackOff.
+    from capamedia_cli.core.bank_autofix import (
+        _libbnc_in_classpath,
+        _service_uses_bancs,
+        _yml_already_excludes_bancs,
+    )
+
+    if _libbnc_in_classpath(ctx.migrated_path) and not _service_uses_bancs(
+        ctx.migrated_path
+    ):
+        yml = ctx.migrated_path / "src" / "main" / "resources" / "application.yml"
+        if not yml.exists():
+            yml = ctx.migrated_path / "src" / "main" / "resources" / "application.yaml"
+        yml_text = _read_or_empty(yml) if yml.exists() else ""
+        if yml.exists() and not _yml_already_excludes_bancs(yml_text):
+            results.append(
+                CheckResult(
+                    "0.2e",
+                    "Block 0",
+                    "BANCS auto-configure exclude cuando lib esta sin uso",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        "lib-bnc-api-client esta en build.gradle pero el "
+                        "servicio no invoca BANCS y application.yml no "
+                        "excluye las auto-configs. El pod fallara al arrancar "
+                        "con 'At least one web client configuration must be "
+                        "provided under bancs.webclients'."
+                    ),
+                    suggested_fix=(
+                        "Agregar a src/main/resources/application.yml:\n"
+                        "spring:\n"
+                        "  autoconfigure:\n"
+                        "    exclude:\n"
+                        "      - com.pichincha.bnc.apiclient.autoconfigure.BancsClientAutoConfiguration\n"
+                        "      - com.pichincha.bnc.apiclient.autoconfigure.BancsCircuitBreakerAutoConfiguration\n"
+                        "      - com.pichincha.bnc.apiclient.autoconfigure.WebClientAutoConfiguration\n"
+                        "Equivale a `capamedia check --auto-fix --bank-fix`."
+                    ),
+                )
+            )
+        elif yml.exists():
+            results.append(
+                CheckResult(
+                    "0.2e",
+                    "Block 0",
+                    "BANCS auto-configure exclude cuando lib esta sin uso",
+                    "pass",
+                    detail="application.yml excluye las 3 auto-configs BANCS",
+                )
+            )
+
     # 0.3 - Operation names match
     if legacy_wsdl:
         legacy_info = analyze_wsdl(legacy_wsdl)
@@ -632,6 +687,39 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
                 "pass",
             )
         )
+
+    # 1.3c - Config/env vars no son puertos de salida
+    config_ports = [
+        str(f.relative_to(ctx.migrated_path))
+        for pattern in (
+            "application/output/port/*ConfigOutputPort.java",
+            "application/port/output/*ConfigOutputPort.java",
+        )
+        for f in src_java.rglob(pattern)
+    ]
+    config_impls = [
+        str(f.relative_to(ctx.migrated_path))
+        for f in src_java.rglob("*.java")
+        if re.search(r"implements\s+\w*ConfigOutputPort\b", _read_or_empty(f))
+    ]
+    config_offenders = sorted(set(config_ports + config_impls))
+    if config_offenders:
+        results.append(
+            CheckResult(
+                "1.3c",
+                "Block 1",
+                "Config no es output port",
+                "fail",
+                severity="high",
+                detail=f"anti-pattern detectado: {', '.join(config_offenders[:5])}",
+                suggested_fix=(
+                    "Leer env/YAML con @ConfigurationProperties o bean de config; "
+                    "los output ports son solo para dependencias externas."
+                ),
+            )
+        )
+    else:
+        results.append(CheckResult("1.3c", "Block 1", "Config no es output port", "pass"))
 
     # 1.4 - UN output port POR DOMINIO de UMP invocado
     # Regla actualizada (v0.3.2): el numero de output ports debe coincidir con la

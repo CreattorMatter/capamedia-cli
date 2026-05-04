@@ -223,3 +223,6 @@ o abrir el PR si no hay residuales HIGH.
    excepcion versionable.
 7. **Informativo, no destructivo.** Todo cambio del autofix queda en
    `.capamedia/autofix/<ts>.log` para trazabilidad.
+8. **Config is not an output port.** Si ves `*ConfigOutputPort` o un adapter
+   que solo lee env/YAML/properties, reemplazar por `@ConfigurationProperties`
+   o bean de config; los output ports son para dependencias externas.

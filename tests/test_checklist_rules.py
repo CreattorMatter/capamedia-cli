@@ -200,6 +200,37 @@ def test_block_1_accepts_canonical_peer_review_port_layout(tmp_path: Path) -> No
     assert check.status == "pass"
 
 
+def test_block_1_rejects_config_output_port_antipattern(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    config_port = (
+        root
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "pichincha"
+        / "sp"
+        / "application"
+        / "output"
+        / "port"
+        / "CustomerBasicConfigOutputPort.java"
+    )
+    config_port.parent.mkdir(parents=True, exist_ok=True)
+    config_port.write_text(
+        "package com.pichincha.sp.application.output.port;\n"
+        "public interface CustomerBasicConfigOutputPort {}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_1(ctx)
+    check = _by_id(results, "1.3c")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "@ConfigurationProperties" in check.suggested_fix
+
+
 def test_block_7_detects_hardcoded_password(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     yml = root / "src/main/resources/application.yml"

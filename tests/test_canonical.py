@@ -216,3 +216,24 @@ def test_canonical_migration_assets_align_ports_with_interfaces() -> None:
         content = path.read_text(encoding="utf-8")
         for phrase in forbidden:
             assert phrase not in content, f"{Path(path).name} still contains outdated rule: {phrase}"
+
+
+def test_canonical_forbids_config_output_ports_for_env_values() -> None:
+    targets = [
+        CANONICAL_ROOT / "prompts" / "migrate.md",
+        CANONICAL_ROOT / "prompts" / "doublecheck.md",
+        CANONICAL_ROOT / "prompts" / "migrate-rest-full.md",
+        CANONICAL_ROOT / "prompts" / "migrate-soap-full.md",
+    ]
+
+    forbidden = [
+        "Config output port",
+        "CustomerConfigOutputPort",
+        "implements CustomerConfigOutputPort",
+    ]
+
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        assert "Config is not an output port" in content
+        for phrase in forbidden:
+            assert phrase not in content, f"{Path(path).name} still allows config output port: {phrase}"

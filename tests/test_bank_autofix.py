@@ -364,15 +364,17 @@ def test_run_bank_autofix_does_not_add_bancs_without_context(tmp_path: Path) -> 
     )
 
     results = run_bank_autofix(tmp_path)
-    # 5 reglas, pero la 6 tiene 2 fixes -> 6 results
-    assert len(results) == 6
+    # 6 reglas, pero la 6 tiene 2 fixes -> 7 results
+    assert len(results) == 7
     rules_applied = {r.rule for r in results if r.applied}
     # Deberia aplicar 4, 7 y 9. La regla 8 queda en modo conservador:
     # normaliza si existe, pero no inventa BANCS sin matriz BUS/IIB+invocaBancs.
+    # La 8b no aplica si lib-bnc-api-client no esta en el classpath.
     assert "4" in rules_applied
     assert "7" in rules_applied
     assert "9" in rules_applied
     assert "8" not in rules_applied
+    assert "8b" not in rules_applied
 
 
 def test_run_bank_autofix_adds_bancs_for_iib_with_invoca_bancs(tmp_path: Path) -> None:

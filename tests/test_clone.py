@@ -41,6 +41,39 @@ def test_git_clone_uses_env_auth_when_pat_is_present(tmp_path: Path, monkeypatch
     assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
 
 
+def test_git_clone_retries_with_gcm_when_env_pat_is_stale(tmp_path: Path, monkeypatch) -> None:
+    dest = tmp_path / "legacy" / "sqb-msa-wsclientes0077"
+    calls: list[dict[str, str] | None] = []
+
+    def fake_run(cmd, capture_output, text, check, timeout, env):
+        calls.append(env)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                stdout="",
+                stderr="remote: TF401019: repository not found or no permissions\n",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "stale-pat")
+    monkeypatch.setattr("capamedia_cli.commands.clone.subprocess.run", fake_run)
+
+    ok, err = _git_clone("sqb-msa-wsclientes0077", dest, shallow=True)
+
+    assert ok is True
+    assert err == ""
+    assert len(calls) == 2
+    first_env = calls[0]
+    retry_env = calls[1]
+    assert isinstance(first_env, dict)
+    assert isinstance(retry_env, dict)
+    assert "GIT_CONFIG_VALUE_0" in first_env
+    assert "GIT_CONFIG_VALUE_0" not in retry_env
+    assert retry_env["GCM_INTERACTIVE"] == "Never"
+    assert retry_env["GIT_TERMINAL_PROMPT"] == "0"
+
+
 def test_clone_migrated_repos_tries_known_namespaces(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, Path, str, bool, bool]] = []
 

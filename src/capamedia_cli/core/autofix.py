@@ -736,12 +736,35 @@ def fix_add_test_annotation(project_root: Path, violation: Violation) -> Autofix
     )
 
 
+# -- Adapters para fixes definidos en bank_autofix.py -----------------------
+
+
+def fix_bancs_autoconfigure_exclude_adapter(
+    root: Path, violation: Violation
+) -> AutofixResult:
+    """Adapter para usar `bank_autofix.fix_bancs_autoconfigure_exclude` desde
+    el AUTOFIX_REGISTRY. Convierte el `BankAutofixResult` en `AutofixResult`.
+    """
+    from capamedia_cli.core.bank_autofix import fix_bancs_autoconfigure_exclude
+
+    bank_result = fix_bancs_autoconfigure_exclude(root)
+    return AutofixResult(
+        applied=bank_result.applied,
+        files_modified=bank_result.files_modified,
+        before="" if bank_result.applied else (bank_result.notes or ""),
+        after="\n".join(bank_result.changes),
+        notes=bank_result.notes
+        or ("spring.autoconfigure.exclude agregado" if bank_result.applied else ""),
+    )
+
+
 # -- Registry ---------------------------------------------------------------
 
 # La clave es el ID del checklist_rules (NO un slug inventado). Asi calza 1:1
 # con `CheckResult.id`. Para 2.2 tenemos 2 fixes encadenados: primero el
 # conversor slf4j->BpLogger, y si aun quedan @Slf4j sueltos el removal puro.
 AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
+    "0.2e": [fix_bancs_autoconfigure_exclude_adapter],
     "1.3": [fix_abstract_to_interface],
     "2.2": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
     "5.1": [fix_bancs_exception_wrapping],

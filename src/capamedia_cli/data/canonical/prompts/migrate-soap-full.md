@@ -41,6 +41,7 @@ allowed_tools:
 > **Scaffold origin:** The Banco Pichincha **Fabrics MCP archetype** generates the initial SOAP scaffold (questionnaire input: 2+ operations, optional DB). **Always verify you are using the latest MCP version** (see §1.0) — the MCP evolves and may fix known gaps. This prompt assumes you start from that scaffold and fill in the migration logic; do NOT rebuild the project skeleton from scratch.
 > **Secrets:** NEVER look for or fabricate secrets (DB passwords, API tokens, keystores). Reference them as `${CCC_*}` env vars in `application.yml` and `helm/*.yml`. The bank provides real secret values ~1 week before production deploy.
 > **SonarLint local:** before opening the first PR, the migrated project MUST contain a versioned `.sonarlint/connectedMode.json` binding to SonarCloud organization `bancopichinchaec`. Use the template at `prompts/configuracion-claude-code/sonarlint/connectedMode.template.json` and replace `<PROJECT_KEY_FROM_SONARCLOUD>` with the real key. See full setup guide at `prompts/configuracion-claude-code/sonarlint/README.md`. Validated by checklist BLOQUE 14.
+> **Config is not an output port:** env/YAML/property values are read with `@ConfigurationProperties` or config beans. Never create `*ConfigOutputPort` or an infrastructure adapter just to read config.
 > **Deployment hygiene:** before closing, the migrated project's `.gitignore` MUST exclude local CapaMedia/AI artifacts that must not be pushed to Azure DevOps: `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`. Do not ignore `.sonarlint/connectedMode.json`; that binding is versionable.
 
 ## WHEN TO USE THIS PROMPT (SOAP) vs REST
@@ -714,7 +715,7 @@ This SOAP prompt ALWAYS produces a Spring MVC stack with Spring WS `@Endpoint` d
 | Input port (interface) | `FooInputPort.java` | `ConsultarClienteInputPort` |
 | Service (implements input port) | `FooService.java` | `ConsultarClienteService` |
 | Output port (interface) | `FooOutputPort.java` | `BancsClienteOutputPort` |
-| Config output port (interface) | `FooConfigOutputPort.java` | `CustomerConfigOutputPort` |
+| Configuration properties | `FooPropertiesConfig.java` | `CustomerPropertiesConfig` |
 | Output adapter | `FooAdapter.java` | `BancsClienteAdapter` |
 | Domain model | `Foo.java` | `Customer` |
 | DTO | `FooDtoRequest/Response` | `CustomerBancsDtoRequest` |
@@ -1555,11 +1556,13 @@ public interface BancsClienteOutputPort {
 }
 ```
 
-3. **Create config port** (if there are configuration properties):
+3. **Create configuration properties class** (if there are properties):
 ```java
-public interface CustomerConfigOutputPort {
-  String getDatasource();
-  boolean isFailoverEnabled();
+@ConfigurationProperties(prefix = "customer")
+@Getter @Setter
+public class CustomerPropertiesConfig {
+  private String datasource;
+  private boolean failoverEnabled;
 }
 ```
 
@@ -2330,11 +2333,12 @@ public <Operacion>Response <operacion>(@RequestPayload <Operacion> request) {
 #### 4.10 Configuration Classes
 
 **DO NOT use `@Configuration` on `@ConfigurationProperties` classes.** `@ConfigurationPropertiesScan` in `Application.java` auto-registers them. Using both is redundant and not the canonical pattern pattern.
+**Config is not an output port:** these classes must not implement `*OutputPort`.
 
 ```java
 @ConfigurationProperties(prefix = "<config-prefix>")
 @Getter @Setter
-public class CustomerPropertiesConfig implements CustomerConfigOutputPort {
+public class CustomerPropertiesConfig {
   private String datasource;
   private boolean failoverEnabled;
 }
