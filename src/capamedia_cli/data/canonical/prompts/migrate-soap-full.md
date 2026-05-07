@@ -69,7 +69,7 @@ sin BANCS (raro). BUS con `invocaBancs: true` **nunca** viene acá — la Regla 
 Si el legacy tiene acceso a BD (WAS con Oracle), agregar HikariCP+JPA dentro
 de este prompt — funciona nativo sobre Spring MVC.
 
-**Both REST and SOAP services receive/return SOAP XML envelopes at the HTTP level.** The REST prompt uses `@RestController` + manual JAXB parsing, while this SOAP prompt uses Spring WS `@Endpoint` + `@PayloadRoot` dispatching on top of Spring MVC. URL path is `/IntegrationBus/soap/<ServiceName>` in both.
+**Both REST and SOAP services receive/return SOAP XML envelopes at the HTTP level.** The REST prompt uses `@RestController` + manual JAXB parsing, while this SOAP prompt uses Spring WS `@Endpoint` + `@PayloadRoot` dispatching on top of Spring MVC. URL path is source-specific: BUS/IIB SOAP may keep `/IntegrationBus/soap/<ServiceName>` only when the legacy BUS contract proves it; WAS SOAP must preserve the WAS endpoint, normally `/<ServiceName>/soap/*` plus `/<ServiceName>/soap/<ServiceName>Request`.
 
 **Count WSDL operations correctly (used by Rule 3 classification after source/override checks):**
 
@@ -161,6 +161,8 @@ Before executing, verify that you have access to:
 6. **Gold standard reference project:** `<namespace>-msa-sp-<svc>` -- the ONLY approved SOAP migration reference. Uses Spring WS `@Endpoint`, `BancsClientHelper` abstract + per-TX subclasses, `HeaderRequestModel`, `NamespacePrefixInterceptor`, `WebServiceConfig`, per-TX circuit breaker, Undertow blocking.
 
 > **CRITICAL WARNING about wsclientes0015:** This canonical pattern was originally a **BUS (IIB)** service migrated as SOAP. Under the **current MCP matrix**, BUS services with `invocaBancs: true` ALWAYS go REST+WebFlux — they would NEVER use this SOAP prompt. The 0015 remains valid as a SOAP/MVC pattern for Rule 3 services (WAS 2+ ops, or BUS 2+ ops without BANCS). When using 0015 as reference, be aware that its BANCS integration patterns (BancsClientHelper, per-TX circuit breaker) are correct for the SOAP/MVC stack, but its origin as a BUS service is a historical artifact that should NOT override `bank-mcp-matrix.md`.
+
+**Endpoint contract gate:** do not copy a BUS/IIB URL path into a WAS service. For WAS SOAP, `WebServiceConfig` must keep the WAS servlet path from the legacy/MCP scaffold, normally `/<ServiceName>/soap/*`, and `DefaultWsdl11Definition.setLocationUri()` normally points to `/<ServiceName>/soap/<ServiceName>Request`. `/IntegrationBus/soap/...` is a BUS/IIB contract and is invalid for WAS unless the legacy WAS evidence explicitly shows that exact path.
 
 **BANCS artifact gate:** for new migrations, this SOAP prompt must not add
 `lib-bnc-api-client`, `BancsService`, `BancsClientHelper`, `bancs.webclients`,
@@ -928,7 +930,7 @@ Parameters:
    ```
 
 3. **Versiones desactualizadas** — el MCP genera con versiones de fecha del deploy del MCP, que pueden ser viejas. Actualizar después del scaffold:
-   - Spring Boot → `3.5.13`
+   - Spring Boot → `3.5.14`
    - Jackson (forzar en resolution strategy) → `2.21.2`
    - Peer Review plugin → `1.1.0`
 
@@ -953,7 +955,7 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Update to `3.5.13` in `build.gradle` (latest as of 2026-04; previous was 3.5.12)
+1. **Spring Boot version:** Update to `3.5.14` in `build.gradle` (released 2026-04-23; previous baseline was 3.5.13)
 2. **Peer Review plugin:** Update to `1.1.0`
 3. **Add dependency** (if not present):
 ```groovy
@@ -1835,14 +1837,14 @@ public class WebServiceConfig implements WsConfigurer {
     MessageDispatcherServlet servlet = new MessageDispatcherServlet();
     servlet.setApplicationContext(applicationContext);
     servlet.setTransformWsdlLocations(true);
-    return new ServletRegistrationBean<>(servlet, "/IntegrationBus/soap/*");
+    return new ServletRegistrationBean<>(servlet, "/<NombreServicio>/soap/*");
   }
 
   @Bean(name = "<NombreServicio>Request")
   public DefaultWsdl11Definition defaultWsdl11Definition(XsdSchema schema) {
     DefaultWsdl11Definition wsdl11Definition = new DefaultWsdl11Definition();
     wsdl11Definition.setPortTypeName("<NombreServicio>");
-    wsdl11Definition.setLocationUri("/IntegrationBus/soap/<NombreServicio>");
+    wsdl11Definition.setLocationUri("/<NombreServicio>/soap/<NombreServicio>Request");
     wsdl11Definition.setTargetNamespace("http://bpichincha.com/servicios");
     wsdl11Definition.setSchema(schema);
     return wsdl11Definition;
@@ -1862,7 +1864,9 @@ public class WebServiceConfig implements WsConfigurer {
 ```
 
 **Key points:**
-- The `MessageDispatcherServlet` is registered at `/IntegrationBus/soap/*` to match the legacy IIB URL path
+- For WAS SOAP, the `MessageDispatcherServlet` is registered at `/<NombreServicio>/soap/*` and `setLocationUri()` uses `/<NombreServicio>/soap/<NombreServicio>Request` unless the legacy WAS evidence shows a different WAS path
+- For BUS/IIB SOAP only, use `/IntegrationBus/soap/*` and `/IntegrationBus/soap/<NombreServicio>` when the legacy BUS URL path proves that contract
+- Never rewrite a WAS SOAP service to `/IntegrationBus/soap/...` just because a BUS gold project uses it
 - The WSDL definition bean name determines the published WSDL URL (e.g., `<NombreServicio>Request.wsdl`)
 - The XSD schema is loaded from `src/main/resources/legacy/` (same files used for CXF code generation)
 - The `NamespacePrefixInterceptor` is registered via `addInterceptors()` for legacy client compatibility
@@ -2892,13 +2896,17 @@ grep "minReplicas" helm/prod.yml
 grep "averageValue" helm/dev.yml helm/test.yml helm/prod.yml
 # EXPECTED: averageValue: 100m in every environment
 
-# CHECK 6: Each CCC_* from application.yml exists in helm/dev.yml
+# CHECK 6: Helm env vars have no placeholders or inline comments
+grep -nE '^\s*(name|value):.*#|value:\s*["'\'']?<[^>]+>["'\'']?|<CCC_' helm/dev.yml helm/test.yml helm/prod.yml
+# EXPECTED: no matches
+
+# CHECK 7: Each CCC_* from application.yml exists in helm/dev.yml
 for var in $(grep -oP 'CCC_\w+' src/main/resources/application.yml | sort -u); do
   grep -q "$var" helm/dev.yml || echo "MISSING in dev.yml: $var"
 done
 # EXPECTED: no MISSING
 
-# CHECK 7: Each CCC_* from application.yml exists in helm/prod.yml
+# CHECK 8: Each CCC_* from application.yml exists in helm/prod.yml
 for var in $(grep -oP 'CCC_\w+' src/main/resources/application.yml | sort -u); do
   grep -q "$var" helm/prod.yml || echo "MISSING in prod.yml: $var"
 done

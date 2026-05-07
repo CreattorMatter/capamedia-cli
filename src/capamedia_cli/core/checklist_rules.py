@@ -19,6 +19,10 @@ from capamedia_cli.core.gitignore_policy import (
     format_deployment_gitignore_block,
     missing_deployment_gitignore_entries,
 )
+from capamedia_cli.core.version_policy import (
+    SPRING_BOOT_BASELINE_VERSION,
+    is_version_lower,
+)
 
 # -- Result dataclass -------------------------------------------------------
 
@@ -101,6 +105,67 @@ def _relative_display(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _unquoted_hash_pos(line: str) -> int:
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_double:
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double:
+            return idx
+    return -1
+
+
+def _helm_yaml_files(helm_dir: Path) -> list[Path]:
+    return sorted(
+        f
+        for f in helm_dir.rglob("*")
+        if f.is_file()
+        and f.suffix.lower() in {".yml", ".yaml"}
+        and ".git" not in f.parts
+        and "build" not in f.parts
+    )
+
+
+_HELM_ENV_LINE_RE = re.compile(r"^\s*(?:-\s*)?(name|value)\s*:\s*(.*)$", re.IGNORECASE)
+_HELM_PLACEHOLDER_RE = re.compile(r"<\s*[^>]+\s*>")
+_HELM_PENDING_MARKER_RE = re.compile(r"\b(TODO|TBD|PENDIENTE|PENDIENTE_VALIDAR|VALIDAR|REVISAR)\b", re.IGNORECASE)
+
+
+def _helm_env_value_hygiene_issues(helm_file: Path, root: Path) -> list[str]:
+    issues: list[str] = []
+    for line_no, line in enumerate(_read_or_empty(helm_file).splitlines(), 1):
+        match = _HELM_ENV_LINE_RE.match(line)
+        if not match:
+            continue
+        key = match.group(1).lower()
+        value = match.group(2).strip()
+        rel = _relative_display(helm_file, root)
+
+        hash_pos = _unquoted_hash_pos(line)
+        if hash_pos >= 0:
+            issues.append(f"{rel}:{line_no} {key}: comentario inline no permitido")
+
+        if key != "value":
+            continue
+        if _HELM_PLACEHOLDER_RE.search(value):
+            issues.append(f"{rel}:{line_no} value placeholder `{value}`")
+        elif _HELM_PENDING_MARKER_RE.search(value):
+            issues.append(f"{rel}:{line_no} value con marcador pendiente `{value}`")
+    return issues
+
+
 def _matrix_requires_bancs(ctx: CheckContext) -> bool:
     return (ctx.source_type or "").lower() in {"bus", "iib"} and ctx.has_bancs
 
@@ -147,6 +212,26 @@ def _active_bancs_artifacts(root: Path) -> list[str]:
     return sorted(set(artifacts))
 
 
+def _was_soap_bus_endpoint_artifacts(root: Path) -> list[str]:
+    """Detecta endpoints BUS en Java de servicios WAS SOAP."""
+    src_java = root / "src" / "main" / "java"
+    if not src_java.exists():
+        return []
+
+    artifacts: list[str] = []
+    for java in src_java.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts:
+            continue
+        for line_no, line in enumerate(_read_or_empty(java).splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith(("//", "/*", "*")):
+                continue
+            if "/IntegrationBus/soap" in stripped:
+                rel = _relative_display(java, root)
+                artifacts.append(f"{rel}:{line_no} {stripped[:120]}")
+    return artifacts
+
+
 def _allowed_mensaje_negocio_slot(line: str) -> bool:
     """True when mensajeNegocio is intentionally emitted empty/null for the contract."""
     return (
@@ -176,6 +261,17 @@ def _collect_tx_codes_from_java(src_java: Path) -> set[str]:
         for pattern in patterns:
             codes.update(pattern.findall(text))
     return codes
+
+
+_SPRING_BOOT_PLUGIN_RE = re.compile(
+    r"id\s*(?:\(\s*[\"']org\.springframework\.boot[\"']\s*\)|[\"']org\.springframework\.boot[\"'])"
+    r"\s*version\s*(?:\(\s*)?[\"']([^\"']+)[\"']",
+    re.IGNORECASE,
+)
+
+
+def _spring_boot_plugin_versions(gradle_text: str) -> list[str]:
+    return [match.group(1).strip() for match in _SPRING_BOOT_PLUGIN_RE.finditer(gradle_text)]
 
 
 _HIGH_DISCOVERY_EDGE_CODES = {
@@ -549,6 +645,42 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
                     "BANCS auto-configure exclude cuando lib esta sin uso",
                     "pass",
                     detail="application.yml excluye las 3 auto-configs BANCS",
+                )
+            )
+
+    # 0.2f - WAS SOAP conserva endpoint WAS, no endpoint BUS/IIB.
+    if (ctx.source_type or "").lower() == "was" and ctx.project_type == "soap":
+        bus_endpoint_artifacts = _was_soap_bus_endpoint_artifacts(ctx.migrated_path)
+        if bus_endpoint_artifacts:
+            results.append(
+                CheckResult(
+                    "0.2f",
+                    "Block 0",
+                    "Endpoint WAS SOAP vs contrato legacy",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        "WAS SOAP no debe publicar rutas BUS/IIB "
+                        f"`/IntegrationBus/soap`: {bus_endpoint_artifacts[:8]}"
+                    ),
+                    suggested_fix=(
+                        "Preservar el endpoint WAS SOAP del legacy/MCP. "
+                        "Patron default: ServletRegistrationBean -> "
+                        "`/<ServiceName>/soap/*` y setLocationUri -> "
+                        "`/<ServiceName>/soap/<ServiceName>Request`. "
+                        "Usar `/IntegrationBus/soap/...` solo para BUS/IIB "
+                        "cuando el legacy lo pruebe."
+                    ),
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "0.2f",
+                    "Block 0",
+                    "Endpoint WAS SOAP vs contrato legacy",
+                    "pass",
+                    detail="WAS SOAP sin rutas BUS/IIB /IntegrationBus/soap",
                 )
             )
 
@@ -986,6 +1118,126 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
         elif checked_hpa_values:
             results.append(CheckResult("7.4", "Block 7", "Helm HPA averageValue", "pass"))
 
+        # 7.5c - Env vars de Helm sin placeholders documentales ni comentarios
+        env_hygiene_issues: list[str] = []
+        for f in _helm_yaml_files(helm_dir):
+            env_hygiene_issues.extend(_helm_env_value_hygiene_issues(f, ctx.migrated_path))
+        if env_hygiene_issues:
+            results.append(
+                CheckResult(
+                    "7.5c",
+                    "Block 7",
+                    "Helm env vars sin placeholders/comentarios",
+                    "fail",
+                    severity="high",
+                    detail="; ".join(env_hygiene_issues[:12]),
+                    suggested_fix=(
+                        "En helm/dev.yml, helm/test.yml y helm/prod.yml, reemplazar "
+                        "`value: \"<CCC_...>\"` por el valor real del ambiente o "
+                        "dejarlo como handoff fuera del Helm. No poner comentarios "
+                        "inline en lineas `name:`/`value:` de variables de entorno."
+                    ),
+                )
+            )
+        elif _helm_yaml_files(helm_dir):
+            results.append(
+                CheckResult(
+                    "7.5c",
+                    "Block 7",
+                    "Helm env vars sin placeholders/comentarios",
+                    "pass",
+                    detail="sin value:<...>, marcadores pendientes ni comentarios inline en name/value",
+                )
+            )
+
+    return results
+
+
+# -- Block 8: Versiones y dependencias -------------------------------------
+
+
+def run_block_8(ctx: CheckContext) -> list[CheckResult]:
+    """Block 8: Spring Boot baseline from the live BPTPSRE rules."""
+    results: list[CheckResult] = []
+    gradle_files = [
+        f
+        for f in (
+            ctx.migrated_path / "build.gradle",
+            ctx.migrated_path / "build.gradle.kts",
+        )
+        if f.exists()
+    ]
+    if not gradle_files:
+        return results
+
+    detected_versions: list[tuple[Path, str]] = []
+    files_with_boot_token: list[Path] = []
+    for gradle_file in gradle_files:
+        text = _read_or_empty(gradle_file)
+        if "org.springframework.boot" in text:
+            files_with_boot_token.append(gradle_file)
+        detected_versions.extend(
+            (gradle_file, version) for version in _spring_boot_plugin_versions(text)
+        )
+
+    if not detected_versions:
+        detail = "no se detecto plugin org.springframework.boot con version literal"
+        if files_with_boot_token:
+            detail += " (puede estar usando variable o pluginManagement)"
+        results.append(
+            CheckResult(
+                "8.1",
+                "Block 8",
+                "Spring Boot baseline",
+                "fail",
+                severity="medium",
+                detail=detail,
+                suggested_fix=(
+                    "Dejar version literal aprobada en build.gradle: "
+                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                ),
+            )
+        )
+        return results
+
+    outdated = [
+        f"{_relative_display(path, ctx.migrated_path)}={version}"
+        for path, version in detected_versions
+        if is_version_lower(version, SPRING_BOOT_BASELINE_VERSION)
+    ]
+    if outdated:
+        results.append(
+            CheckResult(
+                "8.1",
+                "Block 8",
+                "Spring Boot baseline",
+                "fail",
+                severity="medium",
+                detail=(
+                    f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION}: "
+                    + ", ".join(outdated)
+                ),
+                suggested_fix=(
+                    "Actualizar el plugin Gradle a "
+                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                ),
+            )
+        )
+        return results
+
+    versions = ", ".join(
+        f"{_relative_display(path, ctx.migrated_path)}={version}"
+        for path, version in detected_versions
+    )
+    results.append(
+        CheckResult(
+            "8.1",
+            "Block 8",
+            "Spring Boot baseline",
+            "pass",
+            detail=f"Spring Boot >= {SPRING_BOOT_BASELINE_VERSION}: {versions}",
+        )
+    )
     return results
 
 
@@ -2269,6 +2521,7 @@ ALL_BLOCKS = [
     ("Block 3", run_block_3),  # v0.22.0: naming profesional
     ("Block 5", run_block_5),
     ("Block 7", run_block_7),
+    ("Block 8", run_block_8),  # v0.23.33: Spring Boot baseline
     ("Block 13", run_block_13),
     ("Block 14", run_block_14),
     ("Block 15", run_block_15),

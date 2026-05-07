@@ -221,6 +221,21 @@ los nuevos servicios BUS deben usar REST+WebFlux.
 
 ---
 
+### Check 0.2f — WAS SOAP no publica endpoint BUS/IIB
+
+Si `sourceType=WAS` y `projectType=SOAP`, buscar `/IntegrationBus/soap` en
+`src/main/java`.
+
+- Cualquier match activo → **HIGH**. Un WAS SOAP no debe copiar la URL de BUS/IIB.
+- 0 matches → ✓ PASS.
+
+**Acción sugerida:** preservar el endpoint WAS del legacy/MCP. Patrón default:
+`ServletRegistrationBean` en `/<ServiceName>/soap/*` y
+`setLocationUri()` en `/<ServiceName>/soap/<ServiceName>Request`. Usar
+`/IntegrationBus/soap/...` solo para BUS/IIB cuando el legacy lo pruebe.
+
+---
+
 ### Check 0.3 — Nombres de operaciones: legacy = migrado
 
 Requiere `<LEGACY_PATH>` provisto. Si no, **MEDIUM** (skip).
@@ -991,6 +1006,36 @@ NO es valido para la entrega bancaria.
 - `averageValue` distinto de `100m` en cualquier helm → **HIGH**.
 - Ejemplo de detalle esperado: `helm/dev.yml - averageValue: '400m' -> debe ser '100m'`.
 
+### Check 7.5c — Helm env vars sin placeholders ni comentarios [BANCO]
+
+```bash
+grep -nE '^\s*(name|value):.*#|value:\s*["'\'']?<[^>]+>["'\'']?|<CCC_' \
+  <PATH>/helm/dev.yml <PATH>/helm/test.yml <PATH>/helm/prod.yml
+```
+
+**Regla:** las variables de entorno en Helm deben llevar valores reales por
+ambiente. No se aceptan placeholders documentales ni comentarios en las lineas
+`name:` / `value:` porque se despliegan como texto literal o ensucian el
+contrato del chart.
+
+**Prohibido:**
+```yaml
+- name: "CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS"
+  value: "<CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS_TEST>"
+```
+
+```yaml
+- name: "CCC_X"
+  value: "01,02" # pendiente validar
+```
+
+**Veredicto:**
+- `value: "<...>"`, `<CCC_...>` o marcador `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`
+  en `value:` → **HIGH**.
+- Comentario inline en una linea `name:` o `value:` → **HIGH**.
+- Si falta el valor real, documentarlo como handoff fuera del Helm; no dejarlo
+  como placeholder dentro del chart.
+
 ### Check 7.6 — `@ConfigurationPropertiesScan` en Application.java
 
 ```bash
@@ -1048,14 +1093,16 @@ Cualquier valor numérico debe ser trazable al legacy (Section 15 del ANALYSIS) 
 grep -E "springframework.boot.*version|jackson-core:|logstash-logback-encoder|lib-bnc-api-client|peer-review" <PATH>/build.gradle
 ```
 
-Baseline esperado (a 2026-04):
-- Spring Boot: `3.5.13`
+Baseline esperado (a 2026-04-23):
+- Spring Boot: `3.5.14`
 - jackson-core / jackson-dataformat-xml: `2.21.2`
 - logstash-logback-encoder: `9.0` (solo si aplica)
 - lib-bnc-api-client: **verificar en Confluence MCP antes de auditar** — si el valor local es más viejo que el publicado, **MEDIUM**
 - Peer Review plugin: `1.1.0`
 
-Cualquier versión menor al baseline → **MEDIUM**.
+Cualquier versión menor al baseline → **MEDIUM** y `capamedia checklist`
+puede autofixear el literal `id 'org.springframework.boot' version '<vieja>'`
+a `3.5.14` cuando el patrón es claro.
 
 ### Check 8.2 — Snyk sin vulnerabilidades HIGH [PDF-OFICIAL]
 

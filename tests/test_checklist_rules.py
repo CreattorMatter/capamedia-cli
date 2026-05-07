@@ -7,11 +7,13 @@ from unittest.mock import Mock
 
 from openpyxl import Workbook
 
+from capamedia_cli.core.autofix import run_autofix_loop
 from capamedia_cli.core.checklist_rules import (
     CheckContext,
     run_block_0,
     run_block_1,
     run_block_7,
+    run_block_8,
     run_block_13,
     run_block_14,
     run_block_15,
@@ -112,6 +114,17 @@ def _write_helm_hpa_file(root: Path, file_name: str, average_value: str) -> None
         "        target:\n"
         "          type: AverageValue\n"
         f"          averageValue: '{average_value}'\n",
+        encoding="utf-8",
+    )
+
+
+def _write_helm_env_file(root: Path, file_name: str, value_line: str) -> None:
+    helm = root / "helm"
+    helm.mkdir(exist_ok=True)
+    (helm / file_name).write_text(
+        "environment:\n"
+        "  - name: \"CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS\"\n"
+        f"    {value_line}\n",
         encoding="utf-8",
     )
 
@@ -301,6 +314,109 @@ def test_block_7_passes_hpa_average_value_100m(tmp_path: Path) -> None:
     assert hpa_check.status == "pass"
 
 
+def test_block_7_fails_helm_env_placeholder_value(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "app:\n"
+        "  skip-correspondence-channels: ${CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS}\n",
+        encoding="utf-8",
+    )
+    _write_helm_env_file(
+        root,
+        "test.yml",
+        'value: "<CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS_TEST>"',
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.5c")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "<CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS_TEST>" in check.detail
+
+
+def test_block_7_fails_helm_env_inline_comment(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "app:\n"
+        "  channel: ${CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS}\n",
+        encoding="utf-8",
+    )
+    _write_helm_env_file(root, "dev.yml", 'value: "01,02" # pendiente validar')
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.5c")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "comentario inline" in check.detail
+
+
+def test_block_7_passes_clean_helm_env_value(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text(
+        "app:\n"
+        "  channel: ${CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS}\n",
+        encoding="utf-8",
+    )
+    _write_helm_env_file(root, "prod.yml", 'value: "01,02"')
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.5c")
+
+    assert check.status == "pass"
+
+
+def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "plugins { id 'org.springframework.boot' version '3.5.13' }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _by_id(results, "8.1")
+
+    assert check.status == "fail"
+    assert check.severity == "medium"
+    assert "3.5.14" in check.detail
+
+
+def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _by_id(results, "8.1")
+
+    assert check.status == "pass"
+
+
+def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    build_gradle = root / "build.gradle"
+    build_gradle.write_text(
+        "plugins { id 'org.springframework.boot' version '3.5.13' }\n",
+        encoding="utf-8",
+    )
+
+    def rerun():
+        return run_block_8(CheckContext(migrated_path=root, legacy_path=None))
+
+    report = run_autofix_loop(root, rerun)
+
+    assert report.total_applied == 1
+    assert "version '3.5.14'" in build_gradle.read_text(encoding="utf-8")
+
+
 def test_block_14_detects_placeholder_projectkey(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     sonarlint_dir = root / ".sonarlint"
@@ -460,6 +576,92 @@ def test_block_0_allows_bancs_artifacts_for_iib_with_bancs(tmp_path: Path) -> No
     )
     results = run_block_0(ctx)
     check = _by_id(results, "0.2d")
+
+    assert check.status == "pass"
+
+
+def test_block_0_rejects_integrationbus_path_for_was_soap(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    resources = root / "src/main/resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / "WSTecnicos0036.wsdl").write_text(
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<portType name="P"><operation name="op1"/><operation name="op2"/></portType>'
+        "</definitions>",
+        encoding="utf-8",
+    )
+    endpoint = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/soap/impl/FooEndpoint.java"
+    )
+    endpoint.parent.mkdir(parents=True, exist_ok=True)
+    endpoint.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.soap.impl;\n"
+        "import org.springframework.ws.server.endpoint.annotation.Endpoint;\n"
+        "@Endpoint class FooEndpoint {}\n",
+        encoding="utf-8",
+    )
+    config = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/soap/config/WebServiceConfig.java"
+    )
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.soap.config;\n"
+        "class WebServiceConfig {\n"
+        '  String mapping = "/IntegrationBus/soap/*";\n'
+        '  String location = "/IntegrationBus/soap/WSTecnicos0036";\n'
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_0(ctx)
+    check = _by_id(results, "0.2f")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "IntegrationBus" in check.detail
+
+
+def test_block_0_accepts_was_soap_service_path(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    resources = root / "src/main/resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / "WSTecnicos0036.wsdl").write_text(
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<portType name="P"><operation name="op1"/><operation name="op2"/></portType>'
+        "</definitions>",
+        encoding="utf-8",
+    )
+    endpoint = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/soap/impl/FooEndpoint.java"
+    )
+    endpoint.parent.mkdir(parents=True, exist_ok=True)
+    endpoint.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.soap.impl;\n"
+        "import org.springframework.ws.server.endpoint.annotation.Endpoint;\n"
+        "@Endpoint class FooEndpoint {}\n",
+        encoding="utf-8",
+    )
+    config = (
+        root
+        / "src/main/java/com/pichincha/sp/infrastructure/input/adapter/soap/config/WebServiceConfig.java"
+    )
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.soap.config;\n"
+        "class WebServiceConfig {\n"
+        '  String mapping = "/WSTecnicos0036/soap/*";\n'
+        '  String location = "/WSTecnicos0036/soap/WSTecnicos0036Request";\n'
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_0(ctx)
+    check = _by_id(results, "0.2f")
 
     assert check.status == "pass"
 

@@ -9,9 +9,14 @@ import yaml
 
 from capamedia_cli.commands.clone import (
     MIGRATED_NAMESPACES,
+    ConfigCloneResult,
+    TxCloneResult,
+    _clone_global_config_repos,
     _clone_migrated_repos,
+    _detect_global_config_repos,
     _git_clone,
     _resolve_azure_repo,
+    _write_complexity_report,
     _write_properties_report,
 )
 from capamedia_cli.core.legacy_analyzer import LegacyAnalysis, PropertiesReference
@@ -184,6 +189,103 @@ def test_resolve_azure_repo_supports_was_split_repos(tmp_path: Path, monkeypatch
         "wsclientes0154-infraestructura",
     ]
     assert all(call[2] == "was" for call in calls[-2:])
+
+
+def test_detect_global_config_repos_from_legacy_and_umps(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy" / "sqb-msa-wsclientes0006"
+    ump = tmp_path / "umps" / "sqb-msa-umpclientes0001"
+    legacy.mkdir(parents=True)
+    ump.mkdir(parents=True)
+    (legacy / "Flow.esql").write_text(
+        "CALL GestionarRecursoXML('sqb-cfg-000000005-configuraciones', 'x', out);",
+        encoding="utf-8",
+    )
+    (ump / "extra.xml").write_text(
+        '<config repo="sqb-cfg-seguridad-reglas-configuraciones"/>',
+        encoding="utf-8",
+    )
+    (legacy / ".git").mkdir()
+    (legacy / ".git" / "config").write_text(
+        "sqb-cfg-ignored-configuraciones", encoding="utf-8"
+    )
+
+    repos = _detect_global_config_repos([legacy, tmp_path / "umps"])
+
+    assert repos == [
+        "sqb-cfg-000000005-configuraciones",
+        "sqb-cfg-seguridad-reglas-configuraciones",
+    ]
+
+
+def test_clone_global_config_repos_uses_config_project_and_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[tuple[str, Path, str, bool]] = []
+
+    def fake_git_clone(
+        repo_name: str,
+        dest: Path,
+        project_key: str = "bus",
+        shallow: bool = False,
+        no_single_branch: bool = False,
+    ) -> tuple[bool, str]:
+        calls.append((repo_name, dest, project_key, shallow))
+        dest.mkdir(parents=True)
+        return (True, "")
+
+    monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
+
+    results = _clone_global_config_repos(
+        ["sqb-cfg-000000005-configuraciones"], tmp_path, shallow=True
+    )
+
+    assert calls == [
+        (
+            "sqb-cfg-000000005-configuraciones",
+            tmp_path / "config" / "sqb-cfg-000000005-configuraciones",
+            "config",
+            True,
+        )
+    ]
+    assert results == [
+        ConfigCloneResult(
+            repo_name="sqb-cfg-000000005-configuraciones",
+            status="cloned",
+            path=tmp_path / "config" / "sqb-cfg-000000005-configuraciones",
+        )
+    ]
+
+
+def test_complexity_report_includes_global_config_repos(tmp_path: Path) -> None:
+    analysis = LegacyAnalysis(source_kind="iib", wsdl=None)
+    tx_results = [
+        TxCloneResult(
+            tx_code="000503",
+            repo_name="sqb-cfg-000503-TX",
+            status="cloned",
+            path=tmp_path / "tx" / "sqb-cfg-000503-TX",
+        )
+    ]
+    config_results = [
+        ConfigCloneResult(
+            repo_name="sqb-cfg-000000005-configuraciones",
+            status="cloned",
+            path=tmp_path / "config" / "sqb-cfg-000000005-configuraciones",
+        )
+    ]
+
+    report = _write_complexity_report(
+        analysis,
+        "wsclientes0006",
+        tmp_path,
+        tx_results,
+        config_results=config_results,
+    )
+
+    text = report.read_text(encoding="utf-8")
+    assert "## Configuraciones globales clonadas" in text
+    assert "sqb-cfg-000000005-configuraciones" in text
+    assert "config/sqb-cfg-000000005-configuraciones" in text
 
 
 # ---------------------------------------------------------------------------

@@ -147,6 +147,8 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 
 ## Reglas importantes
 
+**Regla de endpoint WAS:** en servicios `source_type=was`, no reescribir rutas REST/SOAP a `/IntegrationBus/soap/...`. WAS SOAP conserva el path del legacy/MCP, normalmente `/<ServiceName>/soap/*` y `/<ServiceName>/soap/<ServiceName>Request`; WAS REST/MVC conserva su endpoint WAS. `/IntegrationBus/soap/...` solo aplica a BUS/IIB cuando el legacy lo prueba.
+
 1. **No sobrescribir `build.gradle` del MCP.** Sólo agregar dependencias faltantes; nunca reemplazar el archivo.
 2. **Puertos son interfaces, nunca abstract classes.**
 3. **Domain sin imports de Spring/JPA/WebFlux.**
@@ -157,3 +159,5 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 8. **Higiene de `.gitignore` antes de cerrar:** el `.gitignore` del proyecto migrado debe ignorar `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md` y `TRAMAS.txt`. No ignorar `.sonarlint/connectedMode.json`.
 9. **BANCS no se infiere por nombre ni por template.** Solo BUS/IIB con `invocaBancs=true` puede agregar `lib-bnc-api-client`, `BancsService`, `BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*` o `dependsOn: lib-bnc-api-client`. En WAS, ORQ y BUS sin BANCS, esos artefactos son error de migracion y deben removerse.
 10. **Config is not an output port.** Env/YAML/properties van por `@ConfigurationProperties` o bean de config; nunca crear `*ConfigOutputPort` ni adapter de infraestructura solo para leer config.
+11. **Spring Boot baseline:** antes de cerrar, `build.gradle` debe declarar `id 'org.springframework.boot' version '3.5.14'` o superior aprobado. Si Fabrics genera una versión menor, actualizar sólo ese literal sin reemplazar el `build.gradle` completo.
+12. **Helm env limpio:** en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, las variables de entorno no pueden quedar como `value: "<CCC_...>"`, `TODO/TBD/PENDIENTE/VALIDAR`, ni con comentarios inline en líneas `name:`/`value:`. Si falta el valor real, reportarlo como handoff fuera del Helm.

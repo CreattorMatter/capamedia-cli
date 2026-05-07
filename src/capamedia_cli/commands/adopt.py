@@ -144,8 +144,8 @@ def adopt(
     for entry in sorted(ws.iterdir()):
         if not entry.is_dir() or entry.name.startswith("."):
             continue
-        # Saltear las carpetas destino/legacy/umps que ya existan
-        if entry.name in ("legacy", "destino", "umps", "tx", "gold-ref"):
+        # Saltear las carpetas CapaMedia que ya existan
+        if entry.name in ("legacy", "destino", "umps", "tx", "config", "gold-ref"):
             continue
 
         kind = _classify_subdir(entry)
@@ -223,10 +223,9 @@ def adopt(
             return
 
         # Confirmar
-        if not yes:
-            if not Confirm.ask("\nProceder con los moves?", default=True):
-                console.print("[yellow]Cancelado.[/yellow]")
-                raise typer.Exit(code=0)
+        if not yes and not Confirm.ask("\nProceder con los moves?", default=True):
+            console.print("[yellow]Cancelado.[/yellow]")
+            raise typer.Exit(code=0)
 
         # Ejecutar moves
         (ws / "legacy").mkdir(exist_ok=True)

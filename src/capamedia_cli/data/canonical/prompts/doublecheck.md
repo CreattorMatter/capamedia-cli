@@ -77,6 +77,12 @@ no debe agregar ni mantener `lib-bnc-api-client`, `BancsService`,
 `dependsOn: lib-bnc-api-client`. Si aparecen, corregirlos o devolver
 `status=blocked`; nunca declararlo PR_READY.
 
+Si el proyecto es WAS, el doublecheck tampoco debe cambiar endpoints REST/SOAP
+a `/IntegrationBus/soap/...`. WAS SOAP debe conservar el path WAS del
+legacy/MCP, normalmente `/<ServiceName>/soap/*` y
+`/<ServiceName>/soap/<ServiceName>Request`. `/IntegrationBus/soap/...` solo
+aplica a BUS/IIB cuando el legacy lo prueba.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash
@@ -226,3 +232,12 @@ o abrir el PR si no hay residuales HIGH.
 8. **Config is not an output port.** Si ves `*ConfigOutputPort` o un adapter
    que solo lee env/YAML/properties, reemplazar por `@ConfigurationProperties`
    o bean de config; los output ports son para dependencias externas.
+9. **Spring Boot baseline.** `build.gradle` debe quedar con
+   `id 'org.springframework.boot' version '3.5.14'` o superior aprobado. Si
+   aparece una versión menor, actualizar el literal del plugin sin reemplazar
+   el scaffold del MCP.
+10. **Helm env limpio.** En `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`,
+    las variables de entorno no pueden tener `value: "<CCC_...>"`,
+    `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` ni comentarios inline en líneas
+    `name:`/`value:`. Si falta el valor real, reportarlo como handoff fuera del
+    Helm; no declarar PR_READY.

@@ -132,7 +132,7 @@ Before executing, verify that you have access to:
 > - `.block()` calls — keep the reactive chain end-to-end (`Mono`/`Flux`)
 > - `spring-boot-starter-web-services` — use `spring-boot-starter-webflux`
 
-**Note:** Both REST and SOAP services receive/return SOAP XML envelopes. The "REST" refers to `@RestController`, not REST-over-JSON. The stack is WebFlux for BUS/ORQ and Spring MVC for WAS single-op. URL path remains `/IntegrationBus/soap/<ServiceName>` in both.
+**Note:** Both REST and SOAP services receive/return SOAP XML envelopes. The "REST" refers to `@RestController`, not REST-over-JSON. The stack is WebFlux for BUS/ORQ and Spring MVC for WAS single-op. URL path is source-specific: BUS/ORQ REST usually preserves `/IntegrationBus/soap/<ServiceName>` when that is the legacy contract; WAS REST/MVC must preserve the WAS legacy/MCP endpoint and must not be rewritten to `/IntegrationBus/soap/...` unless legacy evidence explicitly says so.
 
 If the analysis document is missing, **STOP** and request Phase 1 execution first.
 
@@ -363,6 +363,11 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 **Rule 16b — Helm HPA CPU target:** `averageValue` MUST be `100m` in
 `helm/dev.yml`, `helm/test.yml`, and `helm/prod.yml`. NEVER leave the MCP
 default `400m`; the checklist blocks it as HIGH.
+
+**Rule 16c — Helm env vars must be concrete:** NEVER leave
+`value: "<CCC_...>"`, `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`, or inline comments
+on `name:`/`value:` lines in Helm env vars. If a real environment value is
+missing, document it as handoff outside Helm.
 
 **Rule 17 — Java 21 everywhere** (NEVER 17, NEVER `latest` tag in FROM). Set `JAVA_HOME` to Java 21 before running `gradle test` or `gradle build`. If the machine has multiple JDKs, ensure Java 21 is active.
 
@@ -810,7 +815,7 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Update to `3.5.13` in `build.gradle`
+1. **Spring Boot version:** Update to `3.5.14` in `build.gradle`
 2. **Peer Review plugin:** Update to `1.1.0`
 3. **Jackson version:** Force `2.21.2` in resolution strategy
 4. **logstash-logback-encoder:** Use `9.0`
@@ -845,7 +850,7 @@ WebFlux dependency block to WAS REST/MVC services:
 plugins {
     id 'jacoco'
     id 'java'
-    id 'org.springframework.boot' version '3.5.13'
+    id 'org.springframework.boot' version '3.5.14'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.0'
 }
@@ -1536,7 +1541,7 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/IntegrationBus/soap/<NombreServicio>")
+@RequestMapping("<EndpointPath>")
 public class <NombreServicio>Controller {
 
     private final CustomerServicePort customerService;
@@ -1658,6 +1663,11 @@ public class SoapBodyResponseDto {
     private <Operacion>Response <operacionField>Response;
 }
 ```
+
+`<EndpointPath>` is source-specific: use `/IntegrationBus/soap/<NombreServicio>`
+for BUS/ORQ only when that is the legacy contract; for WAS REST/MVC preserve the
+WAS endpoint from the legacy/MCP scaffold and do not rewrite it to
+`/IntegrationBus/soap/...`.
 
 ---
 

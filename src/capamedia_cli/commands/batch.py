@@ -606,12 +606,22 @@ def _build_batch_migrate_prompt(
         - Verifica que el `.gitignore` del proyecto migrado ignore artefactos
           locales CapaMedia/AI que no van a Azure DevOps: {", ".join(DEPLOYMENT_GITIGNORE_ENTRIES)}.
           No ignores `.sonarlint/connectedMode.json`; ese binding si debe versionarse.
+        - Verifica que `build.gradle` declare `id 'org.springframework.boot'
+          version '3.5.14'` o superior aprobado. Si hay una version menor,
+          actualiza solo ese literal sin reemplazar el build.gradle del MCP.
+        - Verifica Helm env vars: no dejes `value: "<CCC_...>"`, marcadores
+          `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` ni comentarios inline en lineas
+          `name:`/`value:` de `helm/dev.yml`, `helm/test.yml` o `helm/prod.yml`.
         - Aplica la matriz BANCS antes de editar dependencias/config:
           WAS -> MVC sin BANCS; ORQ -> WebFlux sin BANCS directo; BUS/IIB sin
           invocaBancs -> sin BANCS; solo BUS/IIB con invocaBancs=true puede
           tener lib-bnc-api-client, BancsService/BancsClientHelper,
           bancs.webclients, CCC_BANCS_* o dependsOn lib-bnc-api-client.
           Si el modo no corresponde, elimina esos artefactos en vez de agregarlos.
+        - Endpoints WAS no son BUS: si source_type=was, no reescribas rutas
+          REST/SOAP a /IntegrationBus/soap/.... WAS SOAP conserva el path
+          /<ServiceName>/soap/* y /<ServiceName>/soap/<ServiceName>Request
+          salvo evidencia legacy distinta.
         - Trata `gradle architectureReview` como gate del banco. No reportes
           `build_status=green` si queda score < 7, `BLOQUEAR PR: SI`, o
           observaciones de arquitectura/tests. Corrige paquetes

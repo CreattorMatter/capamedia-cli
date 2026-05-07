@@ -7,16 +7,16 @@ Trae solo lo especifico del servicio:
     legacy/_repo/<servicio>-infraestructura/
     umps/sqb-msa-umpclientes<NNNN>/       (dependencias directas)
     tx/sqb-cfg-<NNNNNN>-TX/               (contratos BANCS de cada TX invocado)
+    config/sqb-cfg-*-configuraciones/     (catalogos globales referenciados)
     COMPLEXITY_<servicio>.md              (reporte de analisis)
 
 Decision de diseño (v0.2.2):
-- NO se traen catalogos globales (codigosBackend, errores).
+- NO se traen catalogos globales no referenciados (codigosBackend, errores).
 - NO se trae gold reference (wsclientes0024/0015).
 El conocimiento de esos referentes ya esta embebido en los prompts canonicos
 del CLI (migrate-rest-full.md, migrate-soap-full.md, checklist-rules.md).
-El CLI debe saber migrar bien por si mismo, sin copiar de un servicio-ejemplo
-cada vez. Si en algun servicio particular hace falta un catalogo, el usuario
-puede clonarlo manual una vez.
+El CLI clona catalogos globales solo cuando el legacy/UMP los referencia
+explicitamente con el patron `sqb-cfg-*-configuraciones`.
 """
 
 from __future__ import annotations
@@ -210,6 +210,16 @@ class TxCloneResult:
     tx_code: str
     repo_name: str
     status: str  # "cloned" | "not_found" | "error" | "skipped"
+    path: Path | None = None
+    error: str = ""
+
+
+@dataclass
+class ConfigCloneResult:
+    """Resultado de clonar un repo global de configuracion."""
+
+    repo_name: str
+    status: str  # "cloned" | "not_found" | "error"
     path: Path | None = None
     error: str = ""
 
@@ -473,11 +483,77 @@ def _clone_tx_repos(tx_codes: set[str], workspace: Path, shallow: bool = True) -
     return results
 
 
+GLOBAL_CONFIG_REPO_RE = _clone_re.compile(
+    r"\bsqb-cfg-[a-z0-9][a-z0-9-]*-configuraciones\b",
+    _clone_re.IGNORECASE,
+)
+GLOBAL_CONFIG_SCAN_SUFFIXES = {
+    ".bar",
+    ".bat",
+    ".cfg",
+    ".config",
+    ".esql",
+    ".java",
+    ".json",
+    ".msgflow",
+    ".properties",
+    ".subflow",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+
+
+def _detect_global_config_repos(roots: list[Path]) -> list[str]:
+    """Detecta repos globales `sqb-cfg-*-configuraciones` referenciados."""
+    repos: set[str] = set()
+    ignored_parts = {".git", "build", "target", ".gradle", "destino", "tx", "config"}
+
+    for root in roots:
+        if not root.exists():
+            continue
+        for f in root.rglob("*"):
+            if not f.is_file():
+                continue
+            if ignored_parts.intersection({p.lower() for p in f.parts}):
+                continue
+            if f.suffix.lower() not in GLOBAL_CONFIG_SCAN_SUFFIXES:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            repos.update(m.group(0).lower() for m in GLOBAL_CONFIG_REPO_RE.finditer(text))
+
+    return sorted(repos)
+
+
+def _clone_global_config_repos(
+    repo_names: list[str],
+    workspace: Path,
+    shallow: bool = True,
+) -> list[ConfigCloneResult]:
+    """Clone repos globales de configuracion referenciados por legacy/UMPs."""
+    results: list[ConfigCloneResult] = []
+    for repo_name in sorted(set(repo_names)):
+        dest = workspace / "config" / repo_name
+        ok, err = _git_clone(repo_name, dest, project_key="config", shallow=shallow)
+        if ok:
+            results.append(ConfigCloneResult(repo_name=repo_name, status="cloned", path=dest))
+        elif "not found" in err.lower() or "does not exist" in err.lower() or "404" in err:
+            results.append(ConfigCloneResult(repo_name=repo_name, status="not_found", error=err))
+        else:
+            results.append(ConfigCloneResult(repo_name=repo_name, status="error", error=err))
+    return results
+
+
 def _write_complexity_report(
     analysis,
     service_name: str,
     workspace: Path,
     tx_results: list[TxCloneResult],
+    config_results: list[ConfigCloneResult] | None = None,
     legacy_root: Path | None = None,
     discovery_entry=None,
 ) -> Path:
@@ -491,6 +567,8 @@ def _write_complexity_report(
         detect_orq_dependencies,
         detect_ump_caveats,
     )
+
+    config_results = config_results or []
 
     # Detectar caveats
     caveats: list[Caveat] = []
@@ -559,6 +637,23 @@ def _write_complexity_report(
             }.get(tr.status, tr.status)
             path_str = str(tr.path.relative_to(workspace)) if tr.path else "-"
             lines.append(f"| {tr.tx_code} | {tr.repo_name} | {status_label} | {path_str} |")
+        lines.append("")
+
+    # Global config repos clonados
+    if config_results:
+        lines.append("## Configuraciones globales clonadas")
+        lines.append("")
+        lines.append("| Repo | Status | Path |")
+        lines.append("|---|---|---|")
+        for cr in config_results:
+            status_label = {
+                "cloned": "clonado",
+                "not_found": "no existe repo",
+                "error": "error",
+            }.get(cr.status, cr.status)
+            path_str = str(cr.path.relative_to(workspace)) if cr.path else "-"
+            path_str = path_str.replace("\\", "/")
+            lines.append(f"| {cr.repo_name} | {status_label} | {path_str} |")
         lines.append("")
 
     if analysis.has_database and analysis.db_evidence:
@@ -846,6 +941,25 @@ def clone_service(
     else:
         console.print("\n[dim]5. No hay TX codes extraidos para clonar[/dim]")
 
+    # --- Step 5.5: Clone referenced global config repos ---
+    config_repo_names = _detect_global_config_repos([legacy_dest, ws / "umps"])
+    config_results: list[ConfigCloneResult] = []
+    if config_repo_names:
+        console.print(
+            "\n[bold]5.5. Clonando configuraciones globales referenciadas[/bold] "
+            f"({len(config_repo_names)} repos)..."
+        )
+        config_results = _clone_global_config_repos(config_repo_names, ws, shallow=True)
+        for cr in config_results:
+            if cr.status == "cloned":
+                console.print(f"  [green]OK[/green] {cr.repo_name}")
+            elif cr.status == "not_found":
+                console.print(f"  [yellow]NO EXISTE[/yellow] {cr.repo_name}")
+            else:
+                console.print(f"  [red]ERROR[/red] {cr.repo_name}: {cr.error[:50]}")
+    else:
+        console.print("\n[dim]5.5. No hay configuraciones globales referenciadas[/dim]")
+
     # --- Step 6: Report ---
     discovery_entry = None
     from capamedia_cli.core.discovery import find_discovery_workbook, load_discovery_entry
@@ -874,6 +988,7 @@ def clone_service(
         service_name,
         ws,
         tx_results,
+        config_results=config_results,
         legacy_root=legacy_dest,
         discovery_entry=discovery_entry,
     )
@@ -910,6 +1025,10 @@ def clone_service(
     table.add_row("UMPs con TX extraido", f"{sum(1 for u in analysis.umps if u.tx_codes)}/{len(analysis.umps)}")
     table.add_row("TX codes unicos", str(len(all_tx_codes)))
     table.add_row("TX repos clonados", f"{sum(1 for t in tx_results if t.status == 'cloned')}/{len(tx_results)}")
+    table.add_row(
+        "Config globales clonadas",
+        f"{sum(1 for c in config_results if c.status == 'cloned')}/{len(config_results)}",
+    )
     table.add_row("BD presente", "SI" if analysis.has_database else "NO")
     table.add_row("Complejidad", analysis.complexity.upper())
     pending_props = sum(

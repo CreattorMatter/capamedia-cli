@@ -12,7 +12,7 @@ summary: Log transaccional (lib-event-logs) — EXCLUSIVO de orquestadores (ORQ)
 - `prompts/documentacion/BPTPSRE-Librería Log Transaccional-220426-202920.pdf` (librería, dependencias, config)
 
 **Característica oficial de la librería** (PDF 2, sección "Características"):
-- Agnóstica a **Spring Boot 3.5.12** (no la hereda — convive con cualquier versión compatible).
+- Agnóstica a **Spring Boot 3.5.14** (no la hereda — convive con cualquier versión compatible).
 - Compilada en **Java 21**.
 - Existen dos variantes de artefacto (`-webflux` y `-mvc`), pero en el marco
   de esta migración **solo aplica la variante `-webflux`** porque por regla del
@@ -93,7 +93,7 @@ implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
 ```
 
 **Prerrequisitos del proyecto** (PDF 2, sección "Prerequisitos"):
-- Spring Boot 3.5.12 o superior compatible (la lib es agnóstica pero se probó
+- Spring Boot 3.5.14 o superior compatible (la lib es agnóstica pero se probó
   contra esa versión).
 - Java 21.
 

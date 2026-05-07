@@ -25,6 +25,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from capamedia_cli.core.version_policy import (
+    SPRING_BOOT_BASELINE_VERSION,
+    is_version_lower,
+)
+
 # -- Constantes -------------------------------------------------------------
 
 _SKIP_DIRS = {".git", "build", "target", ".gradle", ".idea", "node_modules"}
@@ -758,6 +763,63 @@ def fix_bancs_autoconfigure_exclude_adapter(
     )
 
 
+_SPRING_BOOT_PLUGIN_DECL_RE = re.compile(
+    r"(?P<prefix>id\s*(?:\(\s*[\"']org\.springframework\.boot[\"']\s*\)|"
+    r"[\"']org\.springframework\.boot[\"'])\s*version\s*(?:\(\s*)?)"
+    r"(?P<quote>[\"'])(?P<version>[^\"']+)(?P=quote)",
+    re.IGNORECASE,
+)
+
+
+def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixResult:
+    """8.1 - Actualiza el plugin Spring Boot cuando la version literal es vieja."""
+    modified: list[Path] = []
+    before_versions: list[str] = []
+
+    gradle_files = [
+        f
+        for f in list(root.rglob("build.gradle")) + list(root.rglob("build.gradle.kts"))
+        if "build" not in f.parts and "test" not in [p.lower() for p in f.parts]
+    ]
+    for gradle_file in gradle_files:
+        text = _read(gradle_file)
+        if "org.springframework.boot" not in text:
+            continue
+
+        replacements = 0
+        rel_gradle = gradle_file.relative_to(root)
+
+        def _replace(match: re.Match[str], rel_path: Path = rel_gradle) -> str:
+            nonlocal replacements
+            current = match.group("version")
+            if not is_version_lower(current, SPRING_BOOT_BASELINE_VERSION):
+                return match.group(0)
+            replacements += 1
+            before_versions.append(f"{rel_path}={current}")
+            return (
+                f"{match.group('prefix')}{match.group('quote')}"
+                f"{SPRING_BOOT_BASELINE_VERSION}{match.group('quote')}"
+            )
+
+        new_text = _SPRING_BOOT_PLUGIN_DECL_RE.sub(_replace, text)
+        if replacements and new_text != text:
+            _write(gradle_file, new_text)
+            modified.append(gradle_file)
+
+    if not modified:
+        return AutofixResult(
+            applied=False,
+            notes="no se encontro version literal vieja de org.springframework.boot",
+        )
+    return AutofixResult(
+        applied=True,
+        files_modified=modified,
+        before=", ".join(before_versions),
+        after=f"org.springframework.boot={SPRING_BOOT_BASELINE_VERSION}",
+        notes=f"Spring Boot actualizado a {SPRING_BOOT_BASELINE_VERSION}",
+    )
+
+
 # -- Registry ---------------------------------------------------------------
 
 # La clave es el ID del checklist_rules (NO un slug inventado). Asi calza 1:1
@@ -768,6 +830,7 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "1.3": [fix_abstract_to_interface],
     "2.2": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
     "5.1": [fix_bancs_exception_wrapping],
+    "8.1": [fix_spring_boot_plugin_version],
     "15.1": [fix_remove_mensajeNegocio_setter],
     "15.2": [fix_recurso_format],
     "15.3": [fix_componente_from_catalog],
