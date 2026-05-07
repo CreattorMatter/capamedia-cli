@@ -83,6 +83,18 @@ legacy/MCP, normalmente `/<ServiceName>/soap/*` y
 `/<ServiceName>/soap/<ServiceName>Request`. `/IntegrationBus/soap/...` solo
 aplica a BUS/IIB cuando el legacy lo prueba.
 
+## Paso 1.6 - Deployment metadata y Helm limpios
+
+- `metadata.namespace` en `catalog-info.yaml` debe salir del prefijo de
+  `metadata.name`: `csg-msa-sp-*` -> `csg-middleware`,
+  `tnd-msa-sp-*` -> `tnd-middleware`, etc.
+- `KUBERNETES_NAMESPACE` en `azure-pipelines.yml` debe coincidir con
+  `metadata.namespace`.
+- `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml` no pueden contener
+  placeholders `<...>` ni marcadores `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`
+  en lineas activas. Los comentarios inline en lineas `name:`/`value:` de env
+  vars tambien son error.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash

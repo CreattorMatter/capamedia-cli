@@ -336,6 +336,30 @@ def test_block_7_fails_helm_env_placeholder_value(tmp_path: Path) -> None:
     assert "<CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS_TEST>" in check.detail
 
 
+def test_block_7_fails_helm_generic_placeholder_marker(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    helm = root / "helm"
+    helm.mkdir(exist_ok=True)
+    (helm / "prod.yml").write_text(
+        "livenessProbe:\n"
+        "  enabled: true\n"
+        "readinessProbe:\n"
+        "  enabled: true\n"
+        "businessConfig:\n"
+        "  skipCorrespondencia: <pendiente_validar>\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.5c")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "<pendiente_validar>" in check.detail
+
+
 def test_block_7_fails_helm_env_inline_comment(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "src/main/resources/application.yml").write_text(
@@ -395,6 +419,45 @@ def test_block_7_fails_when_pipeline_namespace_differs_from_catalog(tmp_path: Pa
     assert check.severity == "high"
     assert "csg-middleware" in check.detail
     assert "tnd-middleware" in check.detail
+
+
+def test_block_7_fails_when_catalog_namespace_does_not_match_project_prefix(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "catalog-info.yaml").write_text(
+        "apiVersion: backstage.io/v1alpha1\n"
+        "kind: Component\n"
+        "metadata:\n"
+        "  name: csg-msa-sp-wsreglas0010\n"
+        "  namespace: tnd-middleware\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.1b")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "csg-middleware" in check.detail
+    assert "tnd-middleware" in check.detail
+
+
+def test_block_7_accepts_catalog_namespace_matching_project_prefix(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "catalog-info.yaml").write_text(
+        "metadata:\n"
+        "  name: csg-msa-sp-wsreglas0010\n"
+        "  namespace: csg-middleware\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.1b")
+
+    assert check.status == "pass"
 
 
 def test_block_7_accepts_matching_pipeline_and_catalog_namespace(tmp_path: Path) -> None:

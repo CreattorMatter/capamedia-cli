@@ -1142,11 +1142,11 @@ tasks.named('compileJava') {
 
 8. **DO NOT create `Dockerfile`** -- The MCP generates it.
 
-9. **DO NOT create `catalog-info.yaml`** -- The MCP generates it. Verify the `name` and `owner` fields are correct.
+9. **DO NOT create `catalog-info.yaml`** -- The MCP generates it. Verify the `name`, `owner`, and namespace fields are correct. `metadata.namespace` must derive from `metadata.name`: `csg-msa-sp-*` -> `csg-middleware`, `tnd-msa-sp-*` -> `tnd-middleware`.
 
 10. **Verify `azure-pipelines.yml`** -- The MCP generates it. Only update:
     - `CMDB_APPLICATION_ID` to `"Red Hat OpenShift Container Platform"` if not set
-    - `KUBERNETES_NAMESPACE` to `<tribu>-middleware`
+    - `KUBERNETES_NAMESPACE` to the same value as `catalog-info.yaml` `metadata.namespace`
     - Variable groups to `ocp-dev-<tribu>-middleware`, `ocp-test-<tribu>-middleware`, `ocp-prod-<tribu>-middleware`
 
 11. **`Application.java` -- verify it has `@ConfigurationPropertiesScan`** (matches canonical SOAP pattern):
@@ -2897,8 +2897,8 @@ grep "minReplicas" helm/prod.yml
 grep "averageValue" helm/dev.yml helm/test.yml helm/prod.yml
 # EXPECTED: averageValue: 100m in every environment
 
-# CHECK 6: Helm env vars have no placeholders or inline comments
-grep -nE '^\s*(name|value):.*#|value:\s*["'\'']?<[^>]+>["'\'']?|<CCC_' helm/dev.yml helm/test.yml helm/prod.yml
+# CHECK 6: Helm values have no placeholders or inline comments
+grep -nE '#|<[^>]+>|TODO|TBD|PENDIENTE|VALIDAR|REVISAR' helm/dev.yml helm/test.yml helm/prod.yml
 # EXPECTED: no matches
 
 # CHECK 7: Each CCC_* from application.yml exists in helm/dev.yml

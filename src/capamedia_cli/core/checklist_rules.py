@@ -128,6 +128,28 @@ def _catalog_metadata_namespace(root: Path) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _catalog_metadata_name(root: Path) -> str:
+    catalog = root / "catalog-info.yaml"
+    data = _load_yaml_mapping(catalog)
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        name = metadata.get("name")
+        if name is not None:
+            return str(name).strip()
+    text = _read_or_empty(catalog)
+    match = re.search(r"(?im)^\s*name\s*:\s*['\"]?([^'\"\s#]+)", text)
+    return match.group(1).strip() if match else ""
+
+
+def _expected_catalog_namespace(project_name: str) -> str:
+    normalized = project_name.strip().lower()
+    match = re.match(r"^([a-z]{3})-msa-sp-", normalized)
+    if match:
+        return f"{match.group(1)}-middleware"
+    prefix = normalized.split("-", 1)[0]
+    return f"{prefix}-middleware" if re.fullmatch(r"[a-z]{3}", prefix) else ""
+
+
 def _pipeline_kubernetes_namespace(root: Path) -> str:
     pipeline = root / "azure-pipelines.yml"
     data = _load_yaml_mapping(pipeline)
@@ -199,12 +221,18 @@ _HELM_PENDING_MARKER_RE = re.compile(r"\b(TODO|TBD|PENDIENTE|PENDIENTE_VALIDAR|V
 def _helm_env_value_hygiene_issues(helm_file: Path, root: Path) -> list[str]:
     issues: list[str] = []
     for line_no, line in enumerate(_read_or_empty(helm_file).splitlines(), 1):
+        rel = _relative_display(helm_file, root)
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            if _HELM_PLACEHOLDER_RE.search(stripped):
+                issues.append(f"{rel}:{line_no} placeholder `{stripped}`")
+            elif _HELM_PENDING_MARKER_RE.search(stripped):
+                issues.append(f"{rel}:{line_no} marcador pendiente `{stripped}`")
+
         match = _HELM_ENV_LINE_RE.match(line)
         if not match:
             continue
         key = match.group(1).lower()
-        value = match.group(2).strip()
-        rel = _relative_display(helm_file, root)
 
         hash_pos = _unquoted_hash_pos(line)
         if hash_pos >= 0:
@@ -212,10 +240,6 @@ def _helm_env_value_hygiene_issues(helm_file: Path, root: Path) -> list[str]:
 
         if key != "value":
             continue
-        if _HELM_PLACEHOLDER_RE.search(value):
-            issues.append(f"{rel}:{line_no} value placeholder `{value}`")
-        elif _HELM_PENDING_MARKER_RE.search(value):
-            issues.append(f"{rel}:{line_no} value con marcador pendiente `{value}`")
     return issues
 
 
@@ -1158,6 +1182,57 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     # 7.6 - KUBERNETES_NAMESPACE alineado con catalog-info.yaml
     pipeline = ctx.migrated_path / "azure-pipelines.yml"
     catalog = ctx.migrated_path / "catalog-info.yaml"
+    if catalog.exists():
+        catalog_name = _catalog_metadata_name(ctx.migrated_path) or ctx.migrated_path.name
+        expected_catalog_namespace = _expected_catalog_namespace(catalog_name)
+        catalog_namespace = _catalog_metadata_namespace(ctx.migrated_path)
+        if expected_catalog_namespace and catalog_namespace and catalog_namespace != expected_catalog_namespace:
+            results.append(
+                CheckResult(
+                    "7.1b",
+                    "Block 7",
+                    "catalog-info namespace por prefijo",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"metadata.name='{catalog_name}' espera metadata.namespace="
+                        f"'{expected_catalog_namespace}', encontrado '{catalog_namespace}'"
+                    ),
+                    suggested_fix=(
+                        "Alinear `metadata.namespace` con el prefijo del micro: "
+                        "`<primeras-3-letras>-middleware`."
+                    ),
+                )
+            )
+        elif expected_catalog_namespace and catalog_namespace:
+            results.append(
+                CheckResult(
+                    "7.1b",
+                    "Block 7",
+                    "catalog-info namespace por prefijo",
+                    "pass",
+                    detail=f"metadata.namespace={catalog_namespace}",
+                )
+            )
+        elif expected_catalog_namespace:
+            results.append(
+                CheckResult(
+                    "7.1b",
+                    "Block 7",
+                    "catalog-info namespace por prefijo",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"metadata.name='{catalog_name}' espera metadata.namespace="
+                        f"'{expected_catalog_namespace}', pero metadata.namespace no esta definido"
+                    ),
+                    suggested_fix=(
+                        "Definir `metadata.namespace` con el prefijo del micro: "
+                        "`<primeras-3-letras>-middleware`."
+                    ),
+                )
+            )
+
     if pipeline.exists() and catalog.exists():
         pipeline_namespace = _pipeline_kubernetes_namespace(ctx.migrated_path)
         catalog_namespace = _catalog_metadata_namespace(ctx.migrated_path)

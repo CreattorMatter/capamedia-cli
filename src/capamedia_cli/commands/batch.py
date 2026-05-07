@@ -612,13 +612,14 @@ def _build_batch_migrate_prompt(
         - Verifica Gradle seguridad: no dejes spring-boot-starter-undertow,
           io.undertow:* ni undertowVersion; usar servidor embebido default
           Tomcat para MVC/Spring WS o Netty para WebFlux.
-        - Verifica que KUBERNETES_NAMESPACE en azure-pipelines.yml coincida
-          con metadata.namespace de catalog-info.yaml.
+        - Verifica que metadata.namespace de catalog-info.yaml sea
+          <prefijo>-middleware segun metadata.name (csg-msa-sp-* ->
+          csg-middleware) y que KUBERNETES_NAMESPACE coincida.
         - Si es WAS con JPA/Hikari, connection-test-query depende del motor:
           SQL Server=SELECT 1; Oracle=SELECT 1 from dual.
-        - Verifica Helm env vars: no dejes `value: "<CCC_...>"`, marcadores
-          `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` ni comentarios inline en lineas
-          `name:`/`value:` de `helm/dev.yml`, `helm/test.yml` o `helm/prod.yml`.
+        - Verifica Helm: no dejes placeholders <...> ni marcadores
+          `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` en lineas activas; tampoco
+          comentarios inline en lineas `name:`/`value:` de env vars.
         - Aplica la matriz BANCS antes de editar dependencias/config:
           WAS -> MVC sin BANCS; ORQ -> WebFlux sin BANCS directo; BUS/IIB sin
           invocaBancs -> sin BANCS; solo BUS/IIB con invocaBancs=true puede

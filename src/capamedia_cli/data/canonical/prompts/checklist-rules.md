@@ -935,6 +935,7 @@ Si el match es en un puerto de application → siempre **HIGH**.
 
 Verificar:
 - `spec.owner: jgarcia@pichincha.com` (NO `<owner>`)
+- `metadata.namespace` debe derivar del prefijo de `metadata.name`: si el micro es `csg-msa-sp-wsreglas0010`, el namespace esperado es `csg-middleware`; si es `tnd-msa-sp-*`, `tnd-middleware`.
 - `spec.lifecycle: test` (NO `<lifecycle>`)
 - `spec.system: ""` (vacío)
 - `spec.domain: ""` (vacío)
@@ -960,6 +961,7 @@ grep -E "KUBERNETES_NAMESPACE|CMDB_APPLICATION_ID" <PATH>/azure-pipelines.yml
 
 Verificar:
 - `KUBERNETES_NAMESPACE` = `metadata.namespace` de `catalog-info.yaml` (ej: `tnd-middleware`)
+- `metadata.namespace` debe coincidir con el prefijo del micro (`<prefijo>-middleware`), no con el namespace elegido por error en otro servicio.
 - `CMDB_APPLICATION_ID` = `"Red Hat OpenShift Container Platform"` (NO `CAPA_COMUN`)
 
 Mismatch → **HIGH**.
@@ -1009,14 +1011,14 @@ NO es valido para la entrega bancaria.
 ### Check 7.5c — Helm env vars sin placeholders ni comentarios [BANCO]
 
 ```bash
-grep -nE '^\s*(name|value):.*#|value:\s*["'\'']?<[^>]+>["'\'']?|<CCC_' \
+grep -nE '#|<[^>]+>|TODO|TBD|PENDIENTE|VALIDAR|REVISAR' \
   <PATH>/helm/dev.yml <PATH>/helm/test.yml <PATH>/helm/prod.yml
 ```
 
 **Regla:** las variables de entorno en Helm deben llevar valores reales por
-ambiente. No se aceptan placeholders documentales ni comentarios en las lineas
-`name:` / `value:` porque se despliegan como texto literal o ensucian el
-contrato del chart.
+ambiente. No se aceptan placeholders documentales en ninguna linea activa del
+Helm; tampoco comentarios inline en lineas `name:` / `value:` porque se
+despliegan como texto literal o ensucian el contrato del chart.
 
 **Prohibido:**
 ```yaml
@@ -1030,6 +1032,8 @@ contrato del chart.
 ```
 
 **Veredicto:**
+- Cualquier `<pendiente_validar>`, `<...>` o marcador pendiente fuera de
+  `value:` tambien es **HIGH** si queda en una linea activa de `helm/*.yml`.
 - `value: "<...>"`, `<CCC_...>` o marcador `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`
   en `value:` → **HIGH**.
 - Comentario inline en una linea `name:` o `value:` → **HIGH**.

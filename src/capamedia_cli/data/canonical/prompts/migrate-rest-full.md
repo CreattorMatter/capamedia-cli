@@ -364,10 +364,10 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 `helm/dev.yml`, `helm/test.yml`, and `helm/prod.yml`. NEVER leave the MCP
 default `400m`; the checklist blocks it as HIGH.
 
-**Rule 16c — Helm env vars must be concrete:** NEVER leave
-`value: "<CCC_...>"`, `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`, or inline comments
-on `name:`/`value:` lines in Helm env vars. If a real environment value is
-missing, document it as handoff outside Helm.
+**Rule 16c — Helm values must be concrete:** NEVER leave placeholders `<...>` or
+`TODO/TBD/PENDIENTE/VALIDAR/REVISAR` in active Helm lines, and do not add inline
+comments on `name:`/`value:` lines in Helm env vars. If a real environment value
+is missing, document it as handoff outside Helm.
 
 **Rule 17 — Java 21 everywhere** (NEVER 17, NEVER `latest` tag in FROM). Set `JAVA_HOME` to Java 21 before running `gradle test` or `gradle build`. If the machine has multiple JDKs, ensure Java 21 is active.
 
