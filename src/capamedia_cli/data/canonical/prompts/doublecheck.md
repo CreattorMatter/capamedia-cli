@@ -236,6 +236,14 @@ o abrir el PR si no hay residuales HIGH.
    `id 'org.springframework.boot' version '3.5.14'` o superior aprobado. Si
    aparece una versión menor, actualizar el literal del plugin sin reemplazar
    el scaffold del MCP.
+10. **Pipeline/catalog namespace.** `KUBERNETES_NAMESPACE` en
+    `azure-pipelines.yml` debe coincidir con `metadata.namespace` de
+    `catalog-info.yaml`.
+11. **Gradle seguridad.** No debe quedar `spring-boot-starter-undertow`,
+    `io.undertow:*` ni `undertowVersion`; usar default embebido
+    Tomcat para MVC/Spring WS o Netty para WebFlux.
+12. **WAS Hikari.** Si WAS usa JPA/Hikari, validar query por motor:
+    SQL Server=`SELECT 1`; Oracle=`SELECT 1 from dual`.
 10. **Helm env limpio.** En `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`,
     las variables de entorno no pueden tener `value: "<CCC_...>"`,
     `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` ni comentarios inline en líneas

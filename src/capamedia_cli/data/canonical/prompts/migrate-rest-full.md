@@ -121,7 +121,7 @@ Before executing, verify that you have access to:
 
 6. **Canonical REST patterns (defined in this document):**
    - BUS/ORQ REST: `@RestController` + `@PostMapping`, Spring WebFlux (Netty reactive, NO `.block()`), `ErrorResolverHandler` (`ErrorWebExceptionHandler`) for SOAP Fault generation, single adapter with `@BancsService("ws-txNNNNNN")`, NO WebServiceConfig, NO NamespacePrefixInterceptor.
-   - WAS single-op REST: `@RestController` + Spring MVC (servlet/Undertow), blocking allowed, HikariCP+JPA+Oracle allowed when the analysis proves DB usage.
+   - WAS single-op REST: `@RestController` + Spring MVC (servlet default/Tomcat), blocking allowed, HikariCP+JPA allowed when the analysis proves DB usage.
 
 > **CRITICAL: MCP matrix for REST.** BUS (IIB) with `invocaBancs: true` → REST+WebFlux always (MCP override, any number of ops). ORQ → REST+WebFlux always. WAS 1-op → REST+MVC. WAS 2+ ops → SOAP+MVC (uses the other prompt). If you see `@Endpoint`/`WebServiceConfig`/`BancsClientHelper`/`.block()` in a BUS or ORQ service, it is **mis-classified** under the current matrix — those are SOAP patterns.
 >
@@ -224,11 +224,11 @@ This prompt produces **two possible stacks** depending on the legacy source:
 - Default persistence: no own DB — orchestrates BANCS via Core Adapter REST (non-blocking via `WebClient`).
 - **Hard rule:** NEVER mix blocking JPA (HikariCP+Hibernate) with WebFlux in the same request path. If the rare case of `DB_USAGE: YES` in WebFlux arises, use R2DBC or explicit blocking boundary on `Schedulers.boundedElastic()` and flag as `ATTENTION_NEEDED_WEBFLUX_WITH_DB`.
 
-**4b. WAS with 1 operation — Spring MVC (Undertow blocking, `@RestController`):**
+**4b. WAS with 1 operation — Spring MVC (servlet blocking, `@RestController`):**
 - Chosen because WAS services typically have DB access (JPA/HikariCP works natively on MVC).
 - Uses `spring-boot-starter-web` instead of `spring-boot-starter-webflux`.
 - BancsClient calls use `.block()` (allowed on MVC servlet container).
-- If `DB_USAGE: YES`: add HikariCP + JPA + Oracle (same pattern as SOAP prompt Rule 4.1, including `connection-test-query: SELECT 1`).
+- If `DB_USAGE: YES`: add HikariCP + JPA. Use DB-specific Hikari validation: SQL Server -> `connection-test-query: SELECT 1`; Oracle -> `connection-test-query: SELECT 1 from dual`.
 
 **How to determine which sub-stack applies:**
 - Check `migration-context.json` field `tecnologia_origen`: `bus` → WebFlux (4a), `was` → MVC (4b)

@@ -959,7 +959,7 @@ grep -E "KUBERNETES_NAMESPACE|CMDB_APPLICATION_ID" <PATH>/azure-pipelines.yml
 ```
 
 Verificar:
-- `KUBERNETES_NAMESPACE` = namespace correcto del microservicio (ej: `tnd-middleware`)
+- `KUBERNETES_NAMESPACE` = `metadata.namespace` de `catalog-info.yaml` (ej: `tnd-middleware`)
 - `CMDB_APPLICATION_ID` = `"Red Hat OpenShift Container Platform"` (NO `CAPA_COMUN`)
 
 Mismatch → **HIGH**.
@@ -1104,14 +1104,16 @@ Cualquier versión menor al baseline → **MEDIUM** y `capamedia checklist`
 puede autofixear el literal `id 'org.springframework.boot' version '<vieja>'`
 a `3.5.14` cuando el patrón es claro.
 
-### Check 8.2 — Snyk sin vulnerabilidades HIGH [PDF-OFICIAL]
+### Check 8.2 — Gradle seguridad: Undertow eliminado
 
-Ejecutar (si está disponible):
+Ejecutar:
 ```bash
-cd <PATH> && snyk test --severity-threshold=high
+grep -nEi "undertow" <PATH>/build.gradle
 ```
 
-Cualquier HIGH → **HIGH** bloqueante. MEDIUM/LOW son informativos.
+Cualquier linea activa con `spring-boot-starter-undertow`, `io.undertow:*` o
+`undertowVersion` bloquea con **HIGH**. Usar el servidor embebido default de
+Spring Boot: Tomcat para MVC / Spring WS y Netty para WebFlux.
 
 ### Check 8.3 — Peer Review score ≥ 7
 
@@ -1151,11 +1153,12 @@ grep -c "spring-boot-starter-web'\|spring-boot-starter-web\"" <PATH>/build.gradl
 **Validación adicional — container real en runtime:**
 ```bash
 # Buscar en logs de tests qué factory levanta Spring
-grep -r "UndertowServletWebServerFactory\|UndertowReactiveWebServerFactory" \
+grep -r "TomcatServletWebServerFactory\|NettyReactiveWebServerFactory" \
     <PATH>/build/test-results/ 2>/dev/null | head -1
 ```
 
-Si aparece `UndertowServletWebServerFactory` en un proyecto SOAP + BUS → **esperado** (Spring WS requiere servlet); el `webflux` starter se usa solo para el `WebClient` outbound. Este híbrido es el **patrón BUS oficial** del banco.
+Si aparece Undertow en Gradle o runtime → **HIGH**. Spring WS/MVC debe usar el
+servidor servlet default (Tomcat) y WebFlux debe usar Netty.
 
 **Nota histórica (archivada 2026-04-23):** el MCP Fabrics tenía un bug donde
 algunos scaffolds iniciales no incluían webflux en servicios que lo requerían
@@ -1534,18 +1537,23 @@ grep -E "url:|username:|password:" <PATH>/src/main/resources/application.yml
 
 Si alguno es literal (no `${...}`) -> **HIGH**. Los secrets NUNCA se commitean — se referencian como `${CCC_DB_URL}`, `${CCC_DB_USER}`, `${CCC_DB_PASSWORD}` y los provee el banco antes del deploy.
 
-### Check 13.11 — WAS Hikari `connection-test-query: SELECT 1`
+### Check 13.11 — WAS Hikari `connection-test-query` segun motor
 
 Solo aplica si el origen legacy es **WAS** y el proyecto migrado tiene JPA/Hikari.
 
 ```bash
-grep -rn "connection-test-query: SELECT 1" <PATH>/src/main/resources/application.yml
+grep -rn "connection-test-query:" <PATH>/src/main/resources/application.yml
 ```
 
-0 matches -> **HIGH**. Accion: agregar bajo `spring.datasource.hikari`:
+0 matches o query incorrecta -> **HIGH**. Accion: agregar bajo
+`spring.datasource.hikari` segun motor:
 
 ```yaml
+# SQL Server
 connection-test-query: SELECT 1
+
+# Oracle
+connection-test-query: SELECT 1 from dual
 ```
 
 ---

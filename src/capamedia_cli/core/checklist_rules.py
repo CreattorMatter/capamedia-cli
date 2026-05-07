@@ -14,6 +14,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from capamedia_cli.core.gitignore_policy import (
     DEPLOYMENT_GITIGNORE_ENTRIES,
     format_deployment_gitignore_block,
@@ -103,6 +105,57 @@ def _relative_display(path: Path, root: Path) -> str:
         return str(path.relative_to(root)).replace("/", "\\")
     except ValueError:
         return str(path)
+
+
+def _load_yaml_mapping(path: Path) -> dict:
+    try:
+        loaded = yaml.safe_load(_read_or_empty(path))
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _catalog_metadata_namespace(root: Path) -> str:
+    catalog = root / "catalog-info.yaml"
+    data = _load_yaml_mapping(catalog)
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        namespace = metadata.get("namespace")
+        if namespace is not None:
+            return str(namespace).strip()
+    text = _read_or_empty(catalog)
+    match = re.search(r"(?im)^\s*namespace\s*:\s*['\"]?([^'\"\s#]+)", text)
+    return match.group(1).strip() if match else ""
+
+
+def _pipeline_kubernetes_namespace(root: Path) -> str:
+    pipeline = root / "azure-pipelines.yml"
+    data = _load_yaml_mapping(pipeline)
+    variables = data.get("variables")
+    if isinstance(variables, dict):
+        value = variables.get("KUBERNETES_NAMESPACE")
+        if value is not None:
+            return str(value).strip()
+    elif isinstance(variables, list):
+        for item in variables:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("name", "")).strip() == "KUBERNETES_NAMESPACE":
+                value = item.get("value")
+                return str(value).strip() if value is not None else ""
+
+    text = _read_or_empty(pipeline)
+    direct = re.search(
+        r"(?im)^\s*KUBERNETES_NAMESPACE\s*:\s*['\"]?([^'\"\s#]+)",
+        text,
+    )
+    if direct:
+        return direct.group(1).strip()
+    named = re.search(
+        r"(?ims)^\s*-\s*name\s*:\s*KUBERNETES_NAMESPACE\s*$.*?^\s*value\s*:\s*['\"]?([^'\"\s#]+)",
+        text,
+    )
+    return named.group(1).strip() if named else ""
 
 
 def _unquoted_hash_pos(line: str) -> int:
@@ -272,6 +325,44 @@ _SPRING_BOOT_PLUGIN_RE = re.compile(
 
 def _spring_boot_plugin_versions(gradle_text: str) -> list[str]:
     return [match.group(1).strip() for match in _SPRING_BOOT_PLUGIN_RE.finditer(gradle_text)]
+
+
+def _undertow_gradle_artifacts(gradle_file: Path, root: Path) -> list[str]:
+    artifacts: list[str] = []
+    for line_no, line in enumerate(_read_or_empty(gradle_file).splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            continue
+        if "undertow" in stripped.lower():
+            rel = _relative_display(gradle_file, root)
+            artifacts.append(f"{rel}:{line_no} -> {stripped[:120]}")
+    return artifacts
+
+
+def _datasource_flavor(gradle_text: str, yml_text: str) -> str:
+    combined = f"{gradle_text}\n{yml_text}".lower()
+    if "oracle.jdbc" in combined or "oracledriver" in combined or "jdbc:oracle" in combined:
+        return "oracle"
+    if (
+        "sqlserverdriver" in combined
+        or "jdbc:sqlserver" in combined
+        or "microsoft.sqlserver" in combined
+        or "mssql" in combined
+    ):
+        return "sqlserver"
+    return "generic"
+
+
+def _connection_test_query(yml_text: str) -> str:
+    match = re.search(r"(?im)^\s*connection-test-query\s*:\s*(.+?)\s*$", yml_text)
+    if not match:
+        return ""
+    value = match.group(1).split("#", 1)[0].strip()
+    return value.strip("\"'")
+
+
+def _normal_query(query: str) -> str:
+    return re.sub(r"\s+", " ", query.strip().lower())
 
 
 _HIGH_DISCOVERY_EDGE_CODES = {
@@ -1064,6 +1155,62 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "pass"))
 
+    # 7.6 - KUBERNETES_NAMESPACE alineado con catalog-info.yaml
+    pipeline = ctx.migrated_path / "azure-pipelines.yml"
+    catalog = ctx.migrated_path / "catalog-info.yaml"
+    if pipeline.exists() and catalog.exists():
+        pipeline_namespace = _pipeline_kubernetes_namespace(ctx.migrated_path)
+        catalog_namespace = _catalog_metadata_namespace(ctx.migrated_path)
+        if pipeline_namespace and catalog_namespace and pipeline_namespace != catalog_namespace:
+            results.append(
+                CheckResult(
+                    "7.6",
+                    "Block 7",
+                    "KUBERNETES_NAMESPACE vs catalog namespace",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        "KUBERNETES_NAMESPACE en azure-pipelines.yml="
+                        f"'{pipeline_namespace}' vs metadata.namespace en "
+                        f"catalog-info.yaml='{catalog_namespace}'"
+                    ),
+                    suggested_fix=(
+                        "Alinear `variables.KUBERNETES_NAMESPACE` del pipeline "
+                        "con `metadata.namespace` de catalog-info.yaml."
+                    ),
+                )
+            )
+        elif pipeline_namespace and catalog_namespace:
+            results.append(
+                CheckResult(
+                    "7.6",
+                    "Block 7",
+                    "KUBERNETES_NAMESPACE vs catalog namespace",
+                    "pass",
+                    detail=f"namespace={pipeline_namespace}",
+                )
+            )
+        else:
+            missing = []
+            if not pipeline_namespace:
+                missing.append("KUBERNETES_NAMESPACE")
+            if not catalog_namespace:
+                missing.append("metadata.namespace")
+            results.append(
+                CheckResult(
+                    "7.6",
+                    "Block 7",
+                    "KUBERNETES_NAMESPACE vs catalog namespace",
+                    "fail",
+                    severity="high",
+                    detail=f"No se pudo leer: {', '.join(missing)}",
+                    suggested_fix=(
+                        "Definir `KUBERNETES_NAMESPACE` en azure-pipelines.yml "
+                        "y `metadata.namespace` en catalog-info.yaml."
+                    ),
+                )
+            )
+
     # 7.3 - Helm probes
     helm_dir = ctx.migrated_path / "helm"
     if helm_dir.exists():
@@ -1170,6 +1317,10 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     if not gradle_files:
         return results
 
+    undertow_artifacts: list[str] = []
+    for gradle_file in gradle_files:
+        undertow_artifacts.extend(_undertow_gradle_artifacts(gradle_file, ctx.migrated_path))
+
     detected_versions: list[tuple[Path, str]] = []
     files_with_boot_token: list[Path] = []
     for gradle_file in gradle_files:
@@ -1198,46 +1349,74 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 ),
             )
         )
-        return results
+    else:
+        outdated = [
+            f"{_relative_display(path, ctx.migrated_path)}={version}"
+            for path, version in detected_versions
+            if is_version_lower(version, SPRING_BOOT_BASELINE_VERSION)
+        ]
+        if outdated:
+            results.append(
+                CheckResult(
+                    "8.1",
+                    "Block 8",
+                    "Spring Boot baseline",
+                    "fail",
+                    severity="medium",
+                    detail=(
+                        f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION}: "
+                        + ", ".join(outdated)
+                    ),
+                    suggested_fix=(
+                        "Actualizar el plugin Gradle a "
+                        f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                    ),
+                )
+            )
+        else:
+            versions = ", ".join(
+                f"{_relative_display(path, ctx.migrated_path)}={version}"
+                for path, version in detected_versions
+            )
+            results.append(
+                CheckResult(
+                    "8.1",
+                    "Block 8",
+                    "Spring Boot baseline",
+                    "pass",
+                    detail=f"Spring Boot >= {SPRING_BOOT_BASELINE_VERSION}: {versions}",
+                )
+            )
 
-    outdated = [
-        f"{_relative_display(path, ctx.migrated_path)}={version}"
-        for path, version in detected_versions
-        if is_version_lower(version, SPRING_BOOT_BASELINE_VERSION)
-    ]
-    if outdated:
+    if undertow_artifacts:
         results.append(
             CheckResult(
-                "8.1",
+                "8.2",
                 "Block 8",
-                "Spring Boot baseline",
+                "Gradle seguridad Undertow",
                 "fail",
-                severity="medium",
+                severity="high",
                 detail=(
-                    f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION}: "
-                    + ", ".join(outdated)
+                    f"Dependencia/config Undertow detectada ({len(undertow_artifacts)}): "
+                    + "; ".join(undertow_artifacts[:12])
                 ),
                 suggested_fix=(
-                    "Actualizar el plugin Gradle a "
-                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                    "Eliminar spring-boot-starter-undertow, io.undertow:* y variables "
+                    "undertowVersion. Usar servidor embebido default: Tomcat para MVC "
+                    "o Netty para WebFlux."
                 ),
             )
         )
-        return results
-
-    versions = ", ".join(
-        f"{_relative_display(path, ctx.migrated_path)}={version}"
-        for path, version in detected_versions
-    )
-    results.append(
-        CheckResult(
-            "8.1",
-            "Block 8",
-            "Spring Boot baseline",
-            "pass",
-            detail=f"Spring Boot >= {SPRING_BOOT_BASELINE_VERSION}: {versions}",
+    else:
+        results.append(
+            CheckResult(
+                "8.2",
+                "Block 8",
+                "Gradle seguridad Undertow",
+                "pass",
+                detail="sin dependencias/config Undertow activas",
+            )
         )
-    )
     return results
 
 
@@ -1280,16 +1459,24 @@ def run_block_13(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("13.5", "Block 13", "open-in-view: false", "fail", severity="medium", detail="falta o es true"))
 
-    # 13.11 - WAS + Hikari must validate connections with SELECT 1.
+    # 13.11 - WAS + Hikari validates connections with DB-specific query.
     if (ctx.source_type or "").lower() == "was":
-        if re.search(r"connection-test-query\s*:\s*SELECT\s+1\b", yml_text, re.IGNORECASE):
+        db_flavor = _datasource_flavor(gradle_text, yml_text)
+        expected_query = "SELECT 1 from dual" if db_flavor == "oracle" else "SELECT 1"
+        actual_query = _connection_test_query(yml_text)
+        actual_normal = _normal_query(actual_query)
+        expected_normal = _normal_query(expected_query)
+        if actual_normal == expected_normal:
             results.append(
                 CheckResult(
                     "13.11",
                     "Block 13",
                     "WAS Hikari connection-test-query",
                     "pass",
-                    detail="connection-test-query: SELECT 1 presente",
+                    detail=(
+                        f"connection-test-query: {actual_query} presente "
+                        f"(db={db_flavor})"
+                    ),
                 )
             )
         else:
@@ -1300,10 +1487,14 @@ def run_block_13(ctx: CheckContext) -> list[CheckResult]:
                     "WAS Hikari connection-test-query",
                     "fail",
                     severity="high",
-                    detail="WAS con JPA/Hikari no define connection-test-query: SELECT 1",
+                    detail=(
+                        "WAS con JPA/Hikari no define el connection-test-query "
+                        f"correcto para db={db_flavor}: actual="
+                        f"'{actual_query or '(faltante)'}'"
+                    ),
                     suggested_fix=(
                         "Agregar bajo spring.datasource.hikari: "
-                        "`connection-test-query: SELECT 1`"
+                        f"`connection-test-query: {expected_query}`"
                     ),
                 )
             )

@@ -370,6 +370,55 @@ def test_block_7_passes_clean_helm_env_value(tmp_path: Path) -> None:
     assert check.status == "pass"
 
 
+def test_block_7_fails_when_pipeline_namespace_differs_from_catalog(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "catalog-info.yaml").write_text(
+        "apiVersion: backstage.io/v1alpha1\n"
+        "kind: Component\n"
+        "metadata:\n"
+        "  name: tnd-msa-sp-wsclientes0026\n"
+        "  namespace: tnd-middleware\n",
+        encoding="utf-8",
+    )
+    (root / "azure-pipelines.yml").write_text(
+        "variables:\n"
+        "  KUBERNETES_NAMESPACE: csg-middleware\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.6")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "csg-middleware" in check.detail
+    assert "tnd-middleware" in check.detail
+
+
+def test_block_7_accepts_matching_pipeline_and_catalog_namespace(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "catalog-info.yaml").write_text(
+        "metadata:\n"
+        "  namespace: tnd-middleware\n",
+        encoding="utf-8",
+    )
+    (root / "azure-pipelines.yml").write_text(
+        "variables:\n"
+        "- name: KUBERNETES_NAMESPACE\n"
+        "  value: tnd-middleware\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _by_id(results, "7.6")
+
+    assert check.status == "pass"
+
+
 def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
@@ -396,6 +445,42 @@ def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
     check = _by_id(results, "8.1")
+
+    assert check.status == "pass"
+
+
+def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies {\n"
+        "  def undertowVersion = '2.4.0.RC4'\n"
+        "  implementation 'org.springframework.boot:spring-boot-starter-undertow'\n"
+        "  implementation \"io.undertow:undertow-core:${undertowVersion}\"\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _by_id(results, "8.2")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "spring-boot-starter-undertow" in check.detail
+
+
+def test_block_8_accepts_default_embedded_server_without_undertow(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _by_id(results, "8.2")
 
     assert check.status == "pass"
 
@@ -691,6 +776,86 @@ def test_block_13_requires_was_connection_test_query(tmp_path: Path) -> None:
     assert check.status == "fail"
     assert check.severity == "high"
     assert "connection-test-query: SELECT 1" in check.suggested_fix
+
+
+def test_block_13_requires_oracle_connection_test_query_from_dual(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-jpa' }\n",
+        encoding="utf-8",
+    )
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    driver-class-name: oracle.jdbc.OracleDriver\n"
+        "    hikari:\n"
+        "      connection-test-query: SELECT 1\n"
+        "  jpa:\n"
+        "    hibernate:\n"
+        "      ddl-auto: validate\n"
+        "    open-in-view: false\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_13(ctx)
+    check = _by_id(results, "13.11")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "SELECT 1 from dual" in check.suggested_fix
+
+
+def test_block_13_accepts_oracle_connection_test_query_from_dual(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-jpa' }\n",
+        encoding="utf-8",
+    )
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    driver-class-name: oracle.jdbc.OracleDriver\n"
+        "    hikari:\n"
+        "      connection-test-query: SELECT 1 from dual\n"
+        "  jpa:\n"
+        "    hibernate:\n"
+        "      ddl-auto: validate\n"
+        "    open-in-view: false\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_13(ctx)
+    check = _by_id(results, "13.11")
+
+    assert check.status == "pass"
+
+
+def test_block_13_accepts_sqlserver_connection_test_query_select_one(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    (root / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-jpa' }\n",
+        encoding="utf-8",
+    )
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n"
+        "  datasource:\n"
+        "    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver\n"
+        "    hikari:\n"
+        "      connection-test-query: SELECT 1\n"
+        "  jpa:\n"
+        "    hibernate:\n"
+        "      ddl-auto: validate\n"
+        "    open-in-view: false\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    results = run_block_13(ctx)
+    check = _by_id(results, "13.11")
+
+    assert check.status == "pass"
 
 
 def test_block_13_accepts_was_connection_test_query(tmp_path: Path) -> None:

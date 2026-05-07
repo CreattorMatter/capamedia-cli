@@ -161,3 +161,6 @@ Corré `/check` para validar contra la checklist BPTPSRE y cruzar con el legacy.
 10. **Config is not an output port.** Env/YAML/properties van por `@ConfigurationProperties` o bean de config; nunca crear `*ConfigOutputPort` ni adapter de infraestructura solo para leer config.
 11. **Spring Boot baseline:** antes de cerrar, `build.gradle` debe declarar `id 'org.springframework.boot' version '3.5.14'` o superior aprobado. Si Fabrics genera una versión menor, actualizar sólo ese literal sin reemplazar el `build.gradle` completo.
 12. **Helm env limpio:** en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, las variables de entorno no pueden quedar como `value: "<CCC_...>"`, `TODO/TBD/PENDIENTE/VALIDAR`, ni con comentarios inline en líneas `name:`/`value:`. Si falta el valor real, reportarlo como handoff fuera del Helm.
+13. **Pipeline/catalog namespace:** `KUBERNETES_NAMESPACE` en `azure-pipelines.yml` debe coincidir con `metadata.namespace` de `catalog-info.yaml`.
+14. **Gradle seguridad:** no dejar `spring-boot-starter-undertow`, `io.undertow:*` ni `undertowVersion`. Usar servidor embebido default: Tomcat para MVC/Spring WS, Netty para WebFlux.
+15. **WAS Hikari:** si WAS usa JPA/Hikari, `connection-test-query` depende del motor: SQL Server=`SELECT 1`, Oracle=`SELECT 1 from dual`.

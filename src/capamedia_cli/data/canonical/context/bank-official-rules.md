@@ -734,7 +734,7 @@ checklist oficial del CLI lo bloquea como HIGH en el Block 7 con el detalle:
 
 ---
 
-## Regla 9i - WAS + JPA/Hikari requiere `connection-test-query: SELECT 1`
+## Regla 9i - WAS + JPA/Hikari requiere `connection-test-query` segun motor
 
 **MUST**: si el origen legacy es **WAS** y el migrado tiene
 `spring-boot-starter-data-jpa`, `application.yml` debe declarar:
@@ -743,7 +743,11 @@ checklist oficial del CLI lo bloquea como HIGH en el Block 7 con el detalle:
 spring:
   datasource:
     hikari:
+      # SQL Server
       connection-test-query: SELECT 1
+
+      # Oracle
+      connection-test-query: SELECT 1 from dual
 ```
 
 Esta regla es exclusiva para WAS con BD/JPA. BUS/ORQ WebFlux sin JPA no deben

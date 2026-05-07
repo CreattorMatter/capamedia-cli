@@ -609,6 +609,13 @@ def _build_batch_migrate_prompt(
         - Verifica que `build.gradle` declare `id 'org.springframework.boot'
           version '3.5.14'` o superior aprobado. Si hay una version menor,
           actualiza solo ese literal sin reemplazar el build.gradle del MCP.
+        - Verifica Gradle seguridad: no dejes spring-boot-starter-undertow,
+          io.undertow:* ni undertowVersion; usar servidor embebido default
+          Tomcat para MVC/Spring WS o Netty para WebFlux.
+        - Verifica que KUBERNETES_NAMESPACE en azure-pipelines.yml coincida
+          con metadata.namespace de catalog-info.yaml.
+        - Si es WAS con JPA/Hikari, connection-test-query depende del motor:
+          SQL Server=SELECT 1; Oracle=SELECT 1 from dual.
         - Verifica Helm env vars: no dejes `value: "<CCC_...>"`, marcadores
           `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` ni comentarios inline en lineas
           `name:`/`value:` de `helm/dev.yml`, `helm/test.yml` o `helm/prod.yml`.
