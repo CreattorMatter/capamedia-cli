@@ -655,7 +655,7 @@ implementation 'com.pichincha.dm.lib:mdw-dm-lib-stratio-connector:1.0.0'
 spring:
   data:
     redis:
-      enabled: ${CCC_REDIS_ENABLED:false}   # set true to cache access token
+      enabled: ${CCC_REDIS_ENABLED}   # set true in helm to cache access token
       # rest of redis.* only required when enabled=true
       ttl-data-duration: 4h
       ttl-oauth2-duration-to-subtract: 5m
@@ -917,13 +917,13 @@ dependencies {
 
     // Corporate libraries
     implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
-    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0-alpha.20260409115137'
+    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
 
     // Logging
     implementation 'net.logstash.logback:logstash-logback-encoder:9.0'
 
     // Resilience4j
-    implementation 'io.github.resilience4j:resilience4j-spring-boot2'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3'
     implementation 'io.github.resilience4j:resilience4j-reactor'
 
     // JAX-WS (needed for WSDL class generation)
@@ -2496,8 +2496,9 @@ public class CatalogExceptionConstants {
 **MANDATORY RULE — All legacy config variables in application.yml:**
 Every configuration variable identified in the ANALYSIS (Section 15 "Service Configuration") — from the service itself AND from its UMP dependencies — MUST have a corresponding entry in `application.yml`. This includes variables from `.properties` files, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`, and `CatalogoAplicaciones.properties`.
 
-- **Functional values** (max records, resource names, component names, business timeouts, lengths, prefixes, flags): commit as literals or with inline default `${CCC_VAR:value}` when the value is known from the legacy code or config files.
+- **Functional values** (max records, resource names, component names, business timeouts, lengths, prefixes, flags): commit as literals only when the value is invariant and proven from legacy code/config; otherwise use `${CCC_*}` WITHOUT defaults and define the value in Helm.
 - **Secrets and environment-dependent values** (DB URLs, passwords, tokens, credentials): use `${CCC_*}` WITHOUT defaults. Each `${CCC_*}` MUST have a corresponding entry in ALL 3 helm files (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`).
+- **NEVER use inline defaults in `application*.yml` for `CCC_*` variables.** If `application.yml` references `${CCC_FOO}`, the concrete value must live in Helm; do not use colon-default placeholder syntax.
 - **NEVER fabricate values.** Only use values extracted from the legacy code, `.properties` files, CSV files, or XML config files. If the value is not available, use `${CCC_*}` and add a YAML comment: `# valor no disponible — obtener de <fuente>`.
 - **NEVER leave a variable undocumented.** If the ANALYSIS lists a property key, it MUST appear in `application.yml`.
 - **Only declare in Helm the `${CCC_*}` variables that are actually referenced in `application.yml`.** No orphan variables.
@@ -2620,26 +2621,26 @@ TPL_LOG_DEBUG: DEBUG
 
 logging:
   level:
-    com.pichincha.sp: ${CCC_LOG_COM_PICHINCHA_SP:DEBUG}
+    com.pichincha.sp: ${CCC_LOG_COM_PICHINCHA_SP}
     com.pichincha.propagation.filter.impl
       .WebFilterHeaderForwardPropagator: DEBUG
 
 bancs:
   webclients:
     ws-tx<TX_CODE>:
-      max-in-memory-size: ${CCC_BANCS_MAX_IN_MEMORY_SIZE:5242880}
-      base-url: ${CCC_BANCS_BASE_URL:http://localhost:9999}
+      max-in-memory-size: ${CCC_BANCS_MAX_IN_MEMORY_SIZE}
+      base-url: ${CCC_BANCS_BASE_URL}
       connector:
-        connect-timeout: ${CCC_BANCS_CONNECT_TIMEOUT:2000}
-        read-timeout: ${CCC_BANCS_READ_TIMEOUT:2000}
-        max-connections: ${CCC_BANCS_MAX_CONNECTIONS:-1}
-        max-idle-time: ${CCC_BANCS_MAX_IDLE_TIME:10s}
+        connect-timeout: ${CCC_BANCS_CONNECT_TIMEOUT}
+        read-timeout: ${CCC_BANCS_READ_TIMEOUT}
+        max-connections: ${CCC_BANCS_MAX_CONNECTIONS}
+        max-idle-time: ${CCC_BANCS_MAX_IDLE_TIME}
         pending-acquire-max-count:
-          ${CCC_BANCS_PENDING_ACQUIRE_MAX_COUNT:-1}
+          ${CCC_BANCS_PENDING_ACQUIRE_MAX_COUNT}
         pending-acquire-timeout:
-          ${CCC_BANCS_PENDING_ACQUIRE_TIMEOUT:2s}
+          ${CCC_BANCS_PENDING_ACQUIRE_TIMEOUT}
   iib-support:
-    enabled: ${CCC_BANCS_LIB_SUPPORT_ENABLED:false}
+    enabled: ${CCC_BANCS_LIB_SUPPORT_ENABLED}
 
 management:
   endpoints:
@@ -2653,30 +2654,30 @@ web-filter:
 resilience4j:
   circuitbreaker:
     bancs-client:
-      enabled: ${CCC_BANCS_CIRCUIT_BREAKER_ENABLED:false}
+      enabled: ${CCC_BANCS_CIRCUIT_BREAKER_ENABLED}
       instances:
         ws-tx<TX_CODE>:
           sliding-window-size:
-            ${CCC_BANCS_CIRCUIT_BREAKER_SLIDING_WINDOW_SIZE:3000}
+            ${CCC_BANCS_CIRCUIT_BREAKER_SLIDING_WINDOW_SIZE}
           failure-rate-threshold:
-            ${CCC_BANCS_CIRCUIT_BREAKER_FAILURE_RATE_THRESHOLD:10}
+            ${CCC_BANCS_CIRCUIT_BREAKER_FAILURE_RATE_THRESHOLD}
           wait-duration-in-open-state:
-            ${CCC_BANCS_CIRCUIT_BREAKER_WAIT_DURATION_IN_OPEN_STATE:20s}
+            ${CCC_BANCS_CIRCUIT_BREAKER_WAIT_DURATION_IN_OPEN_STATE}
           permitted-number-of-calls-in-half-open-state:
-            ${CCC_BANCS_CIRCUIT_BREAKER_PERMITTED_NUMBER_OF_CALLS_IN_HALF_OPEN_STATE:50}
+            ${CCC_BANCS_CIRCUIT_BREAKER_PERMITTED_NUMBER_OF_CALLS_IN_HALF_OPEN_STATE}
           slow-call-rate-threshold:
-            ${CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_RATE_THRESHOLD:10}
+            ${CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_RATE_THRESHOLD}
           slow-call-duration-threshold:
-            ${CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_DURATION_THRESHOLD:1000ms}
+            ${CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_DURATION_THRESHOLD}
 
 trace-logger:
-  enabled: ${CCC_TRACE_LOGGER_ENABLED:true}
+  enabled: ${CCC_TRACE_LOGGER_ENABLED}
   custom-level:
-    enabled: ${CCC_CUSTOM_LEVEL_ENABLED:true}
-    infoEnabled: ${CCC_CUSTOM_LEVEL_INFO_ENABLED:true}
-    debugEnabled: ${CCC_CUSTOM_LEVEL_DEBUG_ENABLED:true}
-    warnEnabled: ${CCC_CUSTOM_LEVEL_WARN_ENABLED:true}
-    errorEnabled: ${CCC_CUSTOM_LEVEL_ERROR_ENABLED:true}
+    enabled: ${CCC_CUSTOM_LEVEL_ENABLED}
+    infoEnabled: ${CCC_CUSTOM_LEVEL_INFO_ENABLED}
+    debugEnabled: ${CCC_CUSTOM_LEVEL_DEBUG_ENABLED}
+    warnEnabled: ${CCC_CUSTOM_LEVEL_WARN_ENABLED}
+    errorEnabled: ${CCC_CUSTOM_LEVEL_ERROR_ENABLED}
 
 optimus:
   web:

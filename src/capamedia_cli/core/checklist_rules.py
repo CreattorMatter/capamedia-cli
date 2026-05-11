@@ -1179,6 +1179,43 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("7.2", "Block 7", "Secrets via env vars", "pass"))
 
+    # 7.2b - application.yml no debe definir variables CCC_* con valores.
+    # Si una config necesita CCC_*, application.yml solo debe referenciar
+    # ${CCC_*}; el valor concreto vive en helm/dev|test|prod.yml.
+    ccc_assignments: list[str] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.match(r"^CCC_[A-Z0-9_]+\s*:", stripped):
+            ccc_assignments.append(f"L{line_no}: {stripped}")
+
+    if ccc_assignments:
+        results.append(
+            CheckResult(
+                "7.2b",
+                "Block 7",
+                "application.yml no define CCC_*",
+                "fail",
+                severity="high",
+                detail="; ".join(ccc_assignments[:10]),
+                suggested_fix=(
+                    "Remover definiciones `CCC_*: valor` de application.yml. "
+                    "Usar `${CCC_*}` donde se referencia la config y declarar "
+                    "el valor en helm/dev.yml, helm/test.yml y helm/prod.yml."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "7.2b",
+                "Block 7",
+                "application.yml no define CCC_*",
+                "pass",
+            )
+        )
+
     # 7.6 - KUBERNETES_NAMESPACE alineado con catalog-info.yaml
     pipeline = ctx.migrated_path / "azure-pipelines.yml"
     catalog = ctx.migrated_path / "catalog-info.yaml"

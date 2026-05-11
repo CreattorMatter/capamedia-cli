@@ -274,6 +274,26 @@ def test_block_7_passes_with_env_var(tmp_path: Path) -> None:
     assert secret_check.status == "pass"
 
 
+def test_block_7_fails_application_yml_ccc_assignment(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    yml = root / "src/main/resources/application.yml"
+    yml.write_text(
+        "CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS: true\n"
+        "app:\n"
+        "  skip-correspondence-channels: ${CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+
+    check = _by_id(results, "7.2b")
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "CCC_WSCLIENTES0006_SKIP_CORRESPONDENCIA_CHANNELS" in check.detail
+    assert "helm/dev.yml" in check.suggested_fix
+
+
 def test_block_7_fails_hpa_average_value_400m(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "src/main/resources/application.yml").write_text(

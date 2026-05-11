@@ -15,6 +15,7 @@ Run with: pytest tests/test_canonical_single_source.py -v
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -257,6 +258,30 @@ def test_rest_prompt_has_stack_specific_dependency_guards() -> None:
         "**DO NOT include:** `spring-boot-starter-web-services`, `wsdl4j`, "
         "`spring-boot-starter-web`"
     ) not in content
+
+
+def test_rest_prompt_uses_stable_bancs_dependency_and_no_ccc_inline_defaults() -> None:
+    """El prompt REST no debe enseñar versiones alpha ni defaults en CCC_*."""
+    content = (CANONICAL_ROOT / "prompts" / "migrate-rest-full.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "lib-bnc-api-client:1.1.0-alpha" not in content
+    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in content
+    assert "resilience4j-spring-boot2" not in content
+    assert "resilience4j-spring-boot3" in content
+    assert not re.search(r"\$\{CCC_[A-Z0-9_]+:[^}]+\}", content)
+
+
+def test_doublecheck_mentions_post_migration_config_dependency_guards() -> None:
+    content = (CANONICAL_ROOT / "prompts" / "doublecheck.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in content
+    assert "resilience4j-spring-boot3" in content
+    assert "CCC_*: valor" in content
+    assert "valor concreto debe\n  vivir en los 3 Helm" in content
 
 
 def test_soap_prompt_jpa_hikari_is_conditional_and_no_inline_pool_defaults() -> None:

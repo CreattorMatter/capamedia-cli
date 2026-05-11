@@ -94,6 +94,9 @@ aplica a BUS/IIB cuando el legacy lo prueba.
   placeholders `<...>` ni marcadores `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`
   en lineas activas. Los comentarios inline en lineas `name:`/`value:` de env
   vars tambien son error.
+- `application*.yml` no puede definir `CCC_*: valor` ni usar defaults inline
+  en placeholders `CCC_*`. Si referencia `${CCC_*}`, el valor concreto debe
+  vivir en los 3 Helm (`dev/test/prod`).
 
 ## Paso 2 — Ejecutar `capamedia checklist`
 
@@ -110,6 +113,9 @@ Eso dispara internamente:
    - Regla 7: `${VAR:default}` → `${VAR}` limpio (preserva `optimus.web.*`)
    - Regla 8: normalizar `lib-bnc-api-client:1.1.0-alpha.*` → `1.1.0` estable
      solo si la matriz permite BANCS (BUS/IIB + invocaBancs=true)
+   - Regla Gradle REST/BANCS: `lib-bnc-api-client` debe quedar en
+     `com.pichincha.bnc:lib-bnc-api-client:1.1.0` estable y Resilience4j debe
+     usar el starter compatible con Spring Boot 3 (`resilience4j-spring-boot3`)
    - Regla 9: esqueleto inicial de `catalog-info.yaml`
    - Block 19: inyectar valores de `.capamedia/inputs/*.properties` a
      `application.yml` (si el owner ya entrego los archivos)
