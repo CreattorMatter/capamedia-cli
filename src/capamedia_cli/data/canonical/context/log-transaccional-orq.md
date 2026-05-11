@@ -389,7 +389,7 @@ del evento (PDF 1, ejemplo de `<NS1:evento>`):
 |---------------|---------------------------------------------------|
 | `00638`       | IIB (broker integración)                          |
 | `00045`       | BANCS aplicación                                  |
-| `00000`       | Usado por golds legacy — **NO es oficial**, evitar|
+| `00000`       | Usado por servicios legacy — **NO es oficial**, evitar|
 | otros         | Consultar catálogo oficial del banco              |
 
 **Mapeo de `tipo`** (cruzar con `reference_error_types.md`):
@@ -402,7 +402,7 @@ del evento (PDF 1, ejemplo de `<NS1:evento>`):
 
 **NEVER**:
 - Usar `tipo="WARN"` o `"DEBUG"` — no son valores válidos en este esquema.
-- Omitir `backend` — algunos golds lo tienen pero es incorrecto; siempre
+- Omitir `backend` — algunos servicios legacy lo tienen pero es incorrecto; siempre
   debe estar.
 - Hardcodear `codigo=0` cuando el response tuvo error — debe reflejar el
   código real devuelto por downstream.

@@ -419,13 +419,13 @@ AUDIT_FILES = (
 # canonical con MUST/NEVER + ejemplo NO. El audit falla si alguna falta.
 OFFICIAL_BANK_RULES = {
     "1": "Capas application/domain/infrastructure",
-    "2": "WSDL framework (invocaBancs REST+WebFlux; fallback 1 op REST+WebFlux, 2+ SOAP+MVC)",
+    "2": "WSDL framework segun bank-mcp-matrix",
     "3": "@BpTraceable controllers",
     "4": "@BpLogger services",
     "5": "Sin navegacion cruzada entre capas",
     "6": "Services sin metodos utilitarios",
     "7": "application.yml sin ${VAR:default}",
-    "8": "Gradle lib-bnc-api-client obligatoria",
+    "8": "Gradle lib-bnc-api-client segun matriz",
     "9": "catalog-info.yaml completo",
 }
 

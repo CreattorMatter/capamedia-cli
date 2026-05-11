@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Reglas canonicas del PDF BPTPSRE (documentadas en
 # `prompts/documentacion/BPTPSRE-Estructura de error-*.pdf`).
-# Orden de precedencia: PDF > checklist > reviewers > golds vigentes.
+# Orden de precedencia: PDF > checklist > reviewers > reglas canonicas vigentes.
 _ERROR_STRUCTURE_RULES: tuple[str, ...] = (
     "codigo: exactamente igual al legacy (mirar ESQL et_bancs/et_soap o properties).",
     "mensaje: para migrados, solo la descripcion. Si legacy decia `NODO-OK`, queda `OK`.",

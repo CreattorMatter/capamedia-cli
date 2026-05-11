@@ -217,7 +217,7 @@ migrados en el pasado como SOAP. Bajo la matriz MCP oficial actual, esto es
 Esos casos legacy NO se reclasifican retroactivamente si ya están en producción;
 los nuevos servicios BUS deben usar REST+WebFlux.
 
-**Guardar en el contexto del reporte:** `sourceType`, `invocaBancs`, `projectType`, `goldStandard`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
+**Guardar en el contexto del reporte:** `sourceType`, `invocaBancs`, `projectType`, `canonicalRule`, `opsLegacy`, `opsMigrated`, `opsMatch`, `expectedFramework`, `actualFramework`, `frameworkMatch`.
 
 ---
 
@@ -743,7 +743,7 @@ grep -rn "catch\s*(\s*BancsOperationException" <PATH>/src/main/java/com/pichinch
 
 0 matches → **HIGH**. Sin catch, el error nunca llega al cliente SOAP/REST con código estructurado.
 
-**Ubicación válida:** Controller (patrón 0007) o Service (patrón 0015). Uno u otro, no ambos.
+**Ubicación válida:** Controller o Service. Uno u otro, no ambos.
 
 ### Check 5.3 — No hay SOAP Faults — todo es HTTP 200 con `<error>` (solo SOAP)
 
@@ -1242,7 +1242,7 @@ Ejecución manual: dev corre SonarLint en IDE. No se puede automatizar desde CLI
 
 ## BLOQUE 10 — SOAP specifics (solo si `projectType = SOAP`)
 
-**Origen:** [COMMIT-bf913b9] + análisis 0015
+**Origen:** [COMMIT-bf913b9] + reglas SOAP canonicas
 
 Si `projectType != SOAP`, saltar este bloque.
 
@@ -1940,4 +1940,4 @@ servicios concretos. Las reglas son abstractas y viven en este checklist.
 **Politica canonica:** las reglas se expresan en abstracto. Si un proyecto
 concreto del banco viola una regla, prevalece el checklist — no se copia del
 proyecto. Anti-patrones historicos se mencionan como tales ("no replicar"),
-sin nombrar servicios especificos como "gold standard".
+sin nombrar servicios especificos como referencia aprobada.

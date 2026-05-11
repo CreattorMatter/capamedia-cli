@@ -145,7 +145,7 @@ def adopt(
         if not entry.is_dir() or entry.name.startswith("."):
             continue
         # Saltear las carpetas CapaMedia que ya existan
-        if entry.name in ("legacy", "destino", "umps", "tx", "config", "gold-ref"):
+        if entry.name in ("legacy", "destino", "umps", "tx", "config"):
             continue
 
         kind = _classify_subdir(entry)

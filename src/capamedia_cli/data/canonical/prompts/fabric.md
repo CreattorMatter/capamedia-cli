@@ -170,7 +170,7 @@ Escribir `destino/<namespace>-msa-sp-<servicio>/migration-context.json`:
 **Workarounds aplicados:**
 - Gap 1 (stack Spring segun matriz) — OK / CORREGIDO
 - Gap 2 (jaxws-rt) — NO aplica (projectType=rest)
-- Gap 3 (versiones) — sincronizado con gold-ref
+- Gap 3 (versiones) — sincronizado con la matriz y reglas canonicas del CLI
 
 **Destino generado:** `./destino/<namespace>-msa-sp-<servicio>/`
 

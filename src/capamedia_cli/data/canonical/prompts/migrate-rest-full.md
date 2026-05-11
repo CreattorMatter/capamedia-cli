@@ -143,7 +143,7 @@ coverage and no pending markers remain.
 
 ---
 
-## FUNDAMENTAL PRINCIPLE: ALIGN WITH THE GOLD STANDARD
+## FUNDAMENTAL PRINCIPLE: ALIGN WITH THE CANONICAL RULES
 
 **The canonical REST pattern is defined in this document. Apply the rules as
 written here; do NOT copy patterns from specific legacy projects of the bank
@@ -484,7 +484,7 @@ static final String SUCCESS_MESSAGE_BANCS = "OK";
 static final String SUCCESS_CODE = "0";
 ```
 
-### Lombok — Use MINIMALLY (Gold Standard Pattern)
+### Lombok — Use MINIMALLY (Canonical Pattern)
 
 **The canonical REST pattern uses:**
 - `@Getter` — for typed exceptions and enums

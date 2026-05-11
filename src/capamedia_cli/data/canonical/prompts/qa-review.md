@@ -130,7 +130,7 @@ Parrafo corto: el servicio migrado esta listo para produccion, requiere
 ajustes, o debe rechazarse.
 ```
 
-## Golden Rules
+## Core Rules
 
 - NUNCA marcar ✅ PASS sin evidencia verificable.
 - Si un criterio NO aplica, justificarlo explicitamente (no saltearlo).

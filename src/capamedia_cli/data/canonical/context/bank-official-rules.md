@@ -381,9 +381,10 @@ optimus:
 
 ---
 
-## Regla 8 - `lib-bnc-api-client:1.1.0` obligatoria
+## Regla 8 - `lib-bnc-api-client:1.1.0` solo cuando la matriz lo exige
 
-**MUST**: el `build.gradle` DEBE declarar la libreria BANCS API client del banco en la **version estable** `1.1.0`:
+**MUST**: solo servicios BUS/IIB con `invocaBancs=true` deben declarar la
+libreria BANCS API client del banco en la **version estable** `1.1.0`:
 
 ```gradle
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
@@ -396,7 +397,8 @@ el regex del validador oficial porque contenia el substring `1.1.0`. Esa
 version queda **deprecada** para proyectos nuevos.
 
 **NEVER**:
-- omitirla (implementar BANCS client a mano desde cero)
+- agregarla en WAS, ORQ o BUS/IIB sin `invocaBancs=true`
+- omitirla en BUS/IIB con `invocaBancs=true` (implementar BANCS client a mano desde cero)
 - usar version `1.0.x` o menor
 - mantener `1.1.0-alpha.*`, `1.1.0-SNAPSHOT`, `1.1.0.RELEASE`, `1.1.0-rc*`,
   `1.1.0-beta*` en proyectos migrados nuevos. La estable ya salio; ir a ella.
@@ -408,8 +410,9 @@ version queda **deprecada** para proyectos nuevos.
 
 1. **Normaliza** cualquier variante pre-release de `1.1.0` (`-alpha.*`,
    `-SNAPSHOT`, `-rc*`, `-beta*`, `.RELEASE`, `.M*`) a `1.1.0` estable.
-2. Si la libreria no esta declarada, la inserta en el bloque
-   `dependencies { }` del `build.gradle` (o crea el bloque si no existe).
+2. Si la matriz indica BUS/IIB con `invocaBancs=true` y la libreria no esta
+   declarada, la inserta en el bloque `dependencies { }` del `build.gradle`.
+   En WAS, ORQ y BUS/IIB sin BANCS no la agrega.
 
 Esta libreria provee: `BancsClient`, `BancsClientHelper`, anotaciones `@BancsService`, mapeos de errores canonicos del banco. Sin ella el codigo se duplica.
 
@@ -433,8 +436,8 @@ implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'
 
 **MUST**: archivo `catalog-info.yaml` en la raiz del proyecto con:
 
-- `metadata.namespace: tnd-middleware` (literal)
-- `metadata.name: tpl-middleware` (literal)
+- `metadata.namespace: <prefijo>-middleware` (derivado del nombre del componente, por ejemplo `tnd-middleware`)
+- `metadata.name: <namespace>-msa-sp-<servicio>` (nombre real del componente, no el proyecto Azure)
 - `metadata.description`: texto real del servicio (NO `"comming soon"`)
 - `metadata.annotations`:
   - `dev.azure.com/project-repo: <proyecto-azure>/<nombre-repo>` (matchea links[0])
@@ -451,8 +454,8 @@ implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'
 apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
-  namespace: tnd-middleware                           # ✔ literal obligatorio
-  name: tpl-middleware                                # ✔ literal obligatorio
+  namespace: tnd-middleware                           # derivado de metadata.name
+  name: tnd-msa-sp-<svc>                              # componente real
   description: Consulta de contacto transaccional BANCS   # ✔ real (no "comming soon")
   annotations:
     dev.azure.com/project-repo: tpl-middleware/<namespace>-msa-sp-<svc>    # ✔ matches links[0]
@@ -833,7 +836,7 @@ completa.
 - `capamedia check <path> --auto-fix` — corrige automaticamente las que son deterministas:
   - Regla 4 `@BpLogger`: agrega anotacion a metodos publicos de `@Service`
   - Regla 7 `${VAR:default}`: reemplaza `${VAR:default}` por `${VAR}` (preserva `optimus.web.*`)
-  - Regla 8 `lib-bnc-api-client`: agrega la dependency si falta
+  - Regla 8 `lib-bnc-api-client`: agrega la dependency solo si la matriz indica BUS/IIB con `invocaBancs=true`
   - Regla 9 `catalog-info.yaml`: genera esqueleto con `namespace`/`name`/`lifecycle` correctos + placeholders marcados para review manual (owner, URLs, UUID sonar)
 - Reglas 1, 2, 3, 5: validadas en `capamedia check` (bloques 0 y 1)
 - Regla 6: autofix parcial deterministico:

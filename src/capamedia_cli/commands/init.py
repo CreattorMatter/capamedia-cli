@@ -87,7 +87,6 @@ def _update_gitignore(target_dir: Path) -> None:
         "umps/",
         "tx/",
         "config/",
-        "gold-ref/",
         "destino/build/",
         "destino/.gradle/",
         "ANALISIS_*.md",

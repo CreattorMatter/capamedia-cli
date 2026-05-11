@@ -533,8 +533,8 @@ def fix_bancs_autoconfigure_exclude(project_root: Path) -> BankAutofixResult:
 CATALOG_INFO_TEMPLATE = """apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
-  namespace: tnd-middleware
-  name: tpl-middleware
+  namespace: {catalog_namespace}
+  name: {repo_name}
   description: {description}
   annotations:
     dev.azure.com/project-repo: tpl-middleware/{repo_name}
@@ -619,6 +619,11 @@ def _infer_repo_name(project_root: Path) -> str:
     return name
 
 
+def _catalog_namespace_from_repo(repo_name: str) -> str:
+    prefix = repo_name.split("-", 1)[0] if "-" in repo_name else repo_name[:3]
+    return f"{prefix}-middleware"
+
+
 def _git_user_email(project_root: Path) -> str | None:
     """Intenta leer `user.email` del git config. Vacio si no tiene `@pichincha.com`."""
     try:
@@ -670,6 +675,7 @@ def fix_catalog_info_scaffold(
             return result
 
     repo_name = _infer_repo_name(project_root)
+    catalog_namespace = _catalog_namespace_from_repo(repo_name)
     sonar_key = _load_sonar_project_key(project_root) or _placeholder_uuid_from_name(repo_name)
     owner_resolved = owner or _git_user_email(project_root) or "<SET-email-pichincha>"
     desc_resolved = description or f"Servicio {repo_name}"
@@ -685,6 +691,7 @@ def fix_catalog_info_scaffold(
     content = CATALOG_INFO_TEMPLATE.format(
         description=desc_resolved,
         repo_name=repo_name,
+        catalog_namespace=catalog_namespace,
         sonar_key=sonar_key,
         owner=owner_resolved,
         depends_on_yaml=depends_on,
@@ -702,7 +709,7 @@ def fix_catalog_info_scaffold(
         result.notes = "Revisar manualmente: " + ", ".join(manual_notes)
     result.changes.append(
         f"{target.relative_to(project_root)}: generado con "
-        f"namespace=tnd-middleware, name=tpl-middleware, lifecycle=test, "
+        f"namespace={catalog_namespace}, name={repo_name}, lifecycle=test, "
         f"dependsOn={detected_libs or '[]'}"
     )
     return result

@@ -152,13 +152,12 @@ MIGRATE_OUTPUT_SCHEMA: dict[str, Any] = {
 
 FALLBACK_MIGRATE_PROMPT = textwrap.dedent(
     """
-    Completa la migracion del servicio legacy a Java 21 + Spring Boot hexagonal siguiendo
-    las instrucciones del workspace. Lee primero AGENTS.md y cualquier prompt local del
-    proyecto, despues implementa los cambios minimos necesarios dentro de `destino/`.
+    Completa la migracion del servicio legacy a Java 21 + Spring Boot hexagonal
+    siguiendo el prompt canonico `data/canonical/prompts/migrate.md`.
 
     Requisitos:
     - trabaja solo dentro del workspace actual;
-    - preserva la matriz oficial del proyecto (1 op -> REST/WebFlux, 2+ ops -> SOAP/MVC);
+    - preserva `bank-mcp-matrix.md` como unica fuente de verdad;
     - valida con build real del proyecto migrado si existe;
     - si falta un prerequisito, no inventes nada: reportalo como `blocked`.
 
@@ -555,6 +554,15 @@ def _load_migrate_prompt(workspace: Path, prompt_file: Path | None = None) -> st
     candidate = prompt_file or (workspace / ".codex" / "prompts" / "migrate.md")
     if candidate.exists():
         return candidate.read_text(encoding="utf-8").strip()
+    canonical = (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "canonical"
+        / "prompts"
+        / "migrate.md"
+    )
+    if canonical.exists():
+        return canonical.read_text(encoding="utf-8").strip()
     return FALLBACK_MIGRATE_PROMPT
 
 

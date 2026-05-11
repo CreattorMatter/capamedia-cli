@@ -6,13 +6,13 @@
 ================================================================================
   Validaciones:
     1. Capas permitidas: application, domain, infrastructure
-    2. WSDL: invocaBancs=true -> REST + WebFlux; si no, 1 método → REST + WebFlux | >1 métodos → SOAP + MVC
+    2. WSDL: framework segun bank-mcp-matrix (WAS siempre MVC; BUS/IIB con BANCS -> REST + WebFlux)
     3. Controladores deben usar @BpTraceable (excluye controladores de test)
     4. Servicios deben usar @BpLogger
     5. No navegación cruzada entre capas
     6. Service Business Logic: servicios solo con lógica de negocio (sin métodos utilitarios)
     7. application.yml: variables sin valores por defecto (excluye rutas optimus.web.*)
-    8. Gradle: librería obligatoria lib-bnc-api-client:1.1.0
+    8. Gradle: lib-bnc-api-client solo para BUS/IIB con invocaBancs=true
     9. catalog-info.yaml: metadata, links, annotations y specs
    10. Genera reporte Markdown con checklist
 ================================================================================
@@ -336,6 +336,12 @@ def _is_bus_bancs(metadata: dict) -> bool:
     return (source_kind in {"iib", "bus"} or tecnologia == "bus") and _truthy(invoca_bancs)
 
 
+def _source_kind(metadata: dict) -> str:
+    source_kind = str(metadata.get("source_kind") or "").strip().lower()
+    tecnologia = str(metadata.get("tecnologia") or "").strip().lower()
+    return source_kind or tecnologia
+
+
 def _format_fabrics_metadata(metadata: dict) -> str:
     invoca_bancs = metadata.get("invoca_bancs", metadata.get("invocaBancs", "?"))
     return (
@@ -423,72 +429,62 @@ def check_wsdl(root: Path) -> list[CheckResult]:
                 ))
             continue
 
-        if ops == 1:
-            # Expected: REST + WebFlux
-            details.append("  Regla aplicable: 1 operación → REST + WebFlux")
-            details.append(f"  WebFlux detectado: {'✔' if framework['webflux'] else '✘'}")
-            details.append(f"  MVC NO presente:   {'✔' if not framework['mvc'] else '✘ MVC detectado (no debería estar)'}")
+        source_kind = _source_kind(fabrics_metadata)
+        is_was = source_kind == "was"
+        is_orq = source_kind == "orq"
+        expected_webflux = is_orq or (not is_was and ops == 1)
+        expected_mvc = is_was or ops > 1
+        expected_soap = ops > 1
+        expected_label = (
+            "REST + MVC" if is_was and ops == 1
+            else "REST + WebFlux" if expected_webflux
+            else "SOAP + MVC"
+        )
 
+        details.append(f"  Metadata Fabrics: {_format_fabrics_metadata(fabrics_metadata)}")
+        details.append(f"  Regla aplicable: {source_kind or 'sin metadata'} + {ops} operacion(es) -> {expected_label}")
+        details.append(f"  WebFlux detectado: {'OK' if framework['webflux'] else 'NO'}")
+        details.append(f"  MVC detectado:     {'OK' if framework['mvc'] else 'NO'}")
+        details.append(f"  SOAP detectado:    {'OK' if framework['soap'] else 'NO'}")
+
+        violations: list[str] = []
+        if expected_webflux and (framework["mvc"] or framework["soap"]):
+            detected = []
             if framework["mvc"]:
-                # MVC confirmado — fallo claro
-                results.append(CheckResult(
-                    passed=False,
-                    message=f"WSDL '{rel.name}': 1 operación — ✘ INCORRECTO (MVC detectado, se esperaba WebFlux)."
-                    , details=details
-                ))
-            elif framework["webflux"]:
-                # WebFlux confirmado — correcto
-                results.append(CheckResult(
-                    passed=True,
-                    message=f"WSDL '{rel.name}': 1 operación — ✔ CORRECTO (REST + WebFlux confirmado).",
-                    details=details
-                ))
-            else:
-                # No se pudo confirmar ningún framework — pasa con observación
-                results.append(CheckResult(
-                    passed=True,
-                    warning=True,
-                    message=f"WSDL '{rel.name}': 1 operación — ⚠ PASA CON OBSERVACIÓN.",
-                    details=details,
-                    observations=[
-                        "No se detectó spring-boot-starter-webflux en los archivos de build.",
-                        "Verificar manualmente que el proyecto use REST + WebFlux.",
-                    ]
-                ))
+                detected.append("MVC")
+            if framework["soap"]:
+                detected.append("SOAP")
+            violations.append(f"{'+'.join(detected)} detectado, se esperaba {expected_label}")
+        if not expected_webflux and framework["webflux"]:
+            violations.append(f"WebFlux detectado, se esperaba {expected_label}")
+        if expected_mvc and not framework["mvc"]:
+            violations.append(f"MVC no detectado, se esperaba {expected_label}")
+        if expected_soap and not framework["soap"]:
+            violations.append(f"SOAP no detectado, se esperaba {expected_label}")
 
+        if violations:
+            results.append(CheckResult(
+                passed=False,
+                message=f"WSDL '{rel.name}': {ops} operacion(es) - INCORRECTO ({'; '.join(violations)}).",
+                details=details,
+            ))
+        elif framework["webflux"] or framework["mvc"] or framework["soap"]:
+            results.append(CheckResult(
+                passed=True,
+                message=f"WSDL '{rel.name}': {ops} operacion(es) - CORRECTO ({expected_label} confirmado).",
+                details=details,
+            ))
         else:
-            # Expected: SOAP + MVC
-            details.append(f"  Regla aplicable: {ops} operaciones únicas → SOAP + MVC")
-            details.append(f"  SOAP detectado: {'✔' if framework['soap'] else '✘'}")
-            details.append(f"  MVC detectado:  {'✔' if framework['mvc'] else '✘'}")
-            details.append(f"  WebFlux NO presente: {'✔' if not framework['webflux'] else '✘ WebFlux detectado (no debería estar)'}")
-
-            if framework["webflux"]:
-                # WebFlux confirmado — fallo claro
-                results.append(CheckResult(
-                    passed=False,
-                    message=f"WSDL '{rel.name}': {ops} operaciones — ✘ INCORRECTO (WebFlux detectado, se esperaba SOAP + MVC).",
-                    details=details
-                ))
-            elif framework["mvc"] or framework["soap"]:
-                # MVC/SOAP confirmado — correcto
-                results.append(CheckResult(
-                    passed=True,
-                    message=f"WSDL '{rel.name}': {ops} operaciones — ✔ CORRECTO (SOAP + MVC confirmado).",
-                    details=details
-                ))
-            else:
-                # No se pudo confirmar ningún framework — pasa con observación
-                results.append(CheckResult(
-                    passed=True,
-                    warning=True,
-                    message=f"WSDL '{rel.name}': {ops} operaciones — ⚠ PASA CON OBSERVACIÓN.",
-                    details=details,
-                    observations=[
-                        "No se detectó spring-boot-starter-web ni dependencias SOAP en los archivos de build.",
-                        "Verificar manualmente que el proyecto use SOAP + MVC.",
-                    ]
-                ))
+            results.append(CheckResult(
+                passed=True,
+                warning=True,
+                message=f"WSDL '{rel.name}': {ops} operacion(es) - PASA CON OBSERVACION.",
+                details=details,
+                observations=[
+                    f"No se detectaron dependencias suficientes para confirmar {expected_label}.",
+                    "Verificar manualmente el framework del proyecto.",
+                ],
+            ))
 
     return results
 
@@ -1197,36 +1193,63 @@ def _collect_bnc_libs_from_gradle(root: Path) -> set[str]:
 
 
 def check_gradle_library(root: Path) -> CheckResult:
-    """
-    Verifica que al menos un build.gradle declare la librería obligatoria:
-      implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
-    """
+    """Validate lib-bnc-api-client only when the MCP matrix requires BANCS."""
     gradle_files = _find_gradle_files(root)
     details: list[str] = []
+    metadata = _load_fabrics_metadata(root)
+    requires_bancs = _is_bus_bancs(metadata)
 
     if not gradle_files:
         return CheckResult(
             passed=False,
             message="No se encontraron archivos build.gradle en el proyecto.",
-            details=["✘ Sin Gradle — no se puede verificar la librería obligatoria."],
+            details=["Sin Gradle: no se puede verificar lib-bnc-api-client."],
         )
 
     found_required = False
     for gf in gradle_files:
         content = file_content(gf)
-        rel     = gf.relative_to(root)
+        rel = gf.relative_to(root)
         if REQUIRED_LIBRARY in content:
             found_required = True
-            details.append(f"  ✔ {rel}  →  '{REQUIRED_LIBRARY}' presente")
+            details.append(f"  OK {rel} -> '{REQUIRED_LIBRARY}' presente")
         else:
-            details.append(f"  ✘ {rel}  →  '{REQUIRED_LIBRARY}' NO encontrada")
+            details.append(f"  NO {rel} -> '{REQUIRED_LIBRARY}' no encontrada")
 
-    passed = found_required
-    header = (
-        f"Librería obligatoria '{REQUIRED_LIBRARY}' "
-        + ("✔ encontrada." if passed else "✘ NO declarada en ningún build.gradle.")
+    details.append(f"  Metadata Fabrics: {_format_fabrics_metadata(metadata)}")
+    details.append(
+        "  Regla aplicable: lib-bnc-api-client solo para BUS/IIB con invocaBancs=true"
     )
-    return CheckResult(passed=passed, message=header, details=details)
+
+    if requires_bancs:
+        passed = found_required
+        header = (
+            f"Libreria BANCS requerida '{REQUIRED_LIBRARY}' "
+            + ("encontrada." if passed else "NO declarada en ningun build.gradle.")
+        )
+        return CheckResult(passed=passed, message=header, details=details)
+
+    if found_required:
+        return CheckResult(
+            passed=False,
+            message=(
+                "lib-bnc-api-client declarada pero la matriz no clasifica el servicio "
+                "como BUS/IIB con invocaBancs=true."
+            ),
+            details=details,
+        )
+
+    warning = not bool(metadata)
+    return CheckResult(
+        passed=True,
+        warning=warning,
+        message="lib-bnc-api-client no aplica para este servicio segun metadata Fabrics.",
+        details=details,
+        observations=(
+            ["No se encontro metadata Fabrics; no se fuerza lib-bnc-api-client para evitar falsos positivos."]
+            if warning else []
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1246,12 +1269,17 @@ _UUID_RE         = re.compile(
 )
 _OWNER_EMAIL_RE  = re.compile(r".+@pichincha\.com$", re.IGNORECASE)
 
-REQUIRED_METADATA = {
-    "namespace":   "tnd-middleware",
-    "name":        "tpl-middleware",
-}
 FORBIDDEN_DESCRIPTION = "comming soon"
 REQUIRED_LIFECYCLE    = "test"
+
+
+def _expected_catalog_metadata(root: Path) -> dict[str, str]:
+    component = root.name
+    prefix = component.split("-", 1)[0] if "-" in component else component[:3]
+    return {
+        "namespace": f"{prefix}-middleware",
+        "name": component,
+    }
 
 
 def _load_catalog(root: Path) -> tuple[Optional[Path], Optional[dict], str]:
@@ -1300,7 +1328,7 @@ def check_catalog_info(root: Path) -> CheckResult:
     details.append("── metadata")
     metadata = data.get("metadata") or {}
 
-    for field_name, expected in REQUIRED_METADATA.items():
+    for field_name, expected in _expected_catalog_metadata(root).items():
         val = str(metadata.get(field_name, "")).strip()
         if val == expected:
             ok(f"metadata.{field_name} = '{val}'")
@@ -1567,7 +1595,7 @@ def generate_markdown(report: ValidationReport) -> str:
         f"| Sin navegación cruzada entre capas | {'✅' if (report.layer_navigation_check and report.layer_navigation_check.passed) else '❌'} |",
         f"| Servicios con lógica de negocio pura | {'✅' if (report.service_business_logic_check and report.service_business_logic_check.passed) else '❌'} |",
         f"| application.yml sin valores por defecto | {'✅' if (report.application_yml_check and report.application_yml_check.passed) else '❌'} |",
-        f"| Librería obligatoria lib-bnc-api-client | {'✅' if (report.gradle_library_check and report.gradle_library_check.passed) else '❌'} |",
+        f"| lib-bnc-api-client segun matriz | {'✅' if (report.gradle_library_check and report.gradle_library_check.passed) else '❌'} |",
         f"| catalog-info.yaml válido | {'✅' if (report.catalog_info_check and report.catalog_info_check.passed) else '❌'} |",
         "",
         "---",
@@ -1638,9 +1666,9 @@ def generate_markdown(report: ValidationReport) -> str:
         7
     )
 
-    # Section 8 – Gradle required library
+    # Section 8 – Gradle matrix library
     lines += _check_section(
-        "Gradle — Librería obligatoria Banco Pichincha",
+        "Gradle — lib-bnc-api-client segun matriz",
         report.gradle_library_check,
         8
     )
@@ -1781,7 +1809,7 @@ def run_validations(project_path: str, output_dir: Optional[str], threshold: int
     report.application_yml_check = check_application_yml(root)
     print_check("application.yml sin defaults", report.application_yml_check)
 
-    print(f"\n{BOLD}[ 8/9 ] Validando librería obligatoria en Gradle...{RESET}")
+    print(f"\n{BOLD}[ 8/9 ] Validando lib-bnc-api-client segun matriz...{RESET}")
     report.gradle_library_check = check_gradle_library(root)
     print_check("lib-bnc-api-client", report.gradle_library_check)
 

@@ -156,6 +156,6 @@ Si ves algo raro (UMPs faltantes, WSDL no estandar, etc.), avisame antes.
 ## Reglas importantes
 
 1. **No fabricar datos.** Si un UMP no se pudo clonar (auth, no existe), marcalo explícitamente y seguí.
-2. **Respetar `.gitignore`.** Las carpetas `legacy/`, `umps/`, `tx/`, `gold-ref/` ya están en `.gitignore` (agregadas por `capamedia init`). Nunca las agregues al commit.
+2. **Respetar `.gitignore`.** Las carpetas `legacy/`, `umps/`, `tx/` ya están en `.gitignore` (agregadas por `capamedia init`). Nunca las agregues al commit.
 3. **Si el PAT falla**, pará y pedile al usuario que corra `git clone` interactivo una vez para cachear el token via GCM. Ver la guía en `CLAUDE.md`.
 4. **Escribí un archivo `COMPLEXITY_<servicio>.md`** con el reporte anterior para que `/fabric` y `/migrate` lo lean después.

@@ -263,7 +263,7 @@ def test_catalog_info_generated(tmp_path: Path) -> None:
     ci = repo_dir / "catalog-info.yaml"
     content = ci.read_text(encoding="utf-8")
     assert "namespace: tnd-middleware" in content
-    assert "name: tpl-middleware" in content
+    assert "name: tnd-msa-sp-wsclientes0007" in content
     assert "lifecycle: test" in content
     assert "owner: ops@pichincha.com" in content
     assert "tnd-msa-sp-wsclientes0007" in content
@@ -282,7 +282,7 @@ def test_catalog_info_preserves_real_values(tmp_path: Path) -> None:
         "kind: Component\n"
         "metadata:\n"
         "  namespace: tnd-middleware\n"
-        "  name: tpl-middleware\n"
+        "  name: tnd-msa-sp-real\n"
         "  description: real\n"
         "spec:\n"
         "  owner: real@pichincha.com\n"

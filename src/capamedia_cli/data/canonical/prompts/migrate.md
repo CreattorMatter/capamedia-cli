@@ -27,7 +27,7 @@ Migra toda la lógica del servicio legacy al arquetipo destino generado por Fabr
 
 ## Prerequisitos
 
-1. Haber corrido `capamedia clone <servicio>` - deja `legacy/`, `umps/`, `tx/`, `gold-ref/`, `COMPLEXITY_*.md`.
+1. Haber corrido `capamedia clone <servicio>` - deja `legacy/`, `umps/`, `tx/`, `COMPLEXITY_*.md`.
 2. Haber corrido `capamedia fabrics generate` - deja `destino/<namespace>-msa-sp-<servicio>/` con el scaffold base.
 3. Ejecutar desde la raiz del workspace; no desde `destino/`.
 
@@ -63,7 +63,6 @@ Usar el sub-agente `migrador` (definido en `.claude/agents/migrador.md` del proy
 
 - `legacy/` — fuente original (ESQL, WSDL, XSDs, msgflows)
 - `umps/` — UMPs asociados con sus ESQL (para extraer TX reales)
-- `gold-ref/` — proyecto gold (0024 para REST, 0015 para SOAP) como referencia de patrones
 - `destino/tnd-msa-sp-<servicio>/` — destino donde se implementa
 - `COMPLEXITY_<servicio>.md` — análisis previo
 - `bank-mcp-matrix.md` — fuente unica para decidir REST/WebFlux, REST/MVC o SOAP/MVC
@@ -73,10 +72,10 @@ El agente ejecuta los 7 bloques del prompt de migración:
 1. **Block 1: Scaffolding** — verificar el scaffold del MCP, ajustar si falta algo
 2. **Block 2: Domain layer** — records, exceptions, sin imports de framework
 3. **Block 3: Application layer** — interface ports + services
-4. **Block 4: Infrastructure layer** — controllers, DTOs, mappers, adapters BANCS, error resolvers, application.yml
+4. **Block 4: Infrastructure layer** — controllers, DTOs, mappers, output adapters permitidos por la matriz, error resolvers, application.yml
 5. **Block 5: Helm + Docker** — values-{dev,test,prod}.yaml con probes
 6. **Block 6: Tests** — unit + integration con JUnit 5, Mockito, StepVerifier
-7. **Block 7: Core Adapter beans** — `@BancsService` config por TX
+7. **Block 7: Core Adapter beans** — solo si `bank-mcp-matrix.md` clasifica BUS/IIB con `invocaBancs=true`
 
 ## Paso 3 — Loop de autocorrección por GATE
 

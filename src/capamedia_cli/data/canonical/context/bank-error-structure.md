@@ -143,8 +143,8 @@ Documentado en `feedback_bancs_header_out_no_echo.md` (memoria del equipo):
 
 > La response **NUNCA** devuelve `<bancs>` aunque venga en el request.
 
-El validador del banco lo considera gap conocido en servicios antiguos
-(`wsclientes0015`, `wsclientes0020`). En servicios nuevos: no replicar el bloque
+El validador del banco lo considera gap conocido en servicios antiguos.
+En servicios nuevos: no replicar el bloque
 `<bancs>` del request en la cabecera de salida.
 
 ## Relación con otros canonicals
