@@ -603,9 +603,12 @@ Cualquier match → **MEDIUM**. Las constantes deben autodocumentarse:
 | `static final String ERROR = "999";` | `static final String ERROR_CODE_SERVICE = "9999";` (del catálogo `errores.xml`) |
 | `static final String MESSAGE = "OK";` | `static final String SUCCESS_MESSAGE_BANCS = "OK";` |
 | `static final String CODE = "0";` | `static final String SUCCESS_CODE = "0";` |
-| `static final String NAME = "WSClientes0024";` | `static final String WS_COMPONENTE = "WSClientes0024";` |
+| `static final String NAME = "WSClientes0024";` | `static final String WS_COMPONENTE = "tnd-msa-sp-wsclientes0024";` (componente MIGRADO, no legacy) |
+| `static final String WS_COMPONENTE = "WSClientes0024";` | `static final String WS_COMPONENTE = "tnd-msa-sp-wsclientes0024";` (legacy en componente del response = HIGH, ticket BTHCCC-6826) |
 
 **Referencia:** `CatalogExceptionConstants` debe usar el patrón `CONTEXT_NOUN` con códigos del catálogo oficial `sqb-cfg-errores-errors/errores.xml`: `WS_RECURSO`, `SUCCESS_CODE`, `ERROR_CODE_SERVICE` (9999), `ERROR_CODE_BANCS_INVOKE` (9929), `ERROR_CODE_BANCS_PARSE` (9922), `ERROR_CODE_HEADER` (9927).
+
+> ⚠️ **error.recurso y error.componente — nombre del componente MIGRADO, NUNCA el legacy.** Ambos campos deben referenciar el `spring.application.name` (= `catalog-info.yaml` `metadata.name` = `<namespace>-msa-sp-<svc>`), no el nombre legacy IIB/WAS/ORQ (`WSClientes0011`, `ORQTransferencias0003`, etc.). QA del banco (ticket BTHCCC-6826, mayo 2026) reporta como HIGH cualquier response con el nombre legacy. Validado por Block 15.2 y 15.3.
 
 ### Check 3.4 — `postProcessWsdl.groovy` sin decapitalize activo [COMMIT-bf913b9] (solo SOAP)
 
@@ -1646,38 +1649,55 @@ Faltantes -> **HIGH**. Acción: agregar al `.gitignore` del proyecto migrado el 
 
 Este bloque NO es redundante con el BLOQUE 5 (que cubre propagación de errores Bancs). Cubre la **forma** de los 8 campos del `<error>` según el PDF oficial + la presencia correcta de las 2 librerías internas opcionales.
 
-### Check 15.1 — `error.recurso` respeta el formato `<SERVICIO>/<MÉTODO>`
+### Check 15.1 — `error.mensajeNegocio` NUNCA se setea con valor real
+
+(El textual estaba desordenado respecto al código. Esta es la primera regla del Block 15 según `run_block_15` en `checklist_rules.py`.)
+
+DataPower gestiona este campo en frente del microservicio. El servicio debe pasarlo como `null` o `""` (slot vacío para preservar el tag SOAP).
 
 ```bash
-# Buscar asignaciones / setters de recurso y ver que contengan "/"
-grep -rnE "setRecurso\(|RECURSO\s*=" <PATH>/src/main/java/ \
-  | grep -vE "//|\\*" \
-  | head -20
+grep -rnE "setMensajeNegocio\(\"[^\"]+\"\)" <PATH>/src/main/java/
 ```
 
-**Veredicto:** para cada match, el string literal debe contener `/` y empezar con el `spring.application.name` del servicio (ej: `<namespace>-msa-sp-<svc>/getDatosBasicos`). Si hay un `setRecurso(...)` con string sin `/`, o que no empieza con el artifactId → **HIGH**.
+0 matches con contenido real esperado → ✅ **PASS**. Cualquier setter con texto real → **HIGH**.
 
-### Check 15.2 — `error.componente` sigue estructura oficial
+### Check 15.2 — `error.recurso`: nombre del componente MIGRADO + `/` + método
 
-El formato depende del tipo de legacy (IIB vs WAS). Consultar `ANALISIS_<ServiceName>.md` para saber cuál aplica.
-
-**Casos IIB (mayoría):**
+Aplica a **WAS, BUS y ORQ** por igual.
 
 ```bash
-# Listar todos los valores literal que se asignan a componente
-grep -rnE "setComponente\(\"[^\"]+\"|COMPONENTE\s*=\s*\"[^\"]+" <PATH>/src/main/java/
+# Buscar setters de recurso y revisar su valor
+grep -rnE "setRecurso\(\s*[\"']" <PATH>/src/main/java/ | head -20
 ```
 
-Cada valor debe matchear uno de:
-- El `spring.application.name` (ej: `<namespace>-msa-sp-<svc>`) — caso servicio interno / respuesta exitosa
-- `ApiClient` (o nombre de librería exacto) — caso error propagado desde librería
-- `TX\d{6}` (prefijo `TX` + 6 dígitos) — caso error de negocio desde ApiClient
+**Veredicto:**
+- Valor empieza con el `spring.application.name` del componente migrado (= `catalog-info.yaml` `metadata.name` = `<namespace>-msa-sp-<svc>`) y contiene `/` → ✅ **PASS**.
+- Valor empieza con un nombre legacy `(WS|ORQ|UMP)[A-Za-z]*\d{3,}` (ej. `WSClientes0011/Op`, `ORQTransferencias0003/Op`, `UMPClientes0002/Op`) → ❌ **HIGH**. QA del banco reporta este caso como bug bloqueante (ticket BTHCCC-6826, mayo 2026): el response debe llevar el nombre del componente migrado, no el legacy.
+- Valor sin `/` → **MEDIUM** (formato inválido pero no leakeo legacy).
 
-Cualquier otro literal → **MEDIUM** (revisar caso a caso).
+**Acción sugerida:** reemplazar el literal por `${spring.application.name}/<operacion>` inyectado vía `@Value`, o por la constante `WS_RECURSO` ya alineada al componente migrado.
 
-**Casos WAS (menos común):** valor debe matchear el nombre del método legacy, el `<NOMBRE_SERVICIO>`, o un valor literal de un `.properties` legacy. Si el origen no es rastreable → **MEDIUM**.
+### Check 15.3 — `error.componente`: uno de los 3 valores canónicos, NUNCA el legacy
 
-### Check 15.3 — `error.mensajeNegocio` NUNCA se setea con valor real
+Aplica a **WAS, BUS y ORQ** por igual.
+
+```bash
+grep -rnE "setComponente\(\s*[\"']" <PATH>/src/main/java/
+```
+
+**Valores canónicos aceptados:**
+1. `<namespace>-msa-sp-<svc>` (= `spring.application.name`) — caso "error interno del servicio migrado" o respuesta exitosa.
+2. `ApiClient` (o nombre exacto de librería interna) — caso error propagado desde librería.
+3. `TX<NNNNNN>` (prefijo `TX` + 6 dígitos) — caso error de negocio propagado desde el Core Adapter.
+
+**Veredicto:**
+- Valor matchea uno de los 3 canónicos → ✅ **PASS**.
+- Valor matchea patrón legacy `(WS|ORQ|UMP)[A-Za-z]*\d{3,}` (ej. `WSClientes0011`, `ORQTransferencias0003`, `UMPClientes0002`) → ❌ **HIGH**. Es el bug exacto que QA reporta. No replicar.
+- Cualquier otro literal → **MEDIUM** (revisar caso a caso; valores válidos pero fuera del catálogo canónico son raros y deben justificarse en `MIGRATION_REPORT.md`).
+
+**Justificación del banco:** el nombre legacy IIB/WAS es solo referencia interna (logs, trazabilidad), no contrato externo. Lo que el banco audita en producción es el `recurso`/`componente` del response — esos identifican unívocamente al microservicio MIGRADO en el catálogo Backstage y en CMDB.
+
+### Check 15.4 — `error.mensaje` sin prefijo `<NODO>-`
 
 DataPower gestiona este campo en frente del microservicio. El servicio debe pasarlo como `null` o `""`.
 

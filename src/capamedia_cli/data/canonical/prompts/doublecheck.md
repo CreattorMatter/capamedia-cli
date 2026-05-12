@@ -102,6 +102,32 @@ happy-path JSON son error salvo evidencia legacy explicita.
   en placeholders `CCC_*`. Si referencia `${CCC_*}`, el valor concreto debe
   vivir en los 3 Helm (`dev/test/prod`).
 
+## Paso 1.7 - error.recurso / error.componente sin nombre legacy
+
+El response del servicio migrado debe llevar el **nombre del componente
+MIGRADO** (`spring.application.name` = `catalog-info.yaml` `metadata.name` =
+`<namespace>-msa-sp-<svc>`) en `error.recurso` y `error.componente`. NUNCA el
+nombre legacy IIB/WAS/ORQ corto. Aplica a WAS, BUS y ORQ.
+
+```bash
+# Senal de bug (QA del banco lo reporta como HIGH bloqueante):
+grep -rnE 'setRecurso\(\s*"(WS|ORQ|UMP)[A-Za-z]*[0-9]+' src/main/java/
+grep -rnE 'setComponente\(\s*"(WS|ORQ|UMP)[A-Za-z]*[0-9]+' src/main/java/
+```
+
+Valores aceptados para `componente`:
+1. `<namespace>-msa-sp-<svc>` (servicio migrado / respuesta exitosa)
+2. `ApiClient` (error propagado desde libreria)
+3. `TX<NNNNNN>` (error de negocio desde Core Adapter, 6 digitos)
+
+Si el doublecheck detecta el patron legacy, lo flaggea como HIGH y propone el
+reemplazo por la constante `WS_COMPONENTE` alineada al `metadata.name` del
+`catalog-info.yaml`. Si el autofix encuentra `setRecurso("WSClientesNNNN/Op")`
+o `setComponente("WSClientesNNNN")` con literal trazable al componente
+migrado, lo aplica automaticamente. Validado por checklist Block 15.2 y 15.3.
+
+**Referencia**: ticket QA BTHCCC-6826, mayo 2026.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash

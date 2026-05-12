@@ -932,6 +932,100 @@ def fix_extract_inner_records_to_model(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 9j — error.recurso / error.componente usan el nombre del componente
+# MIGRADO, no el nombre legacy IIB/WAS/ORQ. QA del banco (ticket BTHCCC-6826,
+# 2026-05) reporto como HIGH cualquier response que traiga el nombre legacy.
+# Aplica a WAS, BUS y ORQ.
+# ---------------------------------------------------------------------------
+
+
+_LEGACY_NAME_RE_FOR_FIX = re.compile(
+    r"(?P<setter>setRecurso|setComponente)\s*\(\s*\""
+    r"(?P<legacy>(?:WS|ORQ|UMP)[A-Za-z]*\d{3,})"
+    r"(?P<tail>(?:/[^\"]*)?)\"",
+    re.IGNORECASE,
+)
+
+
+def _read_catalog_metadata_name(project_root: Path) -> str | None:
+    """Read metadata.name from catalog-info.yaml. Returns None if missing."""
+    catalog = project_root / "catalog-info.yaml"
+    if not catalog.exists():
+        return None
+    try:
+        text = catalog.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = re.search(
+        r"(?im)^\s*name\s*:\s*['\"]?([a-z]{3}-msa-sp-[a-z0-9_-]+)['\"]?\s*$",
+        text,
+    )
+    return match.group(1).strip() if match else None
+
+
+def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
+    """Reemplaza `setRecurso("WSClientesNNNN/Op")` y `setComponente("WSClientesNNNN")`
+    por el componente migrado leido de `catalog-info.yaml`.
+
+    Solo aplica el fix si:
+    - catalog-info.yaml expone `metadata.name` en formato `<ns>-msa-sp-<svc>`.
+    - El legacy hallado (case-insensitive) coincide con el sufijo del migrado.
+      Ej: `WSClientes0011` en setRecurso, migrado `tnd-msa-sp-wsclientes0011`
+      -> match (los digitos+stem coinciden). Si el legacy no matchea con el
+      migrado, no reemplaza (puede ser un upstream legitimo en logs).
+    """
+    result = BankAutofixResult(rule="9j", applied=False)
+    catalog_name = _read_catalog_metadata_name(project_root)
+    if not catalog_name:
+        result.notes = "catalog-info.yaml sin metadata.name <ns>-msa-sp-<svc>"
+        return result
+
+    migrated_short = catalog_name.rsplit("-msa-sp-", 1)[-1].lower()
+
+    java_files: list[Path] = []
+    for java in project_root.rglob("*.java"):
+        if any(p.lower() in {"test", "build", ".git"} for p in java.parts):
+            continue
+        java_files.append(java)
+
+    modified_files: list[Path] = []
+    for java in java_files:
+        try:
+            text = java.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "setRecurso" not in text and "setComponente" not in text:
+            continue
+
+        def _replace(match: re.Match) -> str:
+            setter = match.group("setter")
+            legacy = match.group("legacy")
+            tail = match.group("tail")
+            # Solo reemplazar si el legacy hace referencia al servicio migrado.
+            # Comparamos por el sufijo del componente migrado (ej. wsclientes0011)
+            # contra el legacy normalizado (ej. WSClientes0011 -> wsclientes0011).
+            if legacy.lower() != migrated_short:
+                return match.group(0)  # legacy distinto: no es bug, no tocar
+            new_value = f'"{catalog_name}{tail}"'
+            return f"{setter}({new_value}"
+
+        new_text = _LEGACY_NAME_RE_FOR_FIX.sub(_replace, text)
+        if new_text != text:
+            java.write_text(new_text, encoding="utf-8")
+            modified_files.append(java)
+            result.changes.append(
+                f"{java.relative_to(project_root)}: nombre legacy reemplazado por '{catalog_name}'"
+            )
+
+    if modified_files:
+        result.applied = True
+        result.files_modified = modified_files
+    else:
+        result.notes = "ningun setter de recurso/componente con nombre legacy"
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -946,11 +1040,11 @@ def run_bank_autofix(
     has_bancs: bool = False,
     requires_bancs: bool | None = None,
 ) -> list[BankAutofixResult]:
-    """Corre los 5 autofixes del banco. Devuelve resultados por regla.
+    """Corre los autofixes del banco. Devuelve resultados por regla.
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
     """
-    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9"}
+    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9", "9j"}
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
     results: list[BankAutofixResult] = []
@@ -973,4 +1067,6 @@ def run_bank_autofix(
                 project_root, description=description, owner=owner
             )
         )
+    if "9j" in wanted:
+        results.append(fix_legacy_name_in_error_payload(project_root))
     return results

@@ -527,8 +527,12 @@ public record CustomerBancsDtoResponse(
 ```
 
 ### Constants
-- Create a `CatalogExceptionConstants.java` class with `public static final`
-- UPPER_SNAKE_CASE: `public static final String WS_RECURSO = "WSClientes0024/ConsultarIdentificacion01";`
+- Create a `CatalogExceptionConstants.java` class with `public static final`.
+- UPPER_SNAKE_CASE.
+- **CRITICAL — error.recurso and error.componente: use the migrated component name, NOT the legacy name.** The `WS_RECURSO` literal must start with the `spring.application.name` of the migrated component (`<namespace>-msa-sp-<svc>`, e.g. `tnd-msa-sp-wsclientes0011`), never with the legacy IIB/WAS/ORQ short name (`WSClientes0011`, `ORQTransferencias0003`). QA del banco (ticket BTHCCC-6826, mayo 2026) reporta como HIGH cualquier response que traiga el nombre legacy.
+  - Correct: `public static final String WS_RECURSO = "tnd-msa-sp-wsclientes0011/ConsultarIdentificacion01";`
+  - Incorrect: `public static final String WS_RECURSO = "WSClientes0024/ConsultarIdentificacion01";` ← uses legacy name
+  - Better still: read it dynamically from `${spring.application.name}` (see Block 4.12 below) so the value cannot drift from `catalog-info.yaml` / `settings.gradle`.
 - NEVER magic numbers in code
 
 ### Conventional Commits
@@ -2475,9 +2479,24 @@ public class CatalogExceptionConstants {
     public static final String DETAILED_ERROR_INFORMATION =
         "Detailed error information:";
 
+    // ⚠️ MANDATORY — error.recurso and error.componente carry the MIGRATED
+    // component name (spring.application.name = catalog-info.yaml metadata.name
+    // = <namespace>-msa-sp-<svc>), NEVER the legacy IIB/WAS/ORQ short name.
+    // QA del banco (ticket BTHCCC-6826, 2026-05) reporta como HIGH cualquier
+    // response que traiga "WSClientes0011", "ORQTransferencias0003" o similar
+    // en estos dos campos. Checklist Block 15.2 y 15.3 lo bloquean automatico.
+    //
+    // Three acceptable values for componente:
+    //   1) <namespace>-msa-sp-<svc>  (errors internal to the migrated service)
+    //   2) "ApiClient"               (error propagated from lib-bnc-api-client)
+    //   3) "TX<NNNNNN>"              (business error from Core Adapter, 6 digits)
+    //
+    // Prefer reading the value at runtime from ${spring.application.name}
+    // (inject via @Value) so the constant cannot drift from catalog-info.yaml.
     public static final String WS_RECURSO =
-        "<NombreServicio>/<Operacion>";
-    public static final String WS_COMPONENTE = "<Operacion>";
+        "<namespace>-msa-sp-<svc>/<Operacion>";   // e.g. "tnd-msa-sp-wsclientes0011/ConsultarDatosIdentificacion"
+    public static final String WS_COMPONENTE =
+        "<namespace>-msa-sp-<svc>";               // e.g. "tnd-msa-sp-wsclientes0011"
     public static final String BACKEND_CODE = "00000";
 
     public static final String SUCCESS_CODE = "0";
