@@ -132,7 +132,14 @@ Before executing, verify that you have access to:
 > - `.block()` calls — keep the reactive chain end-to-end (`Mono`/`Flux`)
 > - `spring-boot-starter-web-services` — use `spring-boot-starter-webflux`
 
-**Note:** Both REST and SOAP services receive/return SOAP XML envelopes. The "REST" refers to `@RestController`, not REST-over-JSON. The stack is WebFlux for BUS/ORQ and Spring MVC for WAS single-op. URL path is source-specific: BUS/ORQ REST usually preserves `/IntegrationBus/soap/<ServiceName>` when that is the legacy contract; WAS REST/MVC must preserve the WAS legacy/MCP endpoint and must not be rewritten to `/IntegrationBus/soap/...` unless legacy evidence explicitly says so.
+**Contract note:** In these SOAP-over-HTTP migrations, "REST" refers to the
+Spring adapter (`@RestController`), not REST-over-JSON. BUS/ORQ REST usually
+keeps the SOAP XML contract from WSDL/XSD (`text/xml` or `application/xml`) and
+the legacy path `/IntegrationBus/soap/<ServiceName>` when evidenced. WAS
+REST/MVC must preserve the WAS legacy/MCP endpoint and must not be rewritten to
+`/IntegrationBus/soap/...` unless legacy evidence explicitly says so. For ORQ,
+do not generate `application/json` controllers, JSON external DTOs, or JSON
+happy-path examples unless the legacy contract explicitly proves JSON.
 
 If the analysis document is missing, **STOP** and request Phase 1 execution first.
 

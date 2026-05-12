@@ -11,10 +11,12 @@ from capamedia_cli.commands.clone import (
     MIGRATED_NAMESPACES,
     ConfigCloneResult,
     TxCloneResult,
+    _canonical_service_from_repo_name,
     _clone_global_config_repos,
     _clone_migrated_repos,
     _detect_global_config_repos,
     _git_clone,
+    _orq_alias_candidates,
     _resolve_azure_repo,
     _write_complexity_report,
     _write_properties_report,
@@ -189,6 +191,40 @@ def test_resolve_azure_repo_supports_was_split_repos(tmp_path: Path, monkeypatch
         "wsclientes0154-infraestructura",
     ]
     assert all(call[2] == "was" for call in calls[-2:])
+
+
+def test_resolve_azure_repo_expands_orq_aliases(tmp_path: Path, monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_git_clone(
+        repo_name: str,
+        dest: Path,
+        project_key: str = "bus",
+        shallow: bool = False,
+        no_single_branch: bool = False,
+    ) -> tuple[bool, str]:
+        calls.append((repo_name, project_key))
+        if repo_name == "sqb-msa-orqclientes0022":
+            dest.mkdir(parents=True)
+            return (True, "")
+        return (False, "repository not found")
+
+    monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
+
+    path, project_key, repo_name = _resolve_azure_repo("orq0022", tmp_path, shallow=True)
+
+    assert path == tmp_path / "legacy" / "sqb-msa-orqclientes0022"
+    assert project_key == "bus"
+    assert repo_name == "sqb-msa-orqclientes0022"
+    assert ("sqb-msa-orq0022", "bus") in calls
+    assert ("sqb-msa-orqclientes0022", "bus") in calls
+
+
+def test_orq_alias_candidates_and_canonical_repo_name() -> None:
+    assert _orq_alias_candidates("orq0022")[0] == "orqclientes0022"
+    assert _orq_alias_candidates("0022")[0] == "orqclientes0022"
+    assert _orq_alias_candidates("orqclientes0022") == []
+    assert _canonical_service_from_repo_name("sqb-msa-orqclientes0022") == "orqclientes0022"
 
 
 def test_detect_global_config_repos_from_legacy_and_umps(tmp_path: Path) -> None:

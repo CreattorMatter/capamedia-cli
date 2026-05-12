@@ -202,6 +202,58 @@ def test_run_block_0_orq_rest_ok(tmp_path: Path) -> None:
     assert "ORQ" in r.detail
 
 
+def test_run_block_0_orq_json_controller_fails(tmp_path: Path) -> None:
+    """ORQ es REST/WebFlux, pero el contrato externo no debe ser JSON."""
+    project = _mk_minimal_project(tmp_path, has_endpoint=False, has_controller=True, ops=1)
+    controller = project / "src" / "main" / "java" / "com" / "pichincha" / "TheController.java"
+    controller.write_text(
+        "package com.pichincha;\n"
+        "import org.springframework.http.MediaType;\n"
+        "import org.springframework.web.bind.annotation.RestController;\n"
+        "@RestController\n"
+        "public class TheController {\n"
+        "  static final String BAD = MediaType.APPLICATION_JSON_VALUE;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(
+        migrated_path=project, legacy_path=None,
+        source_type="orq", has_bancs=False,
+    )
+    results = run_block_0(ctx)
+    check = next(r for r in results if r.id == "0.2g")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "application/json" in check.detail.lower() or "APPLICATION_JSON" in check.detail
+
+
+def test_run_block_0_orq_xml_controller_passes(tmp_path: Path) -> None:
+    """ORQ REST/WebFlux con SOAP XML no dispara el guard JSON."""
+    project = _mk_minimal_project(tmp_path, has_endpoint=False, has_controller=True, ops=1)
+    controller = project / "src" / "main" / "java" / "com" / "pichincha" / "TheController.java"
+    controller.write_text(
+        "package com.pichincha;\n"
+        "import org.springframework.http.MediaType;\n"
+        "import org.springframework.web.bind.annotation.RestController;\n"
+        "@RestController\n"
+        "public class TheController {\n"
+        "  static final String OK = MediaType.TEXT_XML_VALUE;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    ctx = CheckContext(
+        migrated_path=project, legacy_path=None,
+        source_type="orq", has_bancs=False,
+    )
+    results = run_block_0(ctx)
+    check = next(r for r in results if r.id == "0.2g")
+
+    assert check.status == "pass"
+
+
 def test_run_block_0_orq_soap_fails(tmp_path: Path) -> None:
     """ORQ migrado como SOAP → HIGH mal-clasificado."""
     project = _mk_minimal_project(tmp_path, has_endpoint=True, has_controller=False, ops=2)

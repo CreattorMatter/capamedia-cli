@@ -36,14 +36,14 @@ Ejecuta el analisis completo de un servicio legacy para preparar su migracion. S
    - Tabla de cuantificacion (operaciones, UMPs, errores, campos, configs)
    - Logica de negocio paso a paso (en ORQ: solo delegaciones, sin profundizar)
    - Mapa de propagacion de errores
-   - Clasificacion: BUS (WebFlux/REST) vs WAS (MVC con HikariCP+JPA si DB)
+   - Clasificacion segun `bank-mcp-matrix.md`: BUS/IIB, WAS u ORQ; stack REST/SOAP y WebFlux/MVC con la regla vigente
    - Score de confianza
    - Incertidumbres y supuestos
 
 6. **Mostrar resumen** al usuario con:
    - Tipo de fuente legacy (IIB / WAS / ORQ)
    - Nombre del servicio
-   - Modo recomendado (REST / SOAP) — basado en N° operaciones + DB_USAGE
+   - Modo recomendado (REST / SOAP) — basado en `bank-mcp-matrix.md`, no solo en N° operaciones
    - Cantidad de UMPs
    - DB_USAGE (si aplica)
    - Score de confianza

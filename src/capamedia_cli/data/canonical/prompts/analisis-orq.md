@@ -118,6 +118,8 @@ ORQ services have NO database and orchestrate multiple downstream calls. They cl
 
 - **Any number of operations** -> REST prompt (Spring WebFlux + `@RestController`)
 - MCP parameter: `deploymentType: orquestador`
+- **Contract format remains SOAP XML** from WSDL/XSD. REST here means
+  `@RestController`/WebFlux implementation, not JSON payloads.
 
 For ORQ services specifically: no DB, no persistence layer — just orchestration. The reactive non-blocking chain of WebFlux is ideal for services that fan out to multiple downstream calls.
 
@@ -139,6 +141,7 @@ The file `ANALISIS_ORQ_<ServiceName>.md` must contain:
 | Technology | IBM Integration Bus (IIB) - ESQL |
 | Operation(s) | <list> |
 | Protocol | SOAP 1.1 over HTTP |
+| Payload format | SOAP XML request/response (not JSON) |
 | Analysis Date | <current date> |
 | Migration Mode | REST + WebFlux (always for ORQ, via `deploymentType: orquestador`) |
 ```

@@ -101,6 +101,15 @@ AZURE_FALLBACK_PATTERNS: list[tuple[str, str]] = [
     ("was", "ms-{svc}-was"),                 # WAS variante "ms"
 ]
 
+ORQ_SERVICE_PREFIX_CANDIDATES = (
+    "orqclientes",
+    "orqcuentas",
+    "orqreglas",
+    "orqtransferencias",
+    "orqpagos",
+    "orqtecnicos",
+)
+
 WAS_SPLIT_REPO_SUFFIXES = ("aplicacion", "infraestructura")
 
 
@@ -139,6 +148,28 @@ def _ump_name_variants(ump_name: str) -> list[str]:
     return variants
 
 
+def _orq_alias_candidates(service_name: str) -> list[str]:
+    """Expande aliases ambiguos tipo `orq0022`/`0022` a ORQ* conocidos."""
+    svc = service_name.lower().strip()
+    match = _clone_re.fullmatch(r"(?:orq)?(\d{4})", svc)
+    if not match:
+        return []
+    num = match.group(1)
+    return [f"{prefix}{num}" for prefix in ORQ_SERVICE_PREFIX_CANDIDATES]
+
+
+def _canonical_service_from_repo_name(repo_name: str) -> str:
+    """Extrae el service name real desde nombres de repo Azure conocidos."""
+    repo = repo_name.strip().lower()
+    if repo.startswith("sqb-msa-"):
+        return repo.removeprefix("sqb-msa-")
+    if repo.startswith("ws-") and repo.endswith("-was"):
+        return repo.removeprefix("ws-").removesuffix("-was")
+    if repo.startswith("ms-") and repo.endswith("-was"):
+        return repo.removeprefix("ms-").removesuffix("-was")
+    return ""
+
+
 def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tuple[Path | None, str, str]:
     """Intenta clonar el servicio probando todos los patrones Azure conocidos.
 
@@ -146,12 +177,18 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
       (path_clonado, project_key, repo_name) o (None, "", "") si nada funciona.
     """
     svc = service_name.lower()
-    for project_key, pattern in AZURE_FALLBACK_PATTERNS:
-        repo_name = pattern.format(svc=svc)
-        dest = dest_root / "legacy" / repo_name
-        ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
-        if ok:
-            return (dest, project_key, repo_name)
+    service_candidates = [svc]
+    for candidate in _orq_alias_candidates(svc):
+        if candidate not in service_candidates:
+            service_candidates.append(candidate)
+
+    for candidate_svc in service_candidates:
+        for project_key, pattern in AZURE_FALLBACK_PATTERNS:
+            repo_name = pattern.format(svc=candidate_svc)
+            dest = dest_root / "legacy" / repo_name
+            ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+            if ok:
+                return (dest, project_key, repo_name)
     split_root = dest_root / "legacy" / "_repo"
     split_repos: list[str] = []
     for suffix in WAS_SPLIT_REPO_SUFFIXES:
@@ -865,6 +902,13 @@ def clone_service(
                 "patron a AZURE_FALLBACK_PATTERNS en clone.py."
             )
             raise typer.Exit(1)
+        resolved_service_name = _canonical_service_from_repo_name(repo_name)
+        if resolved_service_name and resolved_service_name != service_name:
+            console.print(
+                f"[yellow]Tip:[/yellow] alias [cyan]{service_name}[/cyan] resuelto como "
+                f"[cyan]{resolved_service_name}[/cyan] desde repo [cyan]{repo_name}[/cyan]"
+            )
+            service_name = resolved_service_name
         console.print(f"[green]OK[/green] {project_key}/{repo_name} clonado en {legacy_dest}")
 
     # --- Step 2: Detect UMPs (WAS busca en pom.xml + Java; IIB/ORQ en ESQL) ---

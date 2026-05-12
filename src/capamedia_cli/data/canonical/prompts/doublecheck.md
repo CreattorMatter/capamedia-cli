@@ -83,6 +83,10 @@ legacy/MCP, normalmente `/<ServiceName>/soap/*` y
 `/<ServiceName>/soap/<ServiceName>Request`. `/IntegrationBus/soap/...` solo
 aplica a BUS/IIB cuando el legacy lo prueba.
 
+En ORQ, `REST + WebFlux` es solo el arquetipo Spring; el contrato externo viene
+de WSDL/XSD y sigue siendo SOAP XML. `application/json`, DTOs JSON externos o
+happy-path JSON son error salvo evidencia legacy explicita.
+
 ## Paso 1.6 - Deployment metadata y Helm limpios
 
 - `metadata.namespace` en `catalog-info.yaml` debe salir del prefijo de

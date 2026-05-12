@@ -2,7 +2,7 @@
 name: bank-error-structure
 kind: context
 priority: 1
-summary: Estructura oficial del bloque <error> de Banco Pichincha - 7 campos canonicos, mensajeNegocio gestionado por DataPower, variantes BUS/WAS
+summary: Estructura oficial del bloque <error> de Banco Pichincha - 7 campos canonicos, mensajeNegocio gestionado por DataPower, formato segun contrato WSDL/XSD
 ---
 
 # Estructura oficial del bloque `<error>` — Banco Pichincha
@@ -83,9 +83,15 @@ Referencia cruzada con `reference_error_types.md` (memoria del equipo):
 **NEVER**: marcar una falla de BANCS como `ERROR` — es **`FATAL`**. Regla
 reforzada en commits post-2026-04-16 tras feedback del equipo.
 
-## Variantes por contexto legacy
+## Formato segun contrato expuesto
 
-### BUS (IIB) migrado — response SOAP
+El bloque `<error>` conserva los mismos 7 campos canonicos. El formato de
+transporte NO se infiere por la palabra "REST": se toma del contrato legacy
+evidenciado en WSDL/XSD o documentacion. En las migraciones SOAP-over-HTTP del
+programa, incluso cuando el arquetipo Spring usa `@RestController`, el payload
+externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
+
+### Response SOAP/XML
 
 ```xml
 <cabecera>...</cabecera>
@@ -103,38 +109,18 @@ reforzada en commits post-2026-04-16 tras feedback del equipo.
 </error>
 ```
 
-### WAS migrado — response REST (JSON equivalente)
-
-```json
-{
-  "cabecera": { ... },
-  "data": { ... },
-  "error": {
-    "codigo": "0",
-    "tipo": "INFO",
-    "mensajeCliente": "OK",
-    "mensajeNegocio": null,
-    "mensajeAplicacion": null,
-    "backend": "00045",
-    "momentoError": "2026-04-23T21:10:16.123Z"
-  }
-}
-```
-
 ### Error path — ejemplo `BancsClientException`
 
-```json
-{
-  "error": {
-    "codigo": "9929",
-    "tipo": "FATAL",
-    "mensajeCliente": "Error al invocar transaccion Bancs",
-    "mensajeNegocio": null,
-    "mensajeAplicacion": "Timeout after 30000ms calling ws-tx067010",
-    "backend": "00045",
-    "momentoError": "2026-04-23T21:10:16.123Z"
-  }
-}
+```xml
+<error>
+  <codigo>9929</codigo>
+  <tipo>FATAL</tipo>
+  <mensajeCliente>Error al invocar transaccion Bancs</mensajeCliente>
+  <mensajeNegocio/>
+  <mensajeAplicacion>Timeout after 30000ms calling ws-tx067010</mensajeAplicacion>
+  <backend>00045</backend>
+  <momentoError>2026-04-23T21:10:16.123Z</momentoError>
+</error>
 ```
 
 ## Gap conocido — `<bancs>` no se replica en HeaderOut

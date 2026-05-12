@@ -34,6 +34,7 @@ SERVICE_PREFIX_TO_FOLDER_SUFFIX = {
     "wsproductos": "WSP",
     "wstransferencias": "WSTR",
     "wspagos": "WSPA",
+    "orq": "ORQ",
     "orqclientes": "ORQ",
     "orqcuentas": "ORQ",
     "orqreglas": "ORQ",
@@ -71,6 +72,12 @@ def _candidate_folders(capa_media_root: Path, num: str, suffix_hint: str) -> lis
     target = capa_media_root / num
     if target.exists():
         candidates.append(target)
+
+    # 2b. ORQ suele guardarse localmente como `ORQ0027`, no `0027-ORQ`.
+    if suffix_hint.upper() == "ORQ":
+        target = capa_media_root / f"ORQ{num}"
+        if target.exists():
+            candidates.append(target)
 
     # 3. Cualquier `<num>-*` (fallback)
     for d in capa_media_root.glob(f"{num}-*"):

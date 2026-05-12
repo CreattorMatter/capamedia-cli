@@ -309,6 +309,35 @@ def _was_soap_bus_endpoint_artifacts(root: Path) -> list[str]:
     return artifacts
 
 
+def _orq_json_contract_artifacts(root: Path) -> list[str]:
+    """Detecta controllers ORQ que exponen JSON en vez de SOAP XML.
+
+    ORQ migra como REST/WebFlux por arquetipo, pero el contrato externo sigue
+    viniendo de WSDL/XSD SOAP. Restringimos el scan a controllers para no
+    marcar serializacion interna accidental.
+    """
+    src_java = root / "src" / "main" / "java"
+    if not src_java.exists():
+        return []
+
+    artifacts: list[str] = []
+    json_marker = re.compile(r"\b(?:application/json|APPLICATION_JSON(?:_VALUE)?)\b", re.IGNORECASE)
+    for java in src_java.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts:
+            continue
+        text = _read_or_empty(java)
+        if "@RestController" not in text:
+            continue
+        for line_no, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith(("//", "/*", "*")):
+                continue
+            if json_marker.search(stripped):
+                rel = _relative_display(java, root)
+                artifacts.append(f"{rel}:{line_no} {stripped[:120]}")
+    return artifacts
+
+
 def _allowed_mensaje_negocio_slot(line: str) -> bool:
     """True when mensajeNegocio is intentionally emitted empty/null for the contract."""
     return (
@@ -796,6 +825,40 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
                     "Endpoint WAS SOAP vs contrato legacy",
                     "pass",
                     detail="WAS SOAP sin rutas BUS/IIB /IntegrationBus/soap",
+                )
+            )
+
+    # 0.2g - ORQ REST/WebFlux conserva contrato SOAP XML; REST no significa JSON.
+    if (ctx.source_type or "").lower() == "orq" and ctx.project_type == "rest":
+        json_contract_artifacts = _orq_json_contract_artifacts(ctx.migrated_path)
+        if json_contract_artifacts:
+            results.append(
+                CheckResult(
+                    "0.2g",
+                    "Block 0",
+                    "ORQ REST conserva contrato SOAP XML",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        "ORQ no debe exponer application/json si el contrato "
+                        f"viene de WSDL/XSD SOAP: {json_contract_artifacts[:8]}"
+                    ),
+                    suggested_fix=(
+                        "Mantener @RestController/WebFlux, pero consumir y producir "
+                        "`text/xml`/`application/xml` con envelope SOAP. No modelar "
+                        "request/response externo como JSON salvo evidencia explicita "
+                        "del contrato legacy."
+                    ),
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "0.2g",
+                    "Block 0",
+                    "ORQ REST conserva contrato SOAP XML",
+                    "pass",
+                    detail="sin application/json en controllers ORQ",
                 )
             )
 

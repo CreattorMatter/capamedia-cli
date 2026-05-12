@@ -284,6 +284,26 @@ def test_doublecheck_mentions_post_migration_config_dependency_guards() -> None:
     assert "valor concreto debe\n  vivir en los 3 Helm" in content
 
 
+def test_canonicals_do_not_keep_stale_orq_json_or_two_way_classification() -> None:
+    """Evita que vuelvan reglas viejas que contradicen ORQ/SOAP XML."""
+    forbidden = (
+        "Clasificar el servicio como BUS (WebFlux) o WAS (MVC)",
+        "Clasificacion: BUS (WebFlux/REST) vs WAS",
+        "response REST (JSON equivalente)",
+        "JSON equivalente",
+        "basado en N° operaciones + DB_USAGE",
+    )
+    offenders: list[str] = []
+
+    for md in _iter_md_files():
+        content = md.read_text(encoding="utf-8")
+        for phrase in forbidden:
+            if phrase in content:
+                offenders.append(f"{md.relative_to(CANONICAL_ROOT)} contiene {phrase!r}")
+
+    assert not offenders, "\n".join(offenders)
+
+
 def test_soap_prompt_jpa_hikari_is_conditional_and_no_inline_pool_defaults() -> None:
     content = (CANONICAL_ROOT / "prompts" / "migrate-soap-full.md").read_text(
         encoding="utf-8"

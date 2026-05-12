@@ -31,6 +31,18 @@ def test_find_local_legacy_variant(tmp_path: Path) -> None:
     assert result == variant
 
 
+def test_find_local_legacy_orq_folder_name(tmp_path: Path) -> None:
+    """ORQs locales pueden venir como ORQ0022/legacy/_repo directo."""
+    capa_media = tmp_path / "CapaMedia"
+    repo = capa_media / "ORQ0022" / "legacy" / "_repo"
+    repo.mkdir(parents=True)
+    (repo / "ORQClientes0022.wsdl").write_text("<wsdl/>", encoding="utf-8")
+    (repo / "ORQClientes0022.msgflow").write_text("<msgflow/>", encoding="utf-8")
+
+    assert find_local_legacy("ORQClientes0022", capa_media) == repo
+    assert find_local_legacy("orq0022", capa_media) == repo
+
+
 def test_find_local_legacy_no_match_returns_none(tmp_path: Path) -> None:
     capa_media = tmp_path / "CapaMedia"
     capa_media.mkdir()
