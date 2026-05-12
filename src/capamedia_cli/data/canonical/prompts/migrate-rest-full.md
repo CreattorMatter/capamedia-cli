@@ -1606,9 +1606,11 @@ public class <NombreServicio>Controller {
 ```
 
 **Key pattern: 3-tier error handling.**
-- `BusinessValidationException` -> HTTP 200 with `<error>` block
-- `GlobalErrorException` -> HTTP 200 with `<error>` block
-- Anything else -> bubbles to `ErrorResolverHandler` -> SOAP Fault HTTP 500
+- `BusinessValidationException` -> caught by controller's `.onErrorResume` -> HTTP **200** with `<error>` block (`tipo=ERROR`).
+- `GlobalErrorException` -> caught by controller's `.onErrorResume` -> HTTP **200** with `<error>` block (`tipo=ERROR` for business propagation; `tipo=FATAL` for technical BANCS failures, see Rule 9d). The constructor's `HttpStatus.INTERNAL_SERVER_ERROR` default is **only consulted if the exception escapes the controller** — in the happy error path, the controller overrides status to 200.
+- Anything else (uncaught) -> bubbles to `ErrorResolverHandler` -> SOAP Fault HTTP **500** via `GlobalErrorExceptionResolver` / `UnexpectedErrorResolver`. This is the safety net; if you see 500 in production for business cases, the controller is letting exceptions escape — fix the `.onErrorResume`.
+
+> **Note on `GlobalErrorExceptionResolver` status code (§4.10.2):** the resolver does `setStatusCode(throwable.getStatusCode())`. This path is only reached when the controller did **not** catch the exception. By design that means a technical failure, so 500 is correct. **Do not** "fix" the resolver to always return 200 — that would mask real infrastructure failures from monitoring.
 
 ---
 

@@ -71,7 +71,7 @@ heuristicas locales.
 | `deploymentType` | `orquestador` solo para ORQ; en los demas casos `microservicio` |
 | `serviceName` | Nombre del servicio (del argumento de `/clone`) |
 | `groupId` | `com.pichincha.sp` (standard del banco) |
-| `artifactId` | `tnd-msa-sp-<servicio>` |
+| `artifactId` | `<namespace>-msa-sp-<servicio>` donde `<namespace>` es el codigo de tribu (`tnd`, `csg`, `tia`, etc.) leido de `.capamedia/config.yaml` o `migration-context.json`. NUNCA hardcodear `tnd-` |
 | `javaVersion` | `21` |
 | `springBootVersion` | la última compatible (verificar via MCP schema o preguntar) |
 

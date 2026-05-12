@@ -37,11 +37,12 @@ Si el segundo argumento no se pasa, los Checks 0.3/0.4/0.5 degradan a severidad 
    - 0.4 `targetNamespace` del WSDL coincide (solo si `<LEGACY_PATH>` provisto)
    - 0.5 XSDs referenciados están presentes en el migrado
 
-2. **Ejecutar la checklist** (`prompts/post-migracion/03-checklist.md`) bloque por bloque (1 a 14)
-   - Cada bloque referencia su origen: PDF oficial, feedback Jean Pierre Garcia, commits especificos, MCP fabrics
+2. **Ejecutar el checklist** (canonical `checklist-rules.md`, espejo de `ALL_BLOCKS` en `checklist_rules.py`) bloque por bloque. **17 bloques activos** con IDs no contiguos: 0, 1, 2, 3, 5, 7, 8, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22.
+   - Cada bloque referencia su origen: PDF oficial, feedback del equipo, commits especificos, MCP fabrics
    - Para cada regla: pass/fail con evidencia (archivo + linea)
    - Severidad por hallazgo: HIGH / MEDIUM / LOW
    - Accion sugerida concreta para cada fail
+   - Si la documentacion discrepa con `ALL_BLOCKS`, gana el codigo
 
 3. **Generar reporte estructurado** `CHECKLIST_<ServiceName>.md` con:
    - Resumen ejecutivo (pass/fail totales por bloque)

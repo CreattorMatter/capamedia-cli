@@ -19,9 +19,17 @@ grep -r "import.*infrastructure" src/main/java/**/application/
 # domain/ no importa Spring
 grep -r "import org.springframework" src/main/java/**/domain/
 
+# Layout canonico: input/port y output/port (NUNCA port/input ni port/output)
+find src/main/java -type d \( -path "*/application/port/input" -o -path "*/application/port/output" \) -print
+# EXPECTED: 0 matches.
+find src/main/java -type d \( -path "*/application/input/port" -o -path "*/application/output/port" \) -print
+# EXPECTED: ambos directorios presentes si el proyecto tiene puertos.
+
 # Ports son interfaces, nunca abstract classes
-grep -c "public interface" src/main/java/**/port/**/*.java
-grep -c "public abstract class" src/main/java/**/port/**/*.java
+find src/main/java \( -path "*/application/input/port/*.java" -o -path "*/application/output/port/*.java" \) \
+  -exec grep -h "public interface" {} + | wc -l
+find src/main/java \( -path "*/application/input/port/*.java" -o -path "*/application/output/port/*.java" \) \
+  -exec grep -h "public abstract class" {} + | wc -l
 # EXPECTED: interfaces > 0, abstract classes = 0
 ```
 
@@ -33,8 +41,16 @@ grep -r "@Autowired" src/main/java/
 # Metodos > 20 lineas (heuristico)
 # Buscar metodos largos en services y adapters
 
-# @Slf4j en clases con comportamiento
-grep -rL "@Slf4j" src/main/java/**/service/*.java src/main/java/**/adapter/**/*.java
+# Logging del banco (NO @Slf4j ni org.slf4j.*)
+grep -rn "@Slf4j\|import org\.slf4j" src/main/java/
+# EXPECTED: 0 matches. Usar ServiceLogHelper + @BpLogger / @BpTraceable.
+
+# @BpLogger en todos los metodos publicos de @Service
+for f in src/main/java/**/application/service/*.java; do
+  pub=$(grep -cE "^\s+public\s+\w+\s+\w+\(" "$f")
+  bpl=$(grep -c "@BpLogger" "$f")
+  [ "$pub" -gt "$bpl" ] && echo "FAIL: $f (public=$pub, @BpLogger=$bpl)"
+done
 ```
 
 ### Seguridad

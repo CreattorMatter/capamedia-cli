@@ -52,10 +52,15 @@ Migracion de servicios legacy a Java 21 + Spring Boot + arquitectura hexagonal O
 ```
 
 ## Arquitectura: Hexagonal OLA1
+
+Layout canonico (espejo de `hexagonal.md`). El peer-review del banco penaliza
+`application/port/input` y `application/port/output` — usar siempre
+`application/input/port` y `application/output/port`.
+
 ```
 application/
-  port/input/    <- interfaces (NUNCA abstract classes)
-  port/output/   <- interfaces (NUNCA abstract classes)
+  input/port/    <- interfaces (NUNCA abstract classes)
+  output/port/   <- interfaces (NUNCA abstract classes)
   service/       <- SOLO @Override de interfaces (CERO metodos privados)
   util/          <- Helpers extraidos: validaciones, normalizaciones, formateos
 domain/
@@ -70,15 +75,15 @@ infrastructure/
 ```
 
 ## Reglas criticas (NUNCA violar)
-- **Variables de configuracion (MANDATORIO):** TODA variable leida por el servicio legacy o sus UMPs/dependencias (`.properties`, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`) DEBE tener su entrada en `application.yml`. Valores funcionales van como literal o con default inline. Secrets van como `${CCC_*}` con entrada en los 3 helms. NUNCA inventar valores — solo del codigo legacy o archivos config disponibles. Si el archivo no esta disponible, documentar la clave en comentario YAML: `# valor no disponible — obtener de <fuente>`. Solo poner en Helm las `${CCC_*}` que se usen en `application.yml`.
+- **Variables de configuracion (MANDATORIO):** TODA variable leida por el servicio legacy o sus UMPs/dependencias (`.properties`, `Constantes.java`, `Propiedad.get()`, `Environment.cache.*`, `GestionarRecursoConfigurable`, `GestionarRecursoXML`) DEBE tener su entrada en `application.yml`. Valores funcionales invariantes pueden ir como literal; el resto va como `${CCC_*}` **sin default inline** (`${CCC_FOO:default}` esta prohibido) y el valor concreto vive en los 3 Helm. Secrets siempre via `${CCC_*}`. NUNCA inventar valores — solo del codigo legacy o archivos config disponibles. Si el archivo no esta disponible, documentar la clave en comentario YAML: `# valor no disponible — obtener de <fuente>`. Solo poner en Helm las `${CCC_*}` que se usen en `application.yml`.
 - Ports son INTERFACES, nunca abstract classes
 - domain/ no importa Spring, SOAP, JPA, WebFlux
 - application/ no importa infrastructure/
 - CERO @Autowired — solo @RequiredArgsConstructor
 - Metodos max 20 lineas, lineas max 100 columnas
-- @Slf4j en todas las clases con comportamiento
+- **Logging:** usar `ServiceLogHelper log` inyectado + `@BpLogger` / `@BpTraceable` del banco. `@Slf4j` y `import org.slf4j.*` PROHIBIDOS (duplican log y rompen tracing corporativo — checklist Block 2.5 / 8.4).
 - HTTP 200 para errores de negocio (compatibilidad IIB)
-- HTTP 500 solo para SOAP Faults inesperados
+- HTTP 500 solo para SOAP Faults inesperados (los atrapa `ErrorResolverHandler`)
 - Todo el codigo en INGLES
 - Config via ${CCC_*} env vars, NUNCA hardcodear
 - livenessProbe + readinessProbe en TODOS los Helm values
@@ -110,8 +115,8 @@ portable para todas las IA es `capamedia ai migrate` y `capamedia ai doublecheck
 ## Commits
 Conventional Commits: `feat|fix|refactor|test|docs|chore|ci|iac: descripcion`
 
-@prompts/pre-migracion/01-analisis-servicio.md
-@prompts/pre-migracion/01-analisis-orq.md
-@prompts/migracion/REST/02-REST-migrar-servicio.md
-@prompts/migracion/SOAP/02-SOAP-migrar-servicio.md
-@prompts/post-migracion/03-checklist.md
+@src/capamedia_cli/data/canonical/prompts/analisis-servicio.md
+@src/capamedia_cli/data/canonical/prompts/analisis-orq.md
+@src/capamedia_cli/data/canonical/prompts/migrate-rest-full.md
+@src/capamedia_cli/data/canonical/prompts/migrate-soap-full.md
+@src/capamedia_cli/data/canonical/prompts/checklist-rules.md

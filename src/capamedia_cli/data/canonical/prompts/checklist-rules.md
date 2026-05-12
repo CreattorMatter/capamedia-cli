@@ -22,6 +22,18 @@ allowed_tools:
 
 # 03 — Checklist Post-Migración (AI-ejecutable)
 
+## FUENTE DE VERDAD
+
+La lista oficial de bloques activos vive en `ALL_BLOCKS` dentro de
+`capamedia_cli/core/checklist_rules.py`. Son **17 bloques** con IDs no contiguos:
+`0, 1, 2, 3, 5, 7, 8, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22`. Los IDs 4, 6, 9,
+10, 11, 12 no estan reservados ni son bugs — quedaron sin uso tras refactors.
+
+Este markdown describe el detalle textual de cada bloque para que la IA pueda
+auditar. **Si este texto contradice `ALL_BLOCKS` o las funciones `run_block_*`
+del codigo, gana el codigo.** Cualquier divergencia es bug de documentacion y
+debe reportarse para que se actualice este archivo, no el codigo.
+
 ## ROL
 
 Sos un auditor de código que revisa un microservicio Java Spring Boot ya migrado (IIB → Java, arquitectura hexagonal OLA1) contra las reglas vivas del equipo **BPTPSRE** de Banco Pichincha. Tu salida es un **reporte estructurado** con pass/fail por bloque, severidad, y acción sugerida por cada violación.
@@ -327,7 +339,7 @@ Esperado: **0 archivos**. Abstract classes para puertos es desviación del patro
 ### Check 1.4 — UN SOLO output port Bancs [FB-JG]
 
 ```bash
-ls <PATH>/src/main/java/com/pichincha/sp/application/*/port/output/ | grep -iE "bancs|Bancs"
+ls <PATH>/src/main/java/com/pichincha/sp/application/output/port/ | grep -iE "bancs|Bancs"
 ```
 
 - 0 ports Bancs → ⚠ MEDIUM (puede ser intencional si el servicio no llama a Bancs)
@@ -472,7 +484,7 @@ Archivos con más de 5 log.info → **LOW** (revisar si son necesarios o son "lo
 ### Check 3.1 — Output ports usan `get*` para lecturas [FB-JG]
 
 ```bash
-grep -rnE "^\s*\w+\s+query\w+\(" <PATH>/src/main/java/com/pichincha/sp/application/*/port/output/
+grep -rnE "^\s*\w+\s+query\w+\(" <PATH>/src/main/java/com/pichincha/sp/application/output/port/
 ```
 
 Cualquier método `query*` en puertos de lectura → **HIGH**.
@@ -711,9 +723,19 @@ grep -cE "^@Component|public class HeaderRequestValidator" \
 
 **Origen:** [FB-JG] (error propagation) + [FB-JG] (localPart casing ya en bloque 3)
 
-### Check 5.1 — `BancsClientHelper.execute()` atrapa RuntimeException [FB-JG]
+### Check 5.1 — `BancsClientHelper.execute()` atrapa RuntimeException **(solo SOAP)** [FB-JG]
+
+**Aplica solo a proyectos `projectType=SOAP`.** En REST, `BancsClientHelper`
+esta **prohibido** (ver Check 12.6) — se inyecta `BancsClient` directo con
+`@BancsService("ws-txNNNNNN")` y el manejo de error vive en
+`ErrorResolverHandler`. Si el proyecto es REST, este check se omite (no PASS ni
+FAIL). Si encontras `BancsClientHelper` en un proyecto REST, eso es violacion
+de Check 12.6, no de este Check.
 
 ```bash
+# Skip si no es SOAP
+[ "$projectType" != "SOAP" ] && exit 0
+
 grep -A5 "public <T> T execute" <PATH>/src/main/java/com/pichincha/sp/infrastructure/output/adapter/bancs/helper/BancsClientHelper.java | grep -c "catch\s*(\s*RuntimeException"
 ```
 
@@ -916,7 +938,9 @@ Cualquier match → **MEDIUM**. Si un service construye un record con muchos arg
 ### Check 6.4 — Sin `Object`/`Map<String, Object>` en contratos de puertos [FB-JG]
 
 ```bash
-grep -rnE "\b(Object|Map<String,\s*Object>|\?\s*>)\b" <PATH>/src/main/java/com/pichincha/sp/application/*/port/
+grep -rnE "\b(Object|Map<String,\s*Object>|\?\s*>)\b" \
+    <PATH>/src/main/java/com/pichincha/sp/application/input/port/ \
+    <PATH>/src/main/java/com/pichincha/sp/application/output/port/
 ```
 
 Cualquier match → **HIGH**. Excepciones justificadas (deben documentarse):
@@ -1313,7 +1337,7 @@ Menos de 4 → **HIGH**.
 ### Check 11.3 — `CustomerQueryStrategyPort` como interfaz con `withDataSource()` estático
 
 ```bash
-grep -A3 "interface CustomerQueryStrategyPort" <PATH>/src/main/java/com/pichincha/sp/application/*/port/output/CustomerQueryStrategyPort.java
+grep -A3 "interface CustomerQueryStrategyPort" <PATH>/src/main/java/com/pichincha/sp/application/output/port/CustomerQueryStrategyPort.java
 ```
 
 Debe ser `public interface` con método `static Customer withDataSource(...)`. Si no → **MEDIUM**.

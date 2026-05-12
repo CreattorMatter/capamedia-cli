@@ -11,14 +11,14 @@ summary: Matriz oficial BPTPSRE-Modos de uso - 3 reglas de override MCP + 8 temp
 (Banco Pichincha). Este archivo es la **fuente de verdad** para decidir
 que framework/archetype genera el MCP Fabrics segun los parametros ingresados.
 
-## Los 4 parametros MCP
+## Los 5 parametros MCP
 
 | Parametro | Valores | Descripcion |
 |---|---|---|
 | `tecnologia` | `bus` \| `was` | Tecnologia ORIGEN del legacy (IIB o WebSphere) |
 | `projectType` | `rest` \| `soap` | Tipo de contrato del servicio migrado |
-| `framework` | `mvc` \| `webflux` | Framework Spring (blocking o reactive) |
-| `invocaBancs` | `true` \| `false` | Flag de override: si true, forza webflux+rest |
+| `webFramework` | `mvc` \| `webflux` | Framework Spring (blocking o reactive). Nombre canonico que espera el MCP Fabrics |
+| `invocaBancs` | `true` \| `false` | Flag de override: si true, fuerza webflux+rest |
 | `deploymentType` | `microservicio` \| `orquestador` | Tipo de despliegue; orquestador agrega `lib-event-logs` |
 
 ## Las 3 reglas de override (en orden de prioridad)
@@ -36,11 +36,11 @@ que el usuario haya pasado.
 # Parametros ingresados
 invocaBancs: true
 deploymentType: microservicio    # o orquestador
-framework: mvc                    # IGNORADO
+webFramework: mvc                 # IGNORADO
 projectType: soap                 # IGNORADO
 
 # Arquetipo generado
-framework: webflux                # override
+webFramework: webflux             # override
 projectType: rest                 # override
 ```
 
@@ -57,11 +57,11 @@ que ya matcheo la Regla 1), el MCP genera `webflux + rest` + **incluye
 # Parametros ingresados
 deploymentType: orquestador
 invocaBancs: false                # NO invoca BANCS directo
-framework: mvc/webflux            # IGNORADO
+webFramework: mvc/webflux         # IGNORADO
 projectType: rest/soap            # IGNORADO
 
 # Arquetipo generado
-framework: webflux
+webFramework: webflux
 projectType: rest
 # + dependencia lib-event-logs (log transaccional)
 ```
@@ -81,10 +81,10 @@ el MCP genera `mvc + soap` + **incluye `spring-web-service`**.
 projectType: soap
 deploymentType: microservicio
 invocaBancs: false
-framework: mvc/webflux            # se fuerza a mvc
+webFramework: mvc/webflux         # se fuerza a mvc
 
 # Arquetipo generado
-framework: mvc
+webFramework: mvc
 projectType: soap
 # + dependencia spring-web-service (Spring WS)
 ```
@@ -96,7 +96,7 @@ de Spring WS, que solo funciona sobre Spring MVC (no WebFlux).
 
 Combinando las 3 reglas con los casos reales del banco:
 
-| # | Servicio tipico | tecnologia | projectType | framework | invocaBancs | deploymentType | Regla aplicada |
+| # | Servicio tipico | tecnologia | projectType | webFramework | invocaBancs | deploymentType | Regla aplicada |
 |---|---|---|---|---|---|---|---|
 | 1 | WAS base de datos, **1 metodo** | `was` | `rest` | `mvc` | `false` | `microservicio` | — (caso base) |
 | 2 | WAS base de datos, **2+ metodos** | `was` | `soap` | `mvc` | `false` | `microservicio` | **Regla 3** → mvc+soap + spring-web-service |
@@ -109,7 +109,7 @@ Combinando las 3 reglas con los casos reales del banco:
 
 ### Detalles importantes
 
-- **WAS siempre es `framework: mvc`**, nunca WebFlux. Aunque sea 1 op REST,
+- **WAS siempre es `webFramework: mvc`**, nunca WebFlux. Aunque sea 1 op REST,
   el banco usa MVC con un `@RestController` sobre Tomcat (no Netty reactive).
 - **BANCS solo aplica a BUS/IIB con `invocaBancs: true`**. En WAS, ORQ y
   BUS/IIB sin BANCS esta prohibido agregar o mantener `lib-bnc-api-client`,
@@ -144,9 +144,9 @@ def detect_source_kind(legacy_root: Path, service_name: str) -> str:
 
 | `source_type` detectado | tecnologia | deploymentType | Otros |
 |---|---|---|---|
-| `was` | `was` | `microservicio` | projectType/framework segun ops (1=mvc+rest, 2+=mvc+soap) |
+| `was` | `was` | `microservicio` | projectType/webFramework segun ops (1=mvc+rest, 2+=mvc+soap) |
 | `iib` + has_bancs | `bus` | `microservicio` | Regla 1: invocaBancs=true → webflux+rest |
-| `iib` sin bancs + 1 op | `bus` | `microservicio` | framework=webflux, projectType=rest |
+| `iib` sin bancs + 1 op | `bus` | `microservicio` | webFramework=webflux, projectType=rest |
 | `iib` sin bancs + 2+ ops | `bus` | `microservicio` | Regla 3: projectType=soap → mvc |
 | `orq` | `bus` | **`orquestador`** | Regla 2: deploymentType=orquestador → webflux+rest + lib-event-logs |
 

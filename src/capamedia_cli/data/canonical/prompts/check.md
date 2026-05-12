@@ -82,25 +82,33 @@ Si difiere → HIGH (rompe consumidores existentes).
 
 Todo `schemaLocation` del WSDL debe existir en `src/main/resources/`. Si falta → HIGH.
 
-## Paso 3 — Ejecutar BLOQUES 1 a 14
+## Paso 3 — Ejecutar los bloques activos (`ALL_BLOCKS`)
 
-Los bloques están documentados en el prompt canónico `prompts.checklist-rules` (espejo del `post-migracion/03-checklist.md`):
+**Fuente unica:** la lista oficial vive en `ALL_BLOCKS` dentro de
+`capamedia_cli/core/checklist_rules.py`. **17 bloques activos** con IDs no
+contiguos (faltan 4, 6, 9, 10, 11, 12 numericamente; no son bugs, son IDs
+reservados/refactorizados). El prompt `checklist-rules.md` documenta el detalle
+textual y debe ser espejo de `ALL_BLOCKS` — si discrepa, gana el codigo.
 
-- **BLOQUE 1** — Arquitectura hexagonal (capas, domain sin framework, puertos como **interfaces** —NUNCA abstract classes—, único port Bancs)
-- **BLOQUE 2** — Logging y tracing (`@BpTraceable`, `@BpLogger`, sin `org.slf4j`, log levels correctos)
-- **BLOQUE 3** — Naming (camelCase methods, PascalCase `@PayloadRoot.localPart`)
-- **BLOQUE 4** — Validaciones (HeaderRequestValidator, patterns externalizados via `@ConfigurationProperties`)
-- **BLOQUE 5** — Error handling (BancsClientHelper wrapea RuntimeException, HTTP 200 para errores, backend codes del catálogo)
-- **BLOQUE 6** — Mappers (MapStruct o manuales con Javadoc)
-- **BLOQUE 7** — Config externa (application.yml, `${CCC_*}` env vars, Helm probes)
-- **BLOQUE 8** — Versiones y dependencias (Spring Boot, Jackson, starter-webflux, jaxws-rt)
-- **BLOQUE 9** — Tests y calidad (cobertura Jacoco, SonarLint)
-- **BLOQUE 10** — SOAP specifics (si aplica)
-- **BLOQUE 11-12** — REST specifics (si aplica)
-- **BLOQUE 13** — WAS+DB (HikariCP config, `connection-test-query` segun motor: SQL Server=`SELECT 1`, Oracle=`SELECT 1 from dual`, ddl-auto validate, open-in-view false, @Transactional en service boundary)
-- **BLOQUE 14** — SonarLint binding (.sonarlint/connectedMode.json, org=bancopichinchaec, projectKey no placeholder) + higiene de `.gitignore` para artefactos locales CapaMedia/AI
-- **BLOQUE 21** — TX mapping Java vs `application.yml` (`transactionId` / `@BancsService` deben coincidir con `bancs.webclients.ws-txNNNNNN`)
-- **BLOQUE 22** — Discovery edge cases (`LINK WSDL`, observaciones, integraciones y casos de desborde no ignorados; cada codigo debe tener decision/archivo/test sin pendientes)
+| ID | Titulo |
+|---|---|
+| 0  | Pre-check + cross-check WSDL legacy vs migrado + matriz MCP |
+| 1  | Arquitectura hexagonal (capas, ports como interfaces, output port Bancs unico, service purity) |
+| 2  | Logging y tracing (`@BpTraceable`, `@BpLogger`, sin `org.slf4j`/`@Slf4j`) |
+| 3  | Naming profesional (sin nombres genericos, camelCase methods, PascalCase `@PayloadRoot.localPart`) |
+| 5  | Error handling y propagacion Bancs (HTTP 200 para errores, backend codes del catalogo, FATAL/ERROR/INFO) |
+| 7  | Config externa (`application.yml` sin defaults inline, `${CCC_*}` en 3 Helms, HPA `100m`, catalog/pipeline namespace) |
+| 8  | Versiones y dependencias (Spring Boot baseline, Undertow prohibido, webflux/web-services segun stack, Peer Review score >= 7) |
+| 13 | Persistence (HikariCP+JPA solo cuando hay DB; `connection-test-query` SQL Server=`SELECT 1` / Oracle=`SELECT 1 from dual`; ddl-auto validate; open-in-view false) |
+| 14 | SonarLint binding (`.sonarlint/connectedMode.json` versionado, org=`bancopichinchaec`, projectKey real) + higiene `.gitignore` |
+| 15 | Estructura de error oficial (8 campos del PDF BPTPSRE) + librerias opcionales (Audit Log Reactive, Stratio Connector) |
+| 16 | SonarCloud custom rule: test classes con anotacion (`@SpringBootTest` / `@WebMvcTest` / `@ExtendWith`) |
+| 17 | Log transaccional ORQ obligatorio (`lib-event-logs-webflux`, `spring.kafka`, `@EventAudit`) |
+| 18 | Log transaccional indebido en no-ORQ (WAS/BUS/UMP no deben tener `lib-event-logs-*` ni `@EventAudit`) |
+| 19 | Properties delivery audit (`.capamedia/inputs/<file>.properties` entregados por el owner) |
+| 20 | ORQ apunta al servicio MIGRADO, no al legacy (`sqb-msa-<svc>` / `ws-<svc>-was` como endpoint es FAIL) |
+| 21 | TX mapping Java vs `application.yml` (`transactionId` / `@BancsService` deben coincidir con `bancs.webclients.ws-txNNNNNN`) |
+| 22 | Discovery edge cases (`LINK WSDL`, observaciones, integraciones; cada codigo con decision/archivo/test, sin pendientes) |
 
 ## Paso 4 — Generar reporte
 

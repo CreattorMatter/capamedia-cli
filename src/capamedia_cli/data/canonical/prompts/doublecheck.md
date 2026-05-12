@@ -110,7 +110,7 @@ capamedia checklist
 ```
 
 Eso dispara internamente:
-1. **Fase A** — correr los 20 bloques de nuestro checklist + autofix loop
+1. **Fase A** — correr los bloques activos del checklist (ver `ALL_BLOCKS` en `checklist_rules.py`: 17 bloques con IDs 0, 1, 2, 3, 5, 7, 8, 13-22) + autofix loop
    (hasta 3 rondas o convergencia). Los fixes cubren:
    - Regla 4: `@BpLogger` faltante en metodos publicos de `@Service`
    - Regla 6: `StringUtils.*` → Java nativo, extraer records inner del Service
@@ -208,7 +208,7 @@ Al final del doublecheck, responder con un resumen:
 ## Doble check ejecutado: <servicio>
 
 **Pasos corridos:**
-- Checklist (20 bloques): <X/Y PASS>
+- Checklist (17 bloques activos de `ALL_BLOCKS`): <X/Y PASS>
 - Autofixes aplicados: <N> (reglas 4, 6, 7, 8, 9 + Block 19 inject)
 - Re-check post-fix: <X'/Y PASS>
 

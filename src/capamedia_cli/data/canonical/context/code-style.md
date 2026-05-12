@@ -29,12 +29,23 @@ paths:
 - Exception: *Exception.java
 - Constants: *Constants.java
 
-## Lombok obligatorio
-- @RequiredArgsConstructor en servicios y adapters (NUNCA @Autowired)
-- @Slf4j en todas las clases con comportamiento
-- @Builder(toBuilder = true) en records/DTOs
-- @Getter en excepciones
-- @Data en @ConfigurationProperties classes
+## Lombok permitido (canonico)
+- `@RequiredArgsConstructor` en servicios y adapters (NUNCA `@Autowired`)
+- `@Builder` en records/DTOs (preferir records sobre clases mutables)
+- `@Getter` en excepciones tipadas
+- `@UtilityClass` en clases con solo metodos estaticos (helpers, constantes)
+- `@Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor` SOLO en DTOs JAXB SOAP envelope (requieren beans mutables)
+- `@Data @Builder @NoArgsConstructor @AllArgsConstructor` SOLO en DTOs BANCS request (serializacion Jackson)
+
+## Lombok PROHIBIDO
+- `@Slf4j` — duplica el logging del banco. Usar `ServiceLogHelper log` inyectado + `@BpLogger` / `@BpTraceable` (`lib-trace-logger`). Validado por checklist Block 2.5 y 8.4.
+- `import org.slf4j.Logger` / `LoggerFactory` directos — misma razon.
+
+## Logging
+- Inyectar `ServiceLogHelper log` por constructor (via `@RequiredArgsConstructor`).
+- `@BpTraceable` en Controllers.
+- `@BpLogger` en TODOS los metodos publicos de `@Service`.
+- `log.info` reservado para eventos de contrato; diagnostico va a `log.debug`.
 
 ## Java 21
 - Preferir records sobre classes para value objects
