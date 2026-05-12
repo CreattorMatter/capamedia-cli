@@ -202,6 +202,48 @@ def _unquoted_hash_pos(line: str) -> int:
     return -1
 
 
+# Legacy service-name patterns used by Block 15 (error.recurso / error.componente).
+# QA del banco rechaza el response cuando estos nombres aparecen en lugar del
+# spring.application.name del componente migrado (<namespace>-msa-sp-<svc>).
+# Cubre BUS/IIB (WS*), WAS (WS*) y ORQ (ORQ*), ademas de referencias a UMP*.
+# Aplica sobre el VALOR extraido del string literal (sin comillas).
+_LEGACY_SERVICE_VALUE_RE = re.compile(
+    r"^(?:WS|ORQ|UMP)[A-Za-z]*\d{3,}(?:[/].*)?$",
+    re.IGNORECASE,
+)
+
+
+def _is_legacy_service_value(value: str) -> bool:
+    """True if value is a legacy IIB/WAS/ORQ/UMP service literal.
+
+    A value that contains `msa-sp-` is considered a migrated component name
+    (e.g. `tnd-msa-sp-wsclientes0011`) and is NOT legacy, even though it
+    embeds the legacy short name.
+    """
+    if not value:
+        return False
+    if "msa-sp-" in value.lower():
+        return False
+    return bool(_LEGACY_SERVICE_VALUE_RE.match(value))
+
+
+def _setter_string_args(line: str, setter_name: str) -> list[str]:
+    """Extract ALL string literal first-arguments of `setter_name(...)` in line.
+
+    A single line can contain multiple setters (e.g.
+    `error.setRecurso("A/Op"); error.setComponente("B");`).
+    Returns a list (possibly empty) of the literal values without quotes.
+    """
+    pattern = rf"{re.escape(setter_name)}\s*\(\s*[\"']([^\"']*)[\"']"
+    return re.findall(pattern, line)
+
+
+def _setter_string_value(line: str, setter_name: str) -> str:
+    """Backwards-compatible wrapper returning the first match or empty string."""
+    values = _setter_string_args(line, setter_name)
+    return values[0] if values else ""
+
+
 def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     return sorted(
         f
@@ -1736,8 +1778,13 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
-    # 15.2 - recurso con formato <service>/<method>
+    # 15.2 - recurso con formato <componente-migrado>/<method>
+    # El nombre antes del '/' debe ser el spring.application.name (= metadata.name
+    # del catalog-info.yaml = <namespace>-msa-sp-<svc>), NUNCA el nombre legacy
+    # IIB/WAS/ORQ como 'WSClientes0011' o 'ORQTransferencias0003'.
+    # QA reporta como bug HIGH cuando el response trae el nombre legacy.
     recurso_matches = _grep_files(src_java, r"setRecurso\s*\(\s*[\"']")
+    catalog_name = _catalog_metadata_name(ctx.migrated_path)
     if not recurso_matches:
         results.append(
             CheckResult(
@@ -1747,76 +1794,144 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                 "fail",
                 severity="medium",
                 detail="No se encontro setRecurso(...) en ningun archivo",
-                suggested_fix="El mapper del error debe setear recurso = 'service-name/method-name'",
+                suggested_fix=(
+                    "El mapper del error debe setear recurso = "
+                    "'<componente-migrado>/<metodo>' donde <componente-migrado> "
+                    "es el spring.application.name (ej. tnd-msa-sp-wsclientes0011)."
+                ),
             )
         )
     else:
-        # Ver si al menos un hit tiene formato '/'
-        has_slash = False
-        for _f, _ln, line in recurso_matches:
-            if "/" in line:
-                has_slash = True
-                break
-        if has_slash:
+        legacy_hits = []
+        no_slash_hits = []
+        for f, ln, line in recurso_matches:
+            for value in _setter_string_args(line, "setRecurso"):
+                if _is_legacy_service_value(value):
+                    legacy_hits.append((f, ln, line, value))
+                elif "/" not in value:
+                    no_slash_hits.append((f, ln, line, value))
+        if legacy_hits:
+            sample = legacy_hits[0]
             results.append(
                 CheckResult(
                     "15.2",
                     "Block 15",
-                    "recurso con formato service/method",
-                    "pass",
-                    detail=f"{len(recurso_matches)} hit(s), al menos uno con '/'",
+                    "recurso usa el nombre del componente migrado (no el legacy)",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"{len(legacy_hits)} hit(s) con nombre legacy en setRecurso. "
+                        f"Ejemplo: {_relative_display(sample[0], ctx.migrated_path)}:"
+                        f"{sample[1]} -> setRecurso(\"{sample[3]}\")"
+                    ),
+                    suggested_fix=(
+                        "Reemplazar el nombre legacy (WS*/ORQ*/UMP*) por el "
+                        "spring.application.name del componente migrado "
+                        f"({catalog_name or '<namespace>-msa-sp-<svc>'}). "
+                        "QA del banco rechaza el response cuando recurso/componente "
+                        "trae el nombre legacy IIB/WAS."
+                    ),
                 )
             )
-        else:
+        elif no_slash_hits:
             results.append(
                 CheckResult(
                     "15.2",
                     "Block 15",
-                    "recurso con formato service/method",
+                    "recurso con formato componente/method",
                     "fail",
                     severity="medium",
                     detail="setRecurso encontrado pero ninguno tiene '/' en el valor",
-                    suggested_fix="Formato esperado: '<nombre-servicio>/<metodo>'",
-                )
-            )
-
-    # 15.3 - componente con valor valido (IIB: service/ApiClient/TXnnnnnn)
-    comp_matches = _grep_files(src_java, r"setComponente\s*\(\s*[\"']")
-    if comp_matches:
-        valid_patterns = (
-            re.compile(r"TX\d{6}"),  # TX plus 6 digits
-            re.compile(r"ApiClient"),
-        )
-        has_valid = False
-        for _f, _ln, line in comp_matches:
-            if any(p.search(line) for p in valid_patterns):
-                has_valid = True
-                break
-            # Tambien vale literal service-name (ej 'WSClientes0007')
-            if re.search(r"[\"']WS\w+\d+[\"']|[\"']ORQ\w+\d+[\"']|[\"']tnd-msa-", line):
-                has_valid = True
-                break
-        if has_valid:
-            results.append(
-                CheckResult(
-                    "15.3",
-                    "Block 15",
-                    "componente con valor reconocido (service/ApiClient/TX)",
-                    "pass",
+                    suggested_fix=(
+                        "Formato esperado: "
+                        f"'{catalog_name or '<namespace>-msa-sp-<svc>'}/<metodo>'"
+                    ),
                 )
             )
         else:
             results.append(
                 CheckResult(
-                    "15.3",
+                    "15.2",
                     "Block 15",
-                    "componente con valor reconocido (service/ApiClient/TX)",
-                    "fail",
-                    severity="medium",
-                    detail="setComponente encontrado pero sin valor valido reconocido",
-                    suggested_fix="Usar uno de: <nombre-servicio>, 'ApiClient', 'TX<6-digitos>'",
+                    "recurso con formato componente-migrado/method",
+                    "pass",
+                    detail=f"{len(recurso_matches)} hit(s) sin nombre legacy",
                 )
             )
+
+    # 15.3 - componente con valor valido. Valores aceptados:
+    #   1) spring.application.name del componente migrado (<ns>-msa-sp-<svc>)
+    #   2) 'ApiClient' (o nombre exacto de libreria) -> error propagado de lib
+    #   3) 'TX<6-digitos>' -> error de negocio desde Core Adapter
+    # El nombre legacy IIB/WAS/ORQ (WSClientes0011, ORQTransferencias0003) NO
+    # es valido como componente del response.
+    comp_matches = _grep_files(src_java, r"setComponente\s*\(\s*[\"']")
+    if comp_matches:
+        # Valores canonicos aceptados como componente:
+        # (a) spring.application.name del componente migrado: <ns>-msa-sp-<svc>
+        # (b) 'ApiClient' (error propagado desde libreria)
+        # (c) 'TX<NNNNNN>' (6 digitos, error de negocio desde Core Adapter)
+        valid_value_re = re.compile(
+            r"^(?:[a-z]{3}-msa-sp-[a-z0-9_-]+|ApiClient|TX\d{6})$",
+            re.IGNORECASE,
+        )
+        legacy_hits = []
+        all_values: list[tuple[Path, int, str, str]] = []
+        for f, ln, line in comp_matches:
+            for value in _setter_string_args(line, "setComponente"):
+                all_values.append((f, ln, line, value))
+                if _is_legacy_service_value(value):
+                    legacy_hits.append((f, ln, line, value))
+        if legacy_hits:
+            sample = legacy_hits[0]
+            results.append(
+                CheckResult(
+                    "15.3",
+                    "Block 15",
+                    "componente sin nombre legacy del servicio",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"{len(legacy_hits)} hit(s) con nombre legacy en setComponente. "
+                        f"Ejemplo: {_relative_display(sample[0], ctx.migrated_path)}:"
+                        f"{sample[1]} -> setComponente(\"{sample[3]}\")"
+                    ),
+                    suggested_fix=(
+                        "Reemplazar el nombre legacy por uno de: "
+                        f"(a) {catalog_name or '<namespace>-msa-sp-<svc>'} para errores "
+                        "internos del servicio migrado y respuestas exitosas, "
+                        "(b) 'ApiClient' para errores propagados desde lib-bnc-api-client, "
+                        "(c) 'TX<NNNNNN>' (6 digitos) para errores de negocio desde "
+                        "el Core Adapter."
+                    ),
+                )
+            )
+        else:
+            has_valid = any(valid_value_re.match(value) for _f, _ln, _line, value in all_values)
+            if has_valid:
+                results.append(
+                    CheckResult(
+                        "15.3",
+                        "Block 15",
+                        "componente con valor reconocido (componente-migrado/ApiClient/TX)",
+                        "pass",
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "15.3",
+                        "Block 15",
+                        "componente con valor reconocido (componente-migrado/ApiClient/TX)",
+                        "fail",
+                        severity="medium",
+                        detail="setComponente encontrado pero sin valor canonico reconocido",
+                        suggested_fix=(
+                            "Usar uno de: '<namespace>-msa-sp-<svc>' (spring.application.name), "
+                            "'ApiClient', 'TX<6-digitos>'."
+                        ),
+                    )
+                )
     else:
         results.append(
             CheckResult(

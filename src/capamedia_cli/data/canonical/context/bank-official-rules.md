@@ -758,6 +758,71 @@ agregarla.
 
 ---
 
+## Regla 9j - `error.recurso` y `error.componente` usan el nombre del componente MIGRADO
+
+**Origen**: PDF `BPTPSRE-Estructura de error` + QA del banco (ticket BTHCCC-6826,
+hallazgo de 2026-05 sobre `WSClientes0011`).
+
+**Aplica a**: WAS, BUS/IIB y ORQ — **los tres tipos**. El estandar de error es
+unico, no varia por source type.
+
+**MUST**: el response del microservicio migrado debe poner el **nombre del
+componente MIGRADO** (`spring.application.name` = `catalog-info.yaml`
+`metadata.name` = `<namespace>-msa-sp-<svc>`) en estos dos campos. NUNCA el
+nombre legacy IIB/WAS/ORQ corto (`WSClientes0011`, `ORQTransferencias0003`,
+`UMPClientes0002`, etc.).
+
+### Formato canonico
+
+| Campo | Formato | Ejemplo OK | Ejemplo HIGH (rechazado por QA) |
+|---|---|---|---|
+| `recurso` | `<spring.application.name>/<metodo>` | `csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion` | `WSClientes0011/ConsultarDatosIdentificacion` |
+| `componente` | uno de los 3 valores canonicos (ver abajo) | `csg-msa-sp-wsclientes0011` o `ApiClient` o `TX060480` | `WSClientes0011` |
+
+### Tres valores canonicos para `componente`
+
+1. **`<namespace>-msa-sp-<svc>`** (= `spring.application.name`): error interno
+   del servicio migrado o respuesta exitosa.
+2. **`ApiClient`** (o nombre exacto de libreria): error propagado desde
+   `lib-bnc-api-client` u otra libreria interna.
+3. **`TX<NNNNNN>`** (prefijo `TX` + 6 digitos): error de negocio propagado
+   desde el Core Adapter.
+
+### Patron recomendado
+
+Preferir inyeccion dinamica via `@Value("${spring.application.name}")` o uso de
+constante centralizada, en lugar de literal:
+
+```java
+@UtilityClass
+public class CatalogExceptionConstants {
+    // Valor canonico — alinea con catalog-info.yaml metadata.name
+    public static final String WS_COMPONENTE = "csg-msa-sp-wsclientes0011";
+    public static final String WS_RECURSO_PREFIX = WS_COMPONENTE + "/";
+}
+
+// En el helper que construye el <error>:
+error.setRecurso(WS_RECURSO_PREFIX + operationName);
+error.setComponente(WS_COMPONENTE);
+```
+
+### Justificacion
+
+El nombre legacy IIB/WAS/ORQ es referencia interna (logs, trazabilidad), no
+contrato externo. Lo que el banco audita en produccion es el `recurso` y
+`componente` del response — esos identifican univocamente al microservicio
+MIGRADO en el catalogo Backstage y en CMDB. Un response con
+`<componente>WSClientes0011</componente>` no aparece registrado en CMDB y QA
+lo reporta como bug bloqueante.
+
+### Validacion
+
+Checklist `Block 15.2` y `Block 15.3` (codigo en
+`capamedia_cli/core/checklist_rules.py:run_block_15`) detectan el patron legacy
+con severidad HIGH. Test: `tests/test_block_15_legacy_name.py`.
+
+---
+
 ## Regla 11 - CSV `ConfigurablesBusOmniTest_Transfor` para IIB
 
 **Commit b55a794 del PromptCapaMedia (2026-04-21)**.
