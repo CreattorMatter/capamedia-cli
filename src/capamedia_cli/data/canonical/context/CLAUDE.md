@@ -87,7 +87,7 @@ infrastructure/
 - Todo el codigo en INGLES
 - Config via ${CCC_*} env vars, NUNCA hardcodear
 - livenessProbe + readinessProbe en TODOS los Helm values
-- Produccion: replicaCount >= 2, hpa.enabled: true
+- Capacity baseline oficial Helm (`resources` + `hpa`): ver `bank-official-rules.md` Regla 9h.1. Aplica a TODOS los entornos (dev/test/prod). Valores referenciales — definitivos tras performance tests.
 - **Service Purity:** services SOLO contienen @Override de la interfaz del input port. CERO metodos privados (validaciones, normalizaciones, formateos). Extraer a `application/util/<Domain>*Helper.java`
 
 ## Referencia de patrones

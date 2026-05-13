@@ -210,7 +210,7 @@ Forbidden dependencies:
 - Helm env var `name:` / `value:` lines must not contain inline comments.
 - No unresolved placeholders: `<pendiente_validar>`, `TODO`, `TBD`,
   `VALIDAR`, `REVISAR`, or `not_probed`.
-- HPA CPU `averageValue` must be `100m` in dev/test/prod.
+- Helm capacity baseline (Banco Pichincha official, 2026-05): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` + `hpa` baseline. Values are **referential** to let pods start; refined after performance tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required values: `resources.requests` (cpu=`50m`, memory=`350Mi`), `resources.limits` (cpu=`200m`, memory=`500Mi`), `hpa.minReplicas=1`, `hpa.maxReplicas=1`, HPA CPU `averageValue=100m`.
 
 ## Peer Review Gate
 
