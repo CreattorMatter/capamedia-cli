@@ -83,6 +83,13 @@ Referencia cruzada con `reference_error_types.md` (memoria del equipo):
 **NEVER**: marcar una falla de BANCS como `ERROR` — es **`FATAL`**. Regla
 reforzada en commits post-2026-04-16 tras feedback del equipo.
 
+**NEVER**: marcar `BusinessValidationException` como **`FATAL`** — es **`ERROR`**
+(validación recuperable por el caller). Reforzado tras informe QA WSClientes0011
+(2026-05): el migrado usaba `FATAL` para validaciones de negocio, perdiendo la
+diferenciación que hace el legacy con `ERROR` / `INFO`. Reservar `FATAL`
+exclusivamente para infra (header faltante, BANCS, exception genérica). Validado
+por checklist Block 5.7.
+
 ## Formato segun contrato expuesto
 
 El bloque `<error>` conserva los mismos 7 campos canonicos. El formato de

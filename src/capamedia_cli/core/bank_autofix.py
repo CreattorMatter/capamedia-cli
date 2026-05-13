@@ -1026,6 +1026,93 @@ def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 5.6.5 — BusinessValidationException nunca se mapea a FATAL.
+# QA del banco (informe WSClientes0011, 2026-05) reporto que el migrado usaba
+# FATAL para validaciones de negocio, perdiendo la diferenciacion legacy.
+# El autofix detecta el patron y lo rerutea a buildErrorResponse / ERROR_TYPE_ERROR.
+# ---------------------------------------------------------------------------
+
+
+# Patron a reescribir dentro de la ventana de un catch BVE:
+#   buildFatalResponse / buildBancsErrorResponse / setTipo("FATAL") /
+#   ERROR_TYPE_FATAL  ->  equivalente con ERROR.
+_BVE_BUILDER_MAP = {
+    "buildFatalResponse": "buildErrorResponse",
+    "buildBancsErrorResponse": "buildErrorResponse",
+    'setTipo("FATAL")': 'setTipo("ERROR")',
+    "ERROR_TYPE_FATAL": "ERROR_TYPE_ERROR",
+}
+
+_BVE_CATCH_RE = re.compile(
+    r"catch\s*\(\s*BusinessValidationException\b|"
+    r"instanceof\s+BusinessValidationException\b",
+)
+
+
+def fix_bve_not_fatal(project_root: Path) -> BankAutofixResult:
+    """Reescribe rutas FATAL aplicadas a `BusinessValidationException` para que
+    usen el equivalente ERROR. Solo opera dentro de la ventana de 6 lineas
+    posterior al catch para no tocar codigo no relacionado.
+
+    Reemplazos:
+    - `buildFatalResponse(...)`        -> `buildErrorResponse(...)`
+    - `buildBancsErrorResponse(...)`   -> `buildErrorResponse(...)`
+    - `setTipo("FATAL")`               -> `setTipo("ERROR")`
+    - `ERROR_TYPE_FATAL`               -> `ERROR_TYPE_ERROR`
+    """
+    result = BankAutofixResult(rule="5.6.5", applied=False)
+
+    java_files: list[Path] = []
+    for java in project_root.rglob("*.java"):
+        if any(p.lower() in {"test", "build", ".git"} for p in java.parts):
+            continue
+        java_files.append(java)
+
+    modified_files: list[Path] = []
+    for java in java_files:
+        try:
+            text = java.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "BusinessValidationException" not in text:
+            continue
+
+        lines = text.splitlines(keepends=True)
+        changed = False
+        i = 0
+        while i < len(lines):
+            if _BVE_CATCH_RE.search(lines[i]):
+                # Operar sobre la ventana [i, i+6)
+                end = min(len(lines), i + 6)
+                for j in range(i, end):
+                    original = lines[j]
+                    new = original
+                    for old_token, new_token in _BVE_BUILDER_MAP.items():
+                        if old_token in new:
+                            new = new.replace(old_token, new_token)
+                    if new != original:
+                        lines[j] = new
+                        changed = True
+                i = end  # saltar la ventana ya procesada
+            else:
+                i += 1
+
+        if changed:
+            java.write_text("".join(lines), encoding="utf-8")
+            modified_files.append(java)
+            result.changes.append(
+                f"{java.relative_to(project_root)}: BusinessValidationException reruteada a ERROR"
+            )
+
+    if modified_files:
+        result.applied = True
+        result.files_modified = modified_files
+    else:
+        result.notes = "BusinessValidationException no se mapea a FATAL en ningun archivo"
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1044,7 +1131,7 @@ def run_bank_autofix(
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
     """
-    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9", "9j"}
+    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5"}
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
     results: list[BankAutofixResult] = []
@@ -1069,4 +1156,6 @@ def run_bank_autofix(
         )
     if "9j" in wanted:
         results.append(fix_legacy_name_in_error_payload(project_root))
+    if "5.6.5" in wanted:
+        results.append(fix_bve_not_fatal(project_root))
     return results

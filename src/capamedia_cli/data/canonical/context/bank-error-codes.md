@@ -17,6 +17,15 @@ Fuente: `sqb-cfg-errores-errors/errores.xml` del banco — Feedback jgarcia
 **NEVER**: inventar codigos como `"999"`, `"404"`, `"500"` como fallback
 generico. Cada tipo de error tiene un codigo especifico asignado por el banco.
 
+**MUST (mensaje canonico del catalogo, sin transformar)**: el texto del campo
+`mensaje` / `mensajeCliente` se usa **tal cual** aparece en el `errores.xml`.
+NUNCA aplicar `Normalizer.normalize(...)`, `stripAccents(...)`,
+`replaceAll("\\s+", " ")` ni reconstruir el texto en codigo. Esas
+transformaciones comen tildes (`Transaccion` vs `Transacción`) y colapsan
+dobles espacios, generando diferencias que QA del banco reporta como FAIL
+contra el oraculo legacy (informe WSClientes0011, 2026-05). Validado por
+checklist Block 5.5.
+
 ## Catalogo de codes (fragmento principal)
 
 | Code | Mensaje canonico | Cuando usar |
