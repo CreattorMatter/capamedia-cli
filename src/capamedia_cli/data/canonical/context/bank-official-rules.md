@@ -715,13 +715,32 @@ banco (Block 16 — Helm & Kubernetes).
 
 ---
 
-## Regla 9h.1 - Helm HPA `averageValue` oficial = `100m`
+## Regla 9h.1 - Capacity baseline oficial Helm (`resources` + `hpa`)
 
-**MUST**: en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, todo target
-CPU de HPA con `averageValue` debe ser exactamente `100m`:
+**Fuente:** mail del area de capacity del Banco Pichincha (Dario Simbaña,
+2026-05). Directiva oficial para garantizar el uso adecuado de recursos
+compartidos (CPU y memoria) en OpenShift.
+
+**Estado:** valores **referenciales**, no definitivos. Permiten que los pods se
+inicien correctamente. Los valores definitivos se definen en funcion de los
+resultados de las pruebas de rendimiento. El MCP Fabrics desde la version
+`1.0.0-alpha.20260511172128` ya genera estos valores por default.
+
+**MUST**: en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, el bloque
+`resources` y `hpa` deben tener exactamente estos valores:
 
 ```yaml
+resources:
+  requests:
+    cpu: 50m
+    memory: 350Mi
+  limits:
+    cpu: 200m
+    memory: 500Mi
+
 hpa:
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:
@@ -731,9 +750,21 @@ hpa:
           averageValue: 100m
 ```
 
-**NEVER**: dejar `averageValue: 400m` generado por el scaffold/MCP. El
-checklist oficial del CLI lo bloquea como HIGH en el Block 7 con el detalle:
-`helm/<env>.yml - averageValue: '400m' -> debe ser '100m'`.
+**NEVER**:
+- `replicaCount: 2` (o cualquier valor > 1). El baseline actual es 1 replica
+  hasta que las pruebas de rendimiento indiquen otro valor. Reglas viejas que
+  decian "produccion replicaCount >= 2" estan **derogadas** desde 2026-05.
+- `averageValue: 400m` generado por el scaffold/MCP viejo.
+
+**Validacion (Block 7 del checklist, HIGH):**
+- 7.5b: `averageValue` distinto de `100m` en cualquier helm.
+- 7.5d: `hpa.minReplicas` o `maxReplicas` distintos de `1`.
+- 7.5e: cualquier valor de `resources.requests` o `resources.limits` distinto
+  del baseline (`50m / 350Mi / 200m / 500Mi`).
+
+El autofix `fix_helm_capacity_baseline` aplica los 8 valores en los 3 helms
+si difieren. Es idempotente. Si las pruebas de rendimiento definen otros
+valores, documentar la decision en `MIGRATION_REPORT.md` antes del PR.
 
 ---
 

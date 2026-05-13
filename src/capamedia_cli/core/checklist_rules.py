@@ -255,6 +255,100 @@ def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     )
 
 
+# Baseline oficial Helm — mail Dario Simbaña, capacity Banco Pichincha 2026-05.
+# Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores referenciales
+# hasta que las pruebas de rendimiento definan los definitivos.
+HELM_CAPACITY_BASELINE: dict[str, str] = {
+    "requests.cpu": "50m",
+    "requests.memory": "350Mi",
+    "limits.cpu": "200m",
+    "limits.memory": "500Mi",
+}
+
+_REPLICAS_LINE_RE = re.compile(
+    r"^\s*(?P<key>minReplicas|maxReplicas)\s*:\s*['\"]?(?P<value>[^'\"\s#]+)",
+    re.MULTILINE,
+)
+_RESOURCES_BLOCK_RE = re.compile(
+    r"^(?P<indent>\s*)resources\s*:\s*$\n"
+    r"(?P<body>(?:(?P=indent)\s+.*\n)*)",
+    re.MULTILINE,
+)
+_RESOURCE_LEAF_RE = re.compile(
+    r"^\s*(?P<key>cpu|memory)\s*:\s*['\"]?(?P<value>[^'\"\s#]+)",
+)
+
+
+def _helm_hpa_replicas_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.5d helper: minReplicas y maxReplicas deben ser '1' en cada helm."""
+    issues: list[str] = []
+    for f in helm_files:
+        text = _read_or_empty(f)
+        if "hpa" not in text.lower():
+            continue
+        found_min = False
+        found_max = False
+        for m in _REPLICAS_LINE_RE.finditer(text):
+            key = m.group("key")
+            value = m.group("value").strip()
+            if key == "minReplicas":
+                found_min = True
+            elif key == "maxReplicas":
+                found_max = True
+            if value != "1":
+                rel = _relative_display(f, root)
+                issues.append(f"{rel} - hpa.{key}: '{value}' -> debe ser '1'")
+        # Si el archivo declara `hpa:` pero no tiene min/max, eso tambien es bug.
+        if re.search(r"^\s*hpa\s*:\s*$", text, re.MULTILINE):
+            if not found_min:
+                issues.append(f"{_relative_display(f, root)} - hpa.minReplicas no declarado (esperado '1')")
+            if not found_max:
+                issues.append(f"{_relative_display(f, root)} - hpa.maxReplicas no declarado (esperado '1')")
+    return issues
+
+
+def _helm_resources_baseline_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.5e helper: resources.requests/limits con valores baseline exactos.
+
+    Recorre el bloque `resources:` de cada helm y compara cada leaf contra
+    HELM_CAPACITY_BASELINE.
+    """
+    issues: list[str] = []
+    for f in helm_files:
+        text = _read_or_empty(f)
+        block_match = _RESOURCES_BLOCK_RE.search(text)
+        if not block_match:
+            # Si el helm no declara `resources:` para nada, no aplica este check.
+            # Suele declararse en values base, no en cada env override.
+            continue
+        body = block_match.group("body")
+        rel = _relative_display(f, root)
+        # Encontrar tanto `requests:` como `limits:` y leer cpu/memory de cada uno.
+        current_section: str | None = None
+        for line in body.splitlines():
+            section_match = re.match(r"^\s+(requests|limits)\s*:\s*$", line)
+            if section_match:
+                current_section = section_match.group(1)
+                continue
+            if not current_section:
+                continue
+            leaf = _RESOURCE_LEAF_RE.match(line)
+            if not leaf:
+                # Salir de la subseccion si llega otro mapping de nivel mayor
+                if re.match(r"^\s{0,4}\w", line):
+                    current_section = None
+                continue
+            key = leaf.group("key")
+            value = leaf.group("value").strip()
+            baseline_key = f"{current_section}.{key}"
+            expected = HELM_CAPACITY_BASELINE.get(baseline_key)
+            if expected and value != expected:
+                issues.append(
+                    f"{rel} - resources.{baseline_key}: '{value}' -> debe ser '{expected}'"
+                )
+    return issues
+
+
 _HELM_ENV_LINE_RE = re.compile(r"^\s*(?:-\s*)?(name|value)\s*:\s*(.*)$", re.IGNORECASE)
 _HELM_PLACEHOLDER_RE = re.compile(r"<\s*[^>]+\s*>")
 _HELM_PENDING_MARKER_RE = re.compile(r"\b(TODO|TBD|PENDIENTE|PENDIENTE_VALIDAR|VALIDAR|REVISAR)\b", re.IGNORECASE)
@@ -1513,6 +1607,74 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     detail="sin value:<...>, marcadores pendientes ni comentarios inline en name/value",
                 )
             )
+
+        # 7.5d - hpa.minReplicas y maxReplicas = 1 (baseline oficial 2026-05)
+        # 7.5e - resources.requests / resources.limits con valores exactos del banco
+        # Origen: mail Dario Simbaña, area de capacity Banco Pichincha. Aplica a
+        # los 3 helms (dev/test/prod). Ver bank-official-rules.md Regla 9h.1.
+        helm_files = _helm_yaml_files(helm_dir)
+        if helm_files:
+            hpa_replicas_issues = _helm_hpa_replicas_issues(
+                helm_files, ctx.migrated_path
+            )
+            if hpa_replicas_issues:
+                results.append(
+                    CheckResult(
+                        "7.5d",
+                        "Block 7",
+                        "Helm hpa.minReplicas=1 y maxReplicas=1",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(hpa_replicas_issues[:8]),
+                        suggested_fix=(
+                            "Baseline oficial del banco (Dario Simbaña, 2026-05): "
+                            "minReplicas=1, maxReplicas=1 en los 3 helms. Reglas "
+                            "viejas tipo 'produccion replicaCount >= 2' estan "
+                            "derogadas. Si las pruebas de rendimiento definieron "
+                            "otros valores, documentarlo en MIGRATION_REPORT.md."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.5d",
+                        "Block 7",
+                        "Helm hpa.minReplicas=1 y maxReplicas=1",
+                        "pass",
+                    )
+                )
+
+            resources_issues = _helm_resources_baseline_issues(
+                helm_files, ctx.migrated_path
+            )
+            if resources_issues:
+                results.append(
+                    CheckResult(
+                        "7.5e",
+                        "Block 7",
+                        "Helm resources baseline oficial",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(resources_issues[:8]),
+                        suggested_fix=(
+                            "Baseline oficial del banco (Dario Simbaña, 2026-05): "
+                            "resources.requests cpu=50m memory=350Mi; "
+                            "resources.limits cpu=200m memory=500Mi. "
+                            "Aplica a los 3 helms. Si performance tests definieron "
+                            "otros valores, documentar en MIGRATION_REPORT.md."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.5e",
+                        "Block 7",
+                        "Helm resources baseline oficial",
+                        "pass",
+                    )
+                )
 
     return results
 

@@ -1067,6 +1067,42 @@ despliegan como texto literal o ensucian el contrato del chart.
 - Si falta el valor real, documentarlo como handoff fuera del Helm; no dejarlo
   como placeholder dentro del chart.
 
+### Check 7.5d — Helm HPA `minReplicas` y `maxReplicas` = 1 [BANCO]
+
+Implementado en `run_block_7`. Origen: mail oficial del area de capacity del banco (Dario Simbaña, 2026-05). Ver `bank-official-rules.md` Regla 9h.1.
+
+```bash
+grep -nE "minReplicas:|maxReplicas:" <PATH>/helm/dev.yml <PATH>/helm/test.yml <PATH>/helm/prod.yml
+```
+
+**Veredicto:** cualquier valor distinto de `1` en `hpa.minReplicas` o `hpa.maxReplicas` en cualquiera de los 3 helms → **HIGH**. Reglas viejas que decian "produccion replicaCount >= 2" estan derogadas: el baseline actual es 1 replica hasta que pruebas de rendimiento definan otro valor.
+
+### Check 7.5e — Helm `resources.requests/limits` baseline oficial [BANCO]
+
+Implementado en `run_block_7`. Origen: mail oficial del area de capacity del banco (Dario Simbaña, 2026-05). Ver `bank-official-rules.md` Regla 9h.1.
+
+```bash
+for env in dev test prod; do
+  grep -A6 "^resources:" <PATH>/helm/$env.yml
+done
+```
+
+**Valores esperados (exactos):**
+
+```yaml
+resources:
+  requests:
+    cpu: 50m
+    memory: 350Mi
+  limits:
+    cpu: 200m
+    memory: 500Mi
+```
+
+**Veredicto:** cualquier desviacion (cpu, memoria, requests o limits) en cualquiera de los 3 helms → **HIGH**. Estos valores son referenciales; si las pruebas de rendimiento definieron otros, documentarlo en `MIGRATION_REPORT.md` y dejar el chart con esos valores.
+
+El autofix `fix_helm_capacity_baseline` los aplica si difieren.
+
 ### Check 7.6 — `@ConfigurationPropertiesScan` en Application.java
 
 ```bash

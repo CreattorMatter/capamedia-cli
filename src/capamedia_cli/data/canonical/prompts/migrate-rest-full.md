@@ -365,11 +365,26 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 **Rule 15 — `CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"`** (exact value) in the pipeline.
 
-**Rule 16 — Production: `replicaCount >= 2`, `hpa.enabled: true`.**
+**Rule 16 — Helm capacity baseline (Banco Pichincha official, 2026-05).** Every environment (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) must carry the official capacity baseline as published by the bank's capacity team (Dario Simbaña, 2026-05). Values are **referential** to let pods start; the bank refines them after performance tests.
 
-**Rule 16b — Helm HPA CPU target:** `averageValue` MUST be `100m` in
-`helm/dev.yml`, `helm/test.yml`, and `helm/prod.yml`. NEVER leave the MCP
-default `400m`; the checklist blocks it as HIGH.
+```yaml
+resources:
+  requests: { cpu: 50m,  memory: 350Mi }
+  limits:   { cpu: 200m, memory: 500Mi }
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: AverageValue
+          averageValue: 100m
+```
+
+The MCP Fabrics from version `1.0.0-alpha.20260511172128` already generates these values. Earlier scaffolds (or hand edits) must be aligned. Any deviation from the 8 values above is **HIGH** unless `MIGRATION_REPORT.md` documents the post-performance result. See `bank-official-rules.md` Regla 9h.1 for the canonical source.
 
 **Rule 16c — Helm values must be concrete:** NEVER leave placeholders `<...>` or
 `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` in active Helm lines, and do not add inline
@@ -2909,7 +2924,7 @@ env:
 
 **Lookup `CCC_BANCS_BASE_URL`** from `prompts/tx-adapter-catalog.json` using the TX code.
 
-**Production MUST have:** `replicaCount >= 2`, `hpa.enabled: true`, probes enabled. All environments MUST use `hpa.metrics[].resource.target.averageValue: 100m`.
+**All environments MUST carry the official capacity baseline** (Rule 16): `resources.requests/limits` exact values, `hpa.minReplicas=1`, `hpa.maxReplicas=1`, `averageValue=100m`, probes enabled. The bank refines these values after performance tests; until then, this baseline is mandatory.
 
 #### GATE 5 — Helm Verification
 
@@ -2918,17 +2933,17 @@ env:
 grep "CCC_BANCS_BASE_URL" helm/values-dev.yaml
 # EXPECTED: present
 
-# CHECK 2: values-prod.yaml has replicaCount >= 2
-grep "replicaCount" helm/values-prod.yaml
-# EXPECTED: value >= 2
+# CHECK 2: Capacity baseline aligned with bank's official values (Rule 16)
+for env in dev test prod; do
+  echo "--- helm/$env.yml ---"
+  grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
+done
+# EXPECTED: requests cpu=50m memory=350Mi; limits cpu=200m memory=500Mi;
+#           hpa min=1 max=1; averageValue=100m
 
 # CHECK 3: Probes are configured
 grep "livenessProbe" helm/values-dev.yaml
 # EXPECTED: present
-
-# CHECK 4: HPA averageValue oficial del banco
-grep "averageValue" helm/dev.yml helm/test.yml helm/prod.yml
-# EXPECTED: averageValue: 100m in every environment
 ```
 
 **If all pass:** Update `migration-context.json` with `bloque_05_helm_docker: "completado"`.

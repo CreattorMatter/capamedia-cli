@@ -932,6 +932,148 @@ def fix_extract_inner_records_to_model(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 9h.1 — Helm capacity baseline oficial (Dario Simbaña, capacity Banco
+# Pichincha, 2026-05). Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml.
+# Valores referenciales hasta que pruebas de rendimiento definan definitivos.
+# ---------------------------------------------------------------------------
+
+
+HELM_CAPACITY_BASELINE_FIX: dict[str, str] = {
+    "requests.cpu": "50m",
+    "requests.memory": "350Mi",
+    "limits.cpu": "200m",
+    "limits.memory": "500Mi",
+}
+
+_HELM_REPLICAS_FIX_RE = re.compile(
+    r"(?P<lead>^(?P<indent>\s*)(?P<key>minReplicas|maxReplicas)\s*:\s*)"
+    r"['\"]?(?P<value>[^'\"\s#]+)['\"]?",
+    re.MULTILINE,
+)
+
+
+def fix_helm_capacity_baseline(project_root: Path) -> BankAutofixResult:
+    """Aplica el baseline oficial de capacity en los 3 Helm:
+       - hpa.minReplicas = 1, hpa.maxReplicas = 1
+       - resources.requests.cpu/memory y resources.limits.cpu/memory exactos.
+
+    Idempotente. Si un archivo helm/<env>.yml no existe, lo saltea sin tocar.
+    Si declara `hpa:` pero faltan min/max, NO los inyecta (eso es bug de
+    scaffold y debe corregirse manualmente para evitar formato inconsistente).
+    Solo reescribe los valores que YA existen y difieren del baseline.
+    """
+    result = BankAutofixResult(rule="9h.1", applied=False)
+
+    helm_dir = project_root / "helm"
+    if not helm_dir.exists():
+        result.notes = "helm/ no existe en el proyecto"
+        return result
+
+    helm_files = [
+        f for f in helm_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in {".yml", ".yaml"}
+    ]
+    if not helm_files:
+        result.notes = "helm/ vacio"
+        return result
+
+    modified_files: list[Path] = []
+    for f in helm_files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        original = text
+
+        # Fix hpa.minReplicas / hpa.maxReplicas -> "1"
+        def _replace_replicas(m: re.Match) -> str:
+            value = m.group("value").strip()
+            if value == "1":
+                return m.group(0)
+            return f"{m.group('lead')}1"
+
+        text = _HELM_REPLICAS_FIX_RE.sub(_replace_replicas, text)
+
+        # Fix resources.requests/limits.cpu/memory
+        # Procesamos el bloque resources: como un texto compuesto. Buscamos
+        # las subsecciones requests: y limits: y reescribimos cpu/memory dentro
+        # con los valores baseline. Mantenemos la indentacion original.
+        text = _rewrite_helm_resources_block(text)
+
+        if text != original:
+            f.write_text(text, encoding="utf-8")
+            modified_files.append(f)
+            result.changes.append(
+                f"{f.relative_to(project_root)}: capacity baseline aplicado"
+            )
+
+    if modified_files:
+        result.applied = True
+        result.files_modified = modified_files
+    else:
+        result.notes = "helm/ ya tiene el baseline oficial"
+    return result
+
+
+def _rewrite_helm_resources_block(text: str) -> str:
+    """Reescribe valores cpu/memory dentro del bloque resources: por baseline."""
+    lines = text.splitlines(keepends=True)
+    in_resources = False
+    resources_indent = -1
+    current_section: str | None = None
+    section_indent = -1
+
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\n").rstrip()
+        if not stripped:
+            continue
+
+        # Cantidad de espacios al inicio
+        indent = len(line) - len(line.lstrip(" "))
+
+        if not in_resources:
+            if re.match(r"^\s*resources\s*:\s*$", line):
+                in_resources = True
+                resources_indent = indent
+                current_section = None
+                section_indent = -1
+            continue
+
+        # Si encontramos una linea con indent <= resources_indent y no es
+        # blank/comentario, salimos del bloque resources.
+        if indent <= resources_indent:
+            in_resources = False
+            current_section = None
+            continue
+
+        # Dentro del bloque resources: detectar requests:/limits:
+        sec_match = re.match(r"^\s*(requests|limits)\s*:\s*$", line)
+        if sec_match:
+            current_section = sec_match.group(1)
+            section_indent = indent
+            continue
+
+        # Dentro de una subseccion (requests/limits): reescribir cpu/memory
+        if current_section and indent > section_indent:
+            leaf_match = re.match(
+                r"^(?P<lead>\s*(?P<key>cpu|memory)\s*:\s*)['\"]?(?P<value>[^'\"\s#]+)['\"]?",
+                line,
+            )
+            if leaf_match:
+                key = leaf_match.group("key")
+                value = leaf_match.group("value").strip()
+                expected = HELM_CAPACITY_BASELINE_FIX.get(f"{current_section}.{key}")
+                if expected and value != expected:
+                    # Preservar el resto de la linea (comentarios, newline)
+                    tail = line[leaf_match.end():]
+                    lines[i] = f"{leaf_match.group('lead')}{expected}{tail}"
+        elif indent <= section_indent:
+            current_section = None
+
+    return "".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Regla 9j — error.recurso / error.componente usan el nombre del componente
 # MIGRADO, no el nombre legacy IIB/WAS/ORQ. QA del banco (ticket BTHCCC-6826,
 # 2026-05) reporto como HIGH cualquier response que traiga el nombre legacy.
@@ -1044,7 +1186,7 @@ def run_bank_autofix(
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
     """
-    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9", "9j"}
+    wanted = set(rules) if rules else {"4", "6", "7", "8", "8b", "9", "9j", "9h.1"}
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
     results: list[BankAutofixResult] = []
@@ -1069,4 +1211,6 @@ def run_bank_autofix(
         )
     if "9j" in wanted:
         results.append(fix_legacy_name_in_error_payload(project_root))
+    if "9h.1" in wanted:
+        results.append(fix_helm_capacity_baseline(project_root))
     return results

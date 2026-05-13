@@ -29,6 +29,6 @@ paths:
 - Pinear versiones de Jackson, Netty, commons-lang3 si hay CVEs conocidos
 
 ## Helm
-- Produccion: replicaCount >= 2
-- CMDB_APPLICATION_ID: "CAPA_COMUN" (valor exacto)
-- Route (OpenShift), NUNCA Ingress (Kubernetes)
+- Capacity baseline oficial (`resources` + `hpa`): ver `bank-official-rules.md` Regla 9h.1.
+- `CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"` (valor exacto, no `"CAPA_COMUN"` viejo).
+- Route (OpenShift), NUNCA Ingress (Kubernetes).
