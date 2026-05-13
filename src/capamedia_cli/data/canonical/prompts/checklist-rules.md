@@ -827,6 +827,20 @@ grep -l "BusinessValidationException" <PATH>/src/main/java/com/pichincha/sp/doma
 
 0 matches → **HIGH**. Debe existir en `domain/exception/`.
 
+### Check 5.5b — Mensajes de error del catalogo sin normalizar
+
+Implementado en `run_block_5` (`checklist_rules.py`).
+
+```bash
+# Senal de bug (informe QA WSClientes0011, 2026-05):
+grep -rnE "Normalizer\.normalize|stripAccents|removeAccents" <PATH>/src/main/java/
+grep -rnE 'replaceAll\s*\(\s*"\\\\s\+"\s*,' <PATH>/src/main/java/
+```
+
+**Veredicto:** cualquier match en archivos que mencionan `setMensaje`/`GenericError`/`error.codigo` → **MEDIUM**. El texto del catalogo `errores.xml` se usa tal cual; cualquier transformacion come tildes o colapsa dobles espacios y genera diferencias con el legacy que QA reporta como FAIL.
+
+**Origen:** informe QA WSClientes0011 (2026-05) — "diferencias de tildes y dobles espacios en mensajes de error" entre legacy y migrado.
+
 ### Check 5.6 — `error.tipo` sigue la clasificación INFO/ERROR/FATAL [Rule 9d]
 
 **Reglas del legacy IIB (ver `reference_error_types.md` en memoria):**
@@ -885,6 +899,33 @@ grep -cE 'assertEquals\("(INFO|ERROR|FATAL)",.*getTipo' \
 < 4 matches → **MEDIUM**. Cada rama del Controller debe tener al menos un test que asierte el `tipo` (success=INFO, business=ERROR, bancs=FATAL, unexpected=FATAL).
 
 **Nota:** varios servicios antiguos del banco no aplican esta clasificacion (solo INFO/ERROR, sin FATAL). **No replicar** esa simplificacion — siempre distinguir los 3 tipos.
+
+**Check 5.6.5 — `BusinessValidationException` NO se mapea a `FATAL`**
+
+Implementado en `run_block_5`. Es la regla inversa de la tabla: tan importante como "no marcar BANCS como ERROR" es "no marcar validacion de negocio como FATAL".
+
+```bash
+# Detectar archivos que catchean BVE y dentro de la ventana de 6 lineas la
+# rutean a FATAL / buildFatalResponse / buildBancsErrorResponse
+grep -n "catch.*BusinessValidationException\|instanceof BusinessValidationException" <PATH>/src/main/java/ -r
+```
+
+**Veredicto:** si en la ventana inmediatamente posterior al catch hay `buildFatalResponse`, `buildBancsErrorResponse`, `setTipo("FATAL")` o `ERROR_TYPE_FATAL` → **HIGH**. BusinessValidationException es tipo=ERROR (validacion recuperable). FATAL queda reservado para infra (header faltante, BANCS, Exception generica).
+
+**Origen:** informe QA WSClientes0011 (2026-05) — "severidad FATAL usada en exceso por el migrado, perdiendo la diferenciacion que hace el legacy con ERROR / INFO".
+
+### Check 5.8 — Fechas no informadas en BANCS = alto valor `31129999`
+
+Implementado en `run_block_5`. Aplica solo a archivos bajo `infrastructure/output/adapter/bancs/`.
+
+```bash
+grep -rnE '"(01011901|19010101|0001-01-01)"|LocalDate\.MIN\b|LocalDate\.of\s*\(\s*1901\s*,\s*1\s*,\s*1\s*\)' \
+    <PATH>/src/main/java/com/pichincha/sp/infrastructure/output/adapter/bancs/
+```
+
+**Veredicto:** cualquier match → **MEDIUM**. Convencion BANCS: fechas no informadas = alto valor (`"31129999"` / `LocalDate.of(9999,12,31)`), no bajo valor. El legacy usa alto valor y QA marca diferencia funcional cuando el migrado usa bajo valor.
+
+**Origen:** informe QA WSClientes0011 (2026-05) — "legacy usa 'alto valor' (31129999), migrado usa 'bajo valor' (01011901) en fechaInicioResidencia".
 
 ---
 

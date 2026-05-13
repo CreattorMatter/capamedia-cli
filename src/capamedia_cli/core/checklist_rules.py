@@ -1245,8 +1245,10 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
 def run_block_5(ctx: CheckContext) -> list[CheckResult]:
     results: list[CheckResult] = []
     src_java = ctx.migrated_path / "src" / "main" / "java"
+    if not src_java.exists():
+        return results
 
-    # 5.1 - BancsClientHelper atrapa RuntimeException
+    # 5.1 - BancsClientHelper atrapa RuntimeException (solo aplica si existe el helper)
     helpers = list(src_java.rglob("*BancsClientHelper*.java"))
     if not helpers:
         helpers = list(src_java.rglob("*BancsHelper*.java"))
@@ -1256,6 +1258,216 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
             results.append(CheckResult("5.1", "Block 5", "BancsClientHelper catchea RuntimeException", "pass"))
         else:
             results.append(CheckResult("5.1", "Block 5", "BancsClientHelper catchea RuntimeException", "fail", severity="high", detail="helper no atrapa RuntimeException", suggested_fix="Agregar catch (RuntimeException e) { throw new BancsOperationException(...); }"))
+
+    # 5.5 - Mensajes de error sin normalizacion (sin Normalizer.normalize, sin
+    # stripAccents, sin replaceAll("\\s+", " ")) aplicados al texto del catalogo.
+    # Origen: informe QA WSClientes0011 (2026-05) -- "diferencias de tildes y
+    # dobles espacios en mensajes de error" entre legacy y migrado. El mensaje
+    # canonico vive en errores.xml y se usa tal cual.
+    normalize_hits = []
+    for f in src_java.rglob("*.java"):
+        if "test" in [p.lower() for p in f.parts]:
+            continue
+        if any(p == "build" or p == ".git" for p in f.parts):
+            continue
+        text = _read_or_empty(f)
+        # Solo detectar si el archivo tambien menciona setMensaje/Mensaje/error
+        # para reducir falsos positivos (Normalizer en util no relacionado).
+        if not re.search(r"(setMensaje|setMensajeCliente|error\.codigo|GenericError)", text):
+            continue
+        for line_no, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("//") or stripped.startswith("*"):
+                continue
+            if re.search(r"Normalizer\.normalize\s*\(|stripAccents\s*\(|removeAccents\s*\(", line):
+                normalize_hits.append((f, line_no, stripped))
+            elif re.search(r'replaceAll\s*\(\s*"\\\\s\+"\s*,', line):
+                normalize_hits.append((f, line_no, stripped))
+    if normalize_hits:
+        sample = normalize_hits[0]
+        results.append(
+            CheckResult(
+                "5.5b",
+                "Block 5",
+                "Mensajes de error del catalogo sin normalizar",
+                "fail",
+                severity="medium",
+                detail=(
+                    f"{len(normalize_hits)} hit(s) con normalizacion aplicada cerca de "
+                    f"setMensaje/GenericError. Ejemplo: "
+                    f"{_relative_display(sample[0], ctx.migrated_path)}:{sample[1]} -> {sample[2]}"
+                ),
+                suggested_fix=(
+                    "El mensaje del catalogo errores.xml se usa tal cual. "
+                    "Eliminar Normalizer.normalize/stripAccents/replaceAll('\\\\s+', ' '): "
+                    "comen tildes y colapsan espacios, generando diferencias con el legacy "
+                    "que QA reporta como FAIL."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "5.5b",
+                "Block 5",
+                "Mensajes de error del catalogo sin normalizar",
+                "pass",
+            )
+        )
+
+    # 5.6.1 - Constante ERROR_TYPE_FATAL existe en CatalogExceptionConstants.
+    # El textual del checklist documentaba este check pero no estaba implementado
+    # en codigo (gap heredado). Lo cierro aca para que sea ejecutable.
+    catalog_files = list(src_java.rglob("CatalogExceptionConstants.java"))
+    if catalog_files:
+        catalog_text = _read_or_empty(catalog_files[0])
+        if re.search(r'ERROR_TYPE_FATAL\s*=\s*"FATAL"', catalog_text):
+            results.append(
+                CheckResult(
+                    "5.6.1",
+                    "Block 5",
+                    "Constante ERROR_TYPE_FATAL definida",
+                    "pass",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "5.6.1",
+                    "Block 5",
+                    "Constante ERROR_TYPE_FATAL definida",
+                    "fail",
+                    severity="medium",
+                    detail="CatalogExceptionConstants sin ERROR_TYPE_FATAL",
+                    suggested_fix=(
+                        'Agregar `public static final String ERROR_TYPE_FATAL = "FATAL";` '
+                        "para uniformar el mapeo INFO/ERROR/FATAL."
+                    ),
+                )
+            )
+
+    # 5.7 - BusinessValidationException NUNCA debe mapearse a FATAL ni a
+    # buildFatalResponse / buildBancsErrorResponse. Validacion de negocio es
+    # ERROR (recuperable por caller). FATAL queda reservado para infra
+    # (header, BANCS, exception generica).
+    # Origen: informe QA WSClientes0011 (2026-05) -- "severidad FATAL usada en
+    # exceso por el migrado, perdiendo la diferenciacion que hace el legacy".
+    fatal_hits = []
+    for f in src_java.rglob("*.java"):
+        if "test" in [p.lower() for p in f.parts]:
+            continue
+        if any(p == "build" or p == ".git" for p in f.parts):
+            continue
+        text = _read_or_empty(f)
+        if "BusinessValidationException" not in text:
+            continue
+        # Ventana de 5 lineas siguientes al catch de BVE: si en esa ventana
+        # se llama a buildFatalResponse/buildBancsErrorResponse o se setea
+        # tipo=FATAL, es bug.
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            if not re.search(
+                r"catch\s*\(\s*BusinessValidationException|"
+                r"instanceof\s+BusinessValidationException|"
+                r"BusinessValidationException\s+\w+\s*[=)]",
+                line,
+            ):
+                continue
+            window = "\n".join(lines[idx:idx + 6])
+            if re.search(
+                r"buildFatalResponse|buildBancsErrorResponse|"
+                r'setTipo\s*\(\s*"FATAL"|ERROR_TYPE_FATAL',
+                window,
+            ):
+                fatal_hits.append((f, idx + 1, line.strip()))
+                break  # un hit por archivo basta
+    if fatal_hits:
+        sample = fatal_hits[0]
+        results.append(
+            CheckResult(
+                "5.6.5",
+                "Block 5",
+                "BusinessValidationException NO se mapea a FATAL",
+                "fail",
+                severity="high",
+                detail=(
+                    f"{len(fatal_hits)} archivo(s) mapean BusinessValidationException a "
+                    f"FATAL/buildFatalResponse. Ejemplo: "
+                    f"{_relative_display(sample[0], ctx.migrated_path)}:{sample[1]} -> {sample[2]}"
+                ),
+                suggested_fix=(
+                    "BusinessValidationException es tipo=ERROR (validacion recuperable). "
+                    "FATAL queda reservado para infra (header faltante, BANCS, Exception "
+                    "generica). Rerutear el catch a buildErrorResponse / tipo=ERROR / "
+                    "ERROR_TYPE_ERROR."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "5.6.5",
+                "Block 5",
+                "BusinessValidationException NO se mapea a FATAL",
+                "pass",
+            )
+        )
+
+    # 5.8 - Fechas no informadas en BANCS = alto valor 31129999, no bajo valor.
+    # Origen: informe QA WSClientes0011 (2026-05) -- "legacy usa alto valor
+    # 31129999 (31 dic 9999), migrado usa bajo valor 01011901 (1 enero 1901)".
+    # Convencion BANCS: fechas no informadas = "alto valor" (final del rango).
+    bancs_adapter_dir = list(src_java.rglob("*/output/adapter/bancs"))
+    low_value_hits = []
+    if bancs_adapter_dir:
+        for adapter_root in bancs_adapter_dir:
+            for f in adapter_root.rglob("*.java"):
+                if "test" in [p.lower() for p in f.parts]:
+                    continue
+                text = _read_or_empty(f)
+                for line_no, line in enumerate(text.splitlines(), 1):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("//") or stripped.startswith("*"):
+                        continue
+                    # Literales de fecha "bajo valor"
+                    if re.search(
+                        r'"(?:01011901|19010101|0001-01-01)"|'
+                        r"LocalDate\.MIN\b|"
+                        r"LocalDate\.of\s*\(\s*1901\s*,\s*1\s*,\s*1\s*\)",
+                        line,
+                    ):
+                        low_value_hits.append((f, line_no, stripped))
+    if low_value_hits:
+        sample = low_value_hits[0]
+        results.append(
+            CheckResult(
+                "5.8",
+                "Block 5",
+                "Fechas no informadas en BANCS usan alto valor (31129999)",
+                "fail",
+                severity="medium",
+                detail=(
+                    f"{len(low_value_hits)} hit(s) con fecha 'bajo valor' (01011901 / "
+                    f"LocalDate.MIN) en adapter/bancs/. Ejemplo: "
+                    f"{_relative_display(sample[0], ctx.migrated_path)}:{sample[1]} -> {sample[2]}"
+                ),
+                suggested_fix=(
+                    'Convencion BANCS: fechas no informadas = "31129999" (alto valor). '
+                    'Reemplazar "01011901" / LocalDate.MIN / LocalDate.of(1901,1,1) por '
+                    '"31129999" o LocalDate.of(9999,12,31). QA del banco compara contra '
+                    "el legacy que usa alto valor."
+                ),
+            )
+        )
+    elif bancs_adapter_dir:
+        results.append(
+            CheckResult(
+                "5.8",
+                "Block 5",
+                "Fechas no informadas en BANCS usan alto valor (31129999)",
+                "pass",
+            )
+        )
 
     return results
 
