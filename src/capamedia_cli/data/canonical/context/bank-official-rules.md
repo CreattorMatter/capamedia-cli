@@ -768,6 +768,53 @@ valores, documentar la decision en `MIGRATION_REPORT.md` antes del PR.
 
 ---
 
+## Regla 9h.2 - `JAVA_OPTIONS` baseline oficial en Helm env
+
+**Fuente:** mail oficial del area de capacity del Banco Pichincha (Alexis
+Padilla / Kyndryl, 2026-05). Directiva oficial para garantizar el uso adecuado
+de recursos compartidos (CPU y memoria) en OpenShift.
+
+**Estado:** valores **referenciales**, no definitivos. Permiten que la JVM
+tenga un comportamiento dinamico en funcion de los recursos asignados a los
+pods y que los pods se inicien correctamente. Los valores definitivos se
+definen en funcion de los resultados de las pruebas de rendimiento.
+
+**MUST**: en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, el bloque
+`env:` debe declarar la variable `JAVA_OPTIONS` con este valor exacto:
+
+```yaml
+env:
+  - name: "JAVA_OPTIONS"
+    value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
+```
+
+**Por que esos flags:**
+- `-XX:InitialRAMPercentage=70.0` y `-XX:MaxRAMPercentage=70.0`: el heap de
+  la JVM ocupa 70% del memory limit del pod, dejando margen para metaspace
+  y stacks nativos.
+- `-XX:+UseStringDeduplication`: G1 deduplica strings identicos en heap,
+  bajando memory footprint en servicios con muchos textos repetidos
+  (validaciones, mensajes de error, mapping).
+- `-XX:+UseG1GC`: garbage collector recomendado para Java 21 + heap mediano
+  (~350Mi-500Mi como define la Regla 9h.1).
+
+**NEVER**:
+- Definir `JAVA_OPTIONS` con `-Xms` / `-Xmx` literales en lugar de los
+  porcentajes oficiales. Con porcentajes la JVM se adapta al `memory.limits`
+  del pod (que puede cambiar tras pruebas de rendimiento).
+- Omitir alguno de los 4 flags. El conjunto es atomico segun la directiva.
+
+**Validacion (Block 7 del checklist, HIGH):**
+- 7.5f: la env var `JAVA_OPTIONS` no esta declarada en algun helm, o su
+  `value:` difiere del baseline oficial.
+
+El autofix `fix_helm_java_options` reemplaza el `value:` si la env var
+existe y difiere. **No la inyecta si falta** (modificar la lista `env:` sin
+contexto es propenso a romper el chart); en ese caso reporta como handoff
+manual.
+
+---
+
 ## Regla 9i - WAS + JPA/Hikari requiere `connection-test-query` segun motor
 
 **MUST**: si el origen legacy es **WAS** y el migrado tiene

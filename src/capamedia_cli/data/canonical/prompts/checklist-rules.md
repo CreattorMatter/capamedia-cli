@@ -1144,6 +1144,35 @@ resources:
 
 El autofix `fix_helm_capacity_baseline` los aplica si difieren.
 
+### Check 7.5f — Helm env `JAVA_OPTIONS` baseline oficial [BANCO]
+
+Implementado en `run_block_7`. Origen: mail oficial del area de capacity del banco (Alexis Padilla / Kyndryl, 2026-05). Ver `bank-official-rules.md` Regla 9h.2.
+
+```bash
+for env in dev test prod; do
+  grep -nE "name:\s*['\"]?JAVA_OPTIONS['\"]?" -A1 <PATH>/helm/$env.yml
+done
+```
+
+**Valor esperado (exacto):**
+
+```yaml
+- name: "JAVA_OPTIONS"
+  value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
+```
+
+**Veredicto:**
+- La env var `JAVA_OPTIONS` no declarada en algun helm → **HIGH**.
+- `value:` difiere (orden de flags es irrelevante; el conjunto debe matchear exacto) → **HIGH**.
+- Los 3 helms con el valor canonico → ✅ **PASS**.
+
+**Por que el baseline:**
+- `-XX:InitialRAMPercentage=70.0` / `-XX:MaxRAMPercentage=70.0`: heap = 70% del memory limit del pod (deja margen para metaspace y stacks).
+- `-XX:+UseStringDeduplication`: G1 deduplica strings repetidos en heap (bajan footprint en servicios con mucho texto: validaciones, mensajes de error, mapping).
+- `-XX:+UseG1GC`: GC recomendado para Java 21 + heap mediano del baseline 9h.1 (350Mi-500Mi).
+
+El autofix `fix_helm_java_options` reemplaza el `value:` si la env var existe y difiere. NO la inyecta si falta (modificar la lista `env:` sin contexto es propenso a romper el chart); en ese caso reporta como handoff manual.
+
 ### Check 7.6 — `@ConfigurationPropertiesScan` en Application.java
 
 ```bash

@@ -1255,6 +1255,108 @@ def fix_bve_not_fatal(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 9h.2 — JAVA_OPTIONS baseline oficial en Helm env. Mail Alexis Padilla
+# (Kyndryl) / capacity Banco Pichincha 2026-05. Aplica a los 3 helms.
+# ---------------------------------------------------------------------------
+
+
+HELM_JAVA_OPTIONS_BASELINE_FIX: str = (
+    "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 "
+    "-XX:+UseStringDeduplication -XX:+UseG1GC"
+)
+
+
+def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
+    """Si la env var JAVA_OPTIONS ya existe en helm/<env>.yml con un valor
+    distinto al baseline oficial, lo reescribe. NO inyecta la env var si
+    falta (modificar la lista `env:` sin contexto es propenso a romper el
+    chart); en ese caso el check 7.5f la reporta como handoff manual.
+
+    Idempotente. Skip si helm/ no existe o esta vacio.
+    """
+    result = BankAutofixResult(rule="9h.2", applied=False)
+    helm_dir = project_root / "helm"
+    if not helm_dir.exists():
+        result.notes = "helm/ no existe en el proyecto"
+        return result
+
+    helm_files = [
+        f for f in helm_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in {".yml", ".yaml"}
+    ]
+    if not helm_files:
+        result.notes = "helm/ vacio"
+        return result
+
+    expected_tokens = set(HELM_JAVA_OPTIONS_BASELINE_FIX.split())
+    modified_files: list[Path] = []
+    for f in helm_files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        original = text
+
+        lines = text.splitlines(keepends=True)
+        # Buscar cada bloque `name: JAVA_OPTIONS` seguido (en hasta 4 lineas)
+        # de un `value:` y reemplazar el valor si difiere.
+        for i, line in enumerate(lines):
+            if not re.match(
+                r"^\s*(?:-\s*)?name\s*:\s*['\"]?JAVA_OPTIONS['\"]?\s*(#.*)?$",
+                line,
+            ):
+                continue
+            for j in range(i + 1, min(len(lines), i + 5)):
+                candidate = lines[j]
+                stripped = candidate.strip()
+                if not stripped:
+                    continue
+                m = re.match(
+                    r"^(?P<indent>\s*)value\s*:\s*(?P<quote>['\"]?)"
+                    r"(?P<value>[^'\"]*?)(?P=quote)\s*(?P<comment>#.*)?$",
+                    candidate.rstrip("\n"),
+                )
+                if m:
+                    actual_value = m.group("value").strip()
+                    actual_tokens = set(actual_value.split())
+                    if actual_tokens != expected_tokens:
+                        comment = m.group("comment") or ""
+                        comment_part = (
+                            f" {comment}" if comment else ""
+                        )
+                        # Conservar la indentacion y el tipo de comilla original
+                        # (defaulting a comillas dobles si no habia).
+                        quote = m.group("quote") or '"'
+                        lines[j] = (
+                            f"{m.group('indent')}value: "
+                            f"{quote}{HELM_JAVA_OPTIONS_BASELINE_FIX}{quote}"
+                            f"{comment_part}\n"
+                        )
+                    break
+                if re.match(r"^[-\w].*?:", stripped):
+                    # Llegamos a otra key sin haber visto value: -> no tocar
+                    break
+
+        new_text = "".join(lines)
+        if new_text != original:
+            f.write_text(new_text, encoding="utf-8")
+            modified_files.append(f)
+            result.changes.append(
+                f"{f.relative_to(project_root)}: JAVA_OPTIONS value alineado al baseline"
+            )
+
+    if modified_files:
+        result.applied = True
+        result.files_modified = modified_files
+    else:
+        result.notes = (
+            "JAVA_OPTIONS ya alineado al baseline o no declarado en ningun helm "
+            "(si falta, declararlo manualmente en env: — el autofix no la inyecta)"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1276,7 +1378,7 @@ def run_bank_autofix(
     wanted = (
         set(rules)
         if rules
-        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1"}
+        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2"}
     )
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
@@ -1306,4 +1408,6 @@ def run_bank_autofix(
         results.append(fix_bve_not_fatal(project_root))
     if "9h.1" in wanted:
         results.append(fix_helm_capacity_baseline(project_root))
+    if "9h.2" in wanted:
+        results.append(fix_helm_java_options(project_root))
     return results
