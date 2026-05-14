@@ -1224,22 +1224,25 @@ Cualquier valor numérico debe ser trazable al legacy (Section 15 del ANALYSIS) 
 
 **Origen:** [PDF-OFICIAL] (Snyk) + [MCP] (versiones)
 
-### Check 8.1 — Versiones actualizadas
+### Check 8.1 — Versiones actualizadas (CVE-driven)
 
 ```bash
-grep -E "springframework.boot.*version|jackson-core:|logstash-logback-encoder|lib-bnc-api-client|peer-review" <PATH>/build.gradle
+grep -E "springframework.boot.*version|logstash-logback-encoder|lib-bnc-api-client|peer-review" <PATH>/build.gradle
 ```
 
-Baseline esperado (a 2026-04-23):
-- Spring Boot: `3.5.14`
-- jackson-core / jackson-dataformat-xml: `2.21.2`
-- logstash-logback-encoder: `9.0` (solo si aplica)
-- lib-bnc-api-client: **verificar en Confluence MCP antes de auditar** — si el valor local es más viejo que el publicado, **MEDIUM**
-- Peer Review plugin: `1.1.0`
+**Baseline oficial (Snyk 2026-05 → Spring Boot 4.0.6):**
+- **Spring Boot: `4.0.6`** (decidido por Jean Pierre Garcia / Alexis Padilla tras Snyk reports 2026-05: 7 CVEs HIGH transitivas — 3 Jackson 3.0.1 via `logstash-logback-encoder@9.0`, 4 Netty 4.1.132 via WebFlux. SB 4.0.6 BOM trae Jackson 3.1.x + Netty mas nuevo).
+- **Jackson:** NO pinear `jackson-core`, `jackson-databind`, `jackson-dataformat-xml`. Spring Boot 4 BOM los gestiona. Pinear explicito causa drift al proximo CVE.
+- **Netty:** NO pinear `io.netty:*` en `dependencyManagement`. SB 4 BOM lo gestiona. El pin viejo `4.1.132.Final` es ahora el bug (4 CVEs HIGH). Validado por Check 8.7.
+- **logstash-logback-encoder:** `9.0` (la Jackson 3.x transitiva queda alineada via BOM SB 4).
+- **lib-bnc-api-client:** `com.pichincha.bnc:lib-bnc-api-client:1.1.0` estable.
+- **Peer Review plugin:** `1.1.0`.
 
-Cualquier versión menor al baseline → **MEDIUM** y `capamedia checklist`
-puede autofixear el literal `id 'org.springframework.boot' version '<vieja>'`
-a `3.5.14` cuando el patrón es claro.
+**Veredicto:**
+- Spring Boot < `4.0.6` → ❌ **HIGH** (CVE-equivalente, no solo "outdated"). `capamedia checklist` autofixea el literal del plugin y `migration-context.json` simultaneamente.
+- Pin explicito de `jackson-*` con version literal en `build.gradle` → ❌ **HIGH** (mismo principio que Netty: se queda atras al proximo CVE).
+
+### Check 8.2 — Gradle seguridad: Undertow eliminado
 
 ### Check 8.2 — Gradle seguridad: Undertow eliminado
 
@@ -1310,6 +1313,21 @@ grep -E "jaxws-rt:" <PATH>/build.gradle
 ```
 
 0 matches → **HIGH**. El MCP no lo incluye; agregar con las exclusiones de `jaxb-core`/`jaxb-impl` (ver §1.0.3 del prompt SOAP).
+
+### Check 8.7 — Sin pins manuales de `io.netty:*` en `dependencyManagement` (CVE-driven)
+
+Implementado en `run_block_8`. Origen: Snyk 2026-05 reporto 4 CVEs HIGH (`netty-codec`, `netty-codec-http2`, `netty-codec-dns`) sobre la version `4.1.132.Final` — exactamente la que el scaffold viejo pinneaba manualmente para parchar un CVE anterior. **El pin viejo se transformo en el bug.**
+
+```bash
+grep -nE "dependency\s+['\"]io\.netty:" <PATH>/build.gradle
+# (filtrar comentarios)
+```
+
+**Veredicto:** cualquier match dentro de un bloque `dependencyManagement { dependencies { ... } }` → **HIGH**. Sacar el pin: Spring Boot 4 BOM gestiona Netty centralmente y la proxima version del BOM ya incluye los parches.
+
+**Por que es CVE-driven:** pinear una version especifica de una libreria de seguridad (Netty, Jackson) garantiza que **te vas a quedar atras al proximo CVE**. La unica forma sostenible es delegar al BOM que se actualiza con cada bump de Spring Boot. Validado por Snyk 2026-05.
+
+El autofix `fix_remove_netty_pin` elimina el bloque si lo encuentra. Idempotente.
 
 ---
 

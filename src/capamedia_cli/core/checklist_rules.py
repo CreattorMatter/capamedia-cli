@@ -593,6 +593,52 @@ def _undertow_gradle_artifacts(gradle_file: Path, root: Path) -> list[str]:
     return artifacts
 
 
+# Detecta pins manuales de io.netty:* dentro de bloques `dependencyManagement {
+# dependencies { ... } }`. Snyk 2026-05: 4 CVEs HIGH se filtraron porque el
+# template tenia `dependency 'io.netty:netty-codec-http:4.1.132.Final'` (un
+# pin que ahora es el problema). Spring Boot 4 BOM gestiona Netty central —
+# cualquier pin manual es scaffold viejo o intento de parche que se va a
+# quedar atras en el proximo CVE.
+_NETTY_PIN_RE = re.compile(
+    r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s*"
+    r"['\"]io\.netty:[^:]+:[^'\"]+['\"]",
+)
+
+
+def _netty_dependency_management_pins(gradle_file: Path, root: Path) -> list[str]:
+    """Return list of 'io.netty:*:VERSION' pins inside dependencyManagement.
+
+    Solo matchea pins activos (no comentarios). Aplica tambien a pins en
+    `dependencies {}` top-level con version literal (no `:+` ni var).
+    """
+    pins: list[str] = []
+    text = _read_or_empty(gradle_file)
+    rel = _relative_display(gradle_file, root)
+    in_dep_mgmt = False
+    brace_depth = 0
+    dep_mgmt_brace = -1
+    for line_no, raw_line in enumerate(text.splitlines(), 1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            # Tracking simple de braces para mantener estado del bloque.
+            brace_depth += raw_line.count("{") - raw_line.count("}")
+            continue
+        opens = raw_line.count("{")
+        closes = raw_line.count("}")
+        if not in_dep_mgmt and "dependencyManagement" in stripped and "{" in raw_line:
+            in_dep_mgmt = True
+            dep_mgmt_brace = brace_depth + opens
+            brace_depth += opens - closes
+            continue
+        brace_depth += opens - closes
+        if in_dep_mgmt and brace_depth < dep_mgmt_brace:
+            in_dep_mgmt = False
+            dep_mgmt_brace = -1
+        if in_dep_mgmt and _NETTY_PIN_RE.match(raw_line):
+            pins.append(f"{rel}:{line_no} -> {stripped[:120]}")
+    return pins
+
+
 def _datasource_flavor(gradle_text: str, yml_text: str) -> str:
     combined = f"{gradle_text}\n{yml_text}".lower()
     if "oracle.jdbc" in combined or "oracledriver" in combined or "jdbc:oracle" in combined:
@@ -2034,11 +2080,13 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 "Block 8",
                 "Spring Boot baseline",
                 "fail",
-                severity="medium",
+                severity="high",
                 detail=detail,
                 suggested_fix=(
                     "Dejar version literal aprobada en build.gradle: "
-                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
+                    "El baseline es CVE-driven (Snyk 2026-05): Spring Boot < 4.0.0 "
+                    "trae 7 CVEs HIGH transitivas (Jackson + Netty)."
                 ),
             )
         )
@@ -2055,14 +2103,19 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     "Block 8",
                     "Spring Boot baseline",
                     "fail",
-                    severity="medium",
+                    severity="high",
                     detail=(
-                        f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION}: "
+                        f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION} "
+                        f"(7 CVEs HIGH transitivas Jackson+Netty, Snyk 2026-05): "
                         + ", ".join(outdated)
                     ),
                     suggested_fix=(
                         "Actualizar el plugin Gradle a "
-                        f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`."
+                        f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
+                        "Tambien actualizar `spring_boot_version` en "
+                        "`migration-context.json` y eliminar pins explicitos de "
+                        "jackson-* y io.netty:* del template (Spring Boot 4 BOM "
+                        "los gestiona)."
                     ),
                 )
             )
@@ -2108,6 +2161,49 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 "Gradle seguridad Undertow",
                 "pass",
                 detail="sin dependencias/config Undertow activas",
+            )
+        )
+
+    # 8.7 - Pin manual de io.netty:* en dependencyManagement.
+    # (ID 8.4 ya esta ocupado por "Lombok minimal" en checklist-rules.md textual;
+    # uso 8.7 que es el siguiente libre — los 8.5 y 8.6 son MCP gaps.)
+    # Origen: Snyk 2026-05 reporto 4 CVEs HIGH (netty-codec, netty-codec-http2,
+    # netty-codec-dns) en `4.1.132.Final` — la version que el scaffold viejo
+    # habia pinneado manualmente para parchar un CVE anterior. La unica forma
+    # de mantener Netty al dia es dejar que Spring Boot 4 BOM lo gestione.
+    netty_pins: list[str] = []
+    for gradle_file in gradle_files:
+        netty_pins.extend(
+            _netty_dependency_management_pins(gradle_file, ctx.migrated_path)
+        )
+    if netty_pins:
+        results.append(
+            CheckResult(
+                "8.7",
+                "Block 8",
+                "Sin pins manuales de io.netty:* (CVE-driven)",
+                "fail",
+                severity="high",
+                detail=(
+                    f"{len(netty_pins)} pin(s) manual(es) de io.netty:* "
+                    f"detectado(s): " + "; ".join(netty_pins[:6])
+                ),
+                suggested_fix=(
+                    "Eliminar todos los `dependency 'io.netty:*:VERSION'` del "
+                    "bloque dependencyManagement. Spring Boot 4 BOM gestiona "
+                    "Netty centralmente. Pins manuales se quedan atras al "
+                    "proximo CVE (Snyk 2026-05: 4 CVEs HIGH en 4.1.132.Final "
+                    "que el pin viejo introdujo)."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "8.7",
+                "Block 8",
+                "Sin pins manuales de io.netty:* (CVE-driven)",
+                "pass",
             )
         )
     return results

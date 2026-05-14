@@ -772,7 +772,12 @@ _SPRING_BOOT_PLUGIN_DECL_RE = re.compile(
 
 
 def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixResult:
-    """8.1 - Actualiza el plugin Spring Boot cuando la version literal es vieja."""
+    """8.1 - Actualiza el plugin Spring Boot cuando la version literal es vieja.
+
+    Tambien actualiza `spring_boot_version` en `migration-context.json` para
+    mantener consistencia entre el build y el contexto declarado del servicio
+    (Slack 2026-05: decision del equipo tras Snyk 7 CVEs HIGH transitivas).
+    """
     modified: list[Path] = []
     before_versions: list[str] = []
 
@@ -805,6 +810,32 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
         if replacements and new_text != text:
             _write(gradle_file, new_text)
             modified.append(gradle_file)
+
+    # Tambien actualizar `spring_boot_version` en migration-context.json si existe
+    # y declara una version mas vieja que el baseline. Mantiene consistencia
+    # entre el build.gradle y el contexto registrado del servicio.
+    ctx_file = root / "migration-context.json"
+    if ctx_file.exists():
+        ctx_text = _read(ctx_file)
+        ctx_match = re.search(
+            r'(?P<prefix>"spring_boot_version"\s*:\s*")'
+            r"(?P<version>[^\"]+)"
+            r'(?P<suffix>")',
+            ctx_text,
+        )
+        if ctx_match:
+            current = ctx_match.group("version").strip()
+            if current and is_version_lower(current, SPRING_BOOT_BASELINE_VERSION):
+                new_ctx = (
+                    ctx_text[: ctx_match.start("version")]
+                    + SPRING_BOOT_BASELINE_VERSION
+                    + ctx_text[ctx_match.end("version") :]
+                )
+                _write(ctx_file, new_ctx)
+                modified.append(ctx_file)
+                before_versions.append(
+                    f"migration-context.json:spring_boot_version={current}"
+                )
 
     if not modified:
         return AutofixResult(

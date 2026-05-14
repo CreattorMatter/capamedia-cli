@@ -851,14 +851,15 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Update to `3.5.14` in `build.gradle`
+1. **Spring Boot version:** Update to `4.0.6` in `build.gradle`. **Why 4.0.6 and not 3.x:** Snyk reports 2026-05 found 7 transitive CVEs HIGH against `3.5.14` (3 Jackson 3.0.1 via `logstash-logback-encoder@9.0`, 4 Netty 4.1.132 via WebFlux). Spring Boot 4.0.6 BOM brings Jackson 3.1.x and a newer Netty that patch all 7. Decided by the team (Jean Pierre Garcia / Alexis Padilla, Slack 2026-05).
 2. **Peer Review plugin:** Update to `1.1.0`
-3. **Jackson version:** Force `2.21.2` in resolution strategy
-4. **logstash-logback-encoder:** Use `9.0`
-5. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
-6. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
-7. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly.
-8. **Move project files:** If the MCP creates a subfolder, move all contents to the root destination folder.
+3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Spring Boot 4 BOM manages them (3.1.x). Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
+4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE". Spring Boot 4 BOM manages Netty. Old scaffolds that pinned `io.netty:netty-codec-http:4.1.132.Final` for a previous CVE are now the source of 4 new CVEs — remove them. Blocked by Check 8.4.
+5. **logstash-logback-encoder:** Use `9.0`
+6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
+7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
+8. **Verify WSDL generation:** Run `./gradlew generateFromWsdl` to ensure JAXB classes generate correctly.
+9. **Move project files:** If the MCP creates a subfolder, move all contents to the root destination folder.
 
 **Peer review gate:** before closing migration, run or inspect
 `./gradlew architectureReview`. Do not close with `BLOQUEAR PR: SI`, score < 7,
@@ -886,7 +887,7 @@ WebFlux dependency block to WAS REST/MVC services:
 plugins {
     id 'jacoco'
     id 'java'
-    id 'org.springframework.boot' version '3.5.14'
+    id 'org.springframework.boot' version '4.0.6'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.0'
 }
@@ -973,10 +974,10 @@ dependencies {
     implementation 'jakarta.xml.bind:jakarta.xml.bind-api:4.0.2'
     implementation 'org.glassfish.jaxb:jaxb-runtime:4.0.5'
 
-    // Common utilities
+    // Common utilities. NOTE: NEVER pin jackson-core / jackson-databind /
+    // jackson-dataformat-xml here — Spring Boot 4 BOM manages them (3.1.x).
+    // Pinning explicit versions causes drift on the next CVE.
     implementation 'org.apache.commons:commons-lang3:3.18.0'
-    implementation 'com.fasterxml.jackson.core:jackson-core:2.21.2'
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.21.2'
     implementation 'org.mapstruct:mapstruct:1.6.3'
 
     // Testing
@@ -996,11 +997,11 @@ dependencyManagement {
     imports {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
     }
-    dependencies {
-        // Patch CVE: Netty HTTP Request Smuggling
-        dependency 'io.netty:netty-codec-http:4.1.132.Final'
-        dependency 'io.netty:netty-codec-http2:4.1.132.Final'
-    }
+    // NOTE: NEVER add `dependency 'io.netty:*:VERSION'` blocks here to "patch
+    // a CVE". Spring Boot 4 BOM manages Netty centrally. Old scaffolds that
+    // pinned `netty-codec-http:4.1.132.Final` for a previous CVE became the
+    // source of 4 new CVEs in Snyk 2026-05. The next bump in the BOM closes
+    // them — manual pins do not. Blocked by checklist Check 8.4.
 }
 
 compileJava {

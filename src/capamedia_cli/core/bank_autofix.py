@@ -1357,6 +1357,68 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 8.7 / Snyk 2026-05 — Eliminar pins manuales de io.netty:* del bloque
+# `dependencyManagement { dependencies { ... } }`. Spring Boot 4 BOM gestiona
+# Netty centralmente; pins manuales se quedan atras al proximo CVE (era
+# exactamente el bug del template viejo con netty-codec-http:4.1.132.Final).
+# ---------------------------------------------------------------------------
+
+
+_NETTY_PIN_LINE_RE = re.compile(
+    r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s+"
+    r"['\"]io\.netty:[^:]+:[^'\"]+['\"][^\n]*\n?",
+    re.MULTILINE,
+)
+
+
+def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
+    """Elimina pins manuales de `io.netty:*:VERSION` del `build.gradle`.
+
+    Solo opera sobre lineas dentro de bloques `dependencyManagement` o
+    `dependencies` con version literal. Mantiene el resto del archivo intacto.
+    Idempotente. Skip si no hay build.gradle.
+    """
+    result = BankAutofixResult(rule="8.7", applied=False)
+    gradle_files = [
+        f
+        for f in (
+            project_root / "build.gradle",
+            project_root / "build.gradle.kts",
+        )
+        if f.exists()
+    ]
+    if not gradle_files:
+        result.notes = "no se encontro build.gradle"
+        return result
+
+    modified_files: list[Path] = []
+    for f in gradle_files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "io.netty:" not in text:
+            continue
+
+        new_text, n = _NETTY_PIN_LINE_RE.subn("", text)
+        if n > 0 and new_text != text:
+            # Limpiar lineas blancas dobles que pueden haber quedado
+            new_text = re.sub(r"\n{3,}", "\n\n", new_text)
+            f.write_text(new_text, encoding="utf-8")
+            modified_files.append(f)
+            result.changes.append(
+                f"{f.relative_to(project_root)}: removed {n} io.netty:* pin(s)"
+            )
+
+    if modified_files:
+        result.applied = True
+        result.files_modified = modified_files
+    else:
+        result.notes = "no se encontraron pins de io.netty:* en build.gradle"
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1378,7 +1440,7 @@ def run_bank_autofix(
     wanted = (
         set(rules)
         if rules
-        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2"}
+        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2", "8.7"}
     )
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
@@ -1410,4 +1472,6 @@ def run_bank_autofix(
         results.append(fix_helm_capacity_baseline(project_root))
     if "9h.2" in wanted:
         results.append(fix_helm_java_options(project_root))
+    if "8.7" in wanted:
+        results.append(fix_remove_netty_pin(project_root))
     return results

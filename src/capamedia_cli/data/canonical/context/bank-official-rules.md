@@ -432,6 +432,75 @@ implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'
 
 ---
 
+## Regla 8.5 - Spring Boot baseline + Jackson/Netty sin pins manuales (CVE-driven)
+
+**Fuente:** Snyk reports 2026-05 sobre servicios 0076, 0090, 0091 + orquestador
+(Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla). 10 CVEs HIGH
+activas: 3 Jackson 3.0.1 transitivas, 4 Netty 4.1.132 transitivas, 3 Undertow.
+
+**Decision del equipo:** subir baseline a **Spring Boot `4.0.6`** (Jean Pierre:
+"actualizar a TODOS desde el principio con springboot 4.0.6"). Spring Boot 4
+BOM trae Jackson 3.1.x y Netty mas nuevo que parchan las 7 CVEs transitivas
+con un solo bump. Undertow se sigue bloqueando aparte (Regla 8 + Check 8.2).
+
+### Baseline oficial
+
+```gradle
+plugins {
+    id 'org.springframework.boot' version '4.0.6'
+}
+```
+
+`SPRING_BOOT_BASELINE_VERSION` en `capamedia_cli/core/version_policy.py` es la
+fuente unica.
+
+### NEVER (anti-patrones que se quedan atras al proximo CVE)
+
+- **NUNCA pinear `jackson-*` explicito** en `build.gradle`:
+  ```gradle
+  // ✘ NO
+  implementation 'com.fasterxml.jackson.core:jackson-core:2.21.2'
+  implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.21.2'
+  ```
+  Spring Boot 4 BOM los gestiona en `3.1.x`. Pinear explicito es lo que llevo
+  a Snyk 2026-05 (3 CVEs HIGH en Jackson 3.0.1 transitiva del logger porque
+  el pin del template no se actualizo). **Dejar que el BOM mande.**
+
+- **NUNCA agregar `dependency 'io.netty:*:VERSION'` en `dependencyManagement`**
+  "para parchar un CVE":
+  ```gradle
+  // ✘ NO — esto era el "fix" del CVE viejo, ahora es el bug nuevo
+  dependencyManagement {
+    dependencies {
+      dependency 'io.netty:netty-codec-http:4.1.132.Final'
+      dependency 'io.netty:netty-codec-http2:4.1.132.Final'
+    }
+  }
+  ```
+  Snyk 2026-05 encontro 4 CVEs HIGH en `4.1.132.Final` — la misma version
+  que el scaffold viejo pinneaba para parchar un CVE anterior. **El pin se
+  transformo en el bug.** Spring Boot 4 BOM gestiona Netty centralmente.
+
+- **NUNCA `replicaCount: 2` en helm** (regla derogada — ver Regla 9h.1).
+
+### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
+
+- 8.1: plugin `org.springframework.boot` con version < `4.0.6` → HIGH.
+- 8.2: cualquier dependencia `undertow` activa → HIGH.
+- 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH.
+
+### Autofix
+
+`fix_spring_boot_version` (clave `"8.1"`):
+1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'4.0.6'`
+   en `build.gradle` y `build.gradle.kts`.
+2. Actualiza `spring_boot_version` en `migration-context.json` si difiere.
+
+`fix_remove_netty_pin` (clave `"8.7"`): elimina `dependency 'io.netty:*:VERSION'`
+de bloques `dependencyManagement { dependencies { ... } }`. Idempotente.
+
+---
+
 ## Regla 9 - `catalog-info.yaml` completo
 
 **MUST**: archivo `catalog-info.yaml` en la raiz del proyecto con:
