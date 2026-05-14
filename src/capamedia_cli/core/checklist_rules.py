@@ -349,6 +349,71 @@ def _helm_resources_baseline_issues(helm_files: list[Path], root: Path) -> list[
     return issues
 
 
+# Baseline oficial de JAVA_OPTIONS — mail Alexis Padilla / Kyndryl, capacity
+# Banco Pichincha 2026-05. Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml.
+# Valores referenciales hasta que las pruebas de rendimiento definan definitivos.
+HELM_JAVA_OPTIONS_BASELINE: str = (
+    "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 "
+    "-XX:+UseStringDeduplication -XX:+UseG1GC"
+)
+
+
+def _helm_java_options_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.5f helper: env var JAVA_OPTIONS debe existir con el valor exacto
+    del baseline en los 3 helms (dev/test/prod).
+
+    Estrategia: localizar pares `name: JAVA_OPTIONS` (con o sin comillas) y
+    leer el `value:` siguiente en una ventana corta. Si no existe el `name:`
+    -> issue 'not declared'. Si existe pero `value:` difiere -> issue 'value
+    mismatch' con el valor real.
+    """
+    issues: list[str] = []
+    expected_tokens = set(HELM_JAVA_OPTIONS_BASELINE.split())
+    for f in helm_files:
+        text = _read_or_empty(f)
+        rel = _relative_display(f, root)
+        lines = text.splitlines()
+        java_opts_name_positions = []
+        for i, line in enumerate(lines):
+            # `name: JAVA_OPTIONS` o `name: "JAVA_OPTIONS"`
+            if re.match(
+                r"^\s*(?:-\s*)?name\s*:\s*['\"]?JAVA_OPTIONS['\"]?\s*(#.*)?$",
+                line,
+            ):
+                java_opts_name_positions.append(i)
+        if not java_opts_name_positions:
+            issues.append(
+                f"{rel} - env var JAVA_OPTIONS no declarada (esperado baseline oficial)"
+            )
+            continue
+        for pos in java_opts_name_positions:
+            # Buscar `value:` en las siguientes 3 lineas no vacias
+            value_line = None
+            for j in range(pos + 1, min(len(lines), pos + 5)):
+                candidate = lines[j].strip()
+                if not candidate:
+                    continue
+                m = re.match(r"value\s*:\s*['\"]?(?P<value>[^'\"]*?)['\"]?\s*(#.*)?$", candidate)
+                if m:
+                    value_line = m.group("value").strip()
+                    break
+                # Si encontramos otra key (name:, -, etc) sin haber visto value:, salir
+                if re.match(r"^[-\w].*?:", candidate):
+                    break
+            if value_line is None:
+                issues.append(
+                    f"{rel}:L{pos + 1} - JAVA_OPTIONS sin `value:` siguiente"
+                )
+                continue
+            actual_tokens = set(value_line.split())
+            if actual_tokens != expected_tokens:
+                issues.append(
+                    f"{rel}:L{pos + 1} - JAVA_OPTIONS value: '{value_line}' -> "
+                    f"debe ser '{HELM_JAVA_OPTIONS_BASELINE}'"
+                )
+    return issues
+
+
 _HELM_ENV_LINE_RE = re.compile(r"^\s*(?:-\s*)?(name|value)\s*:\s*(.*)$", re.IGNORECASE)
 _HELM_PLACEHOLDER_RE = re.compile(r"<\s*[^>]+\s*>")
 _HELM_PENDING_MARKER_RE = re.compile(r"\b(TODO|TBD|PENDIENTE|PENDIENTE_VALIDAR|VALIDAR|REVISAR)\b", re.IGNORECASE)
@@ -1884,6 +1949,43 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         "7.5e",
                         "Block 7",
                         "Helm resources baseline oficial",
+                        "pass",
+                    )
+                )
+
+            # 7.5f - JAVA_OPTIONS env var baseline oficial (Alexis Padilla,
+            # capacity Banco Pichincha, 2026-05). Aplica a los 3 helms.
+            # Ver bank-official-rules.md Regla 9h.2.
+            java_opts_issues = _helm_java_options_issues(
+                helm_files, ctx.migrated_path
+            )
+            if java_opts_issues:
+                results.append(
+                    CheckResult(
+                        "7.5f",
+                        "Block 7",
+                        "Helm env JAVA_OPTIONS baseline oficial",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(java_opts_issues[:6]),
+                        suggested_fix=(
+                            "Baseline oficial del banco (Alexis Padilla, 2026-05) "
+                            "para JAVA_OPTIONS: "
+                            "'-XX:InitialRAMPercentage=70.0 "
+                            "-XX:MaxRAMPercentage=70.0 "
+                            "-XX:+UseStringDeduplication -XX:+UseG1GC'. "
+                            "Declarar la env var en los 3 helms (dev/test/prod). "
+                            "Si las pruebas de rendimiento definieron otros valores, "
+                            "documentarlo en MIGRATION_REPORT.md."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.5f",
+                        "Block 7",
+                        "Helm env JAVA_OPTIONS baseline oficial",
                         "pass",
                     )
                 )

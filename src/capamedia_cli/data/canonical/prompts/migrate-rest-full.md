@@ -386,6 +386,16 @@ hpa:
 
 The MCP Fabrics from version `1.0.0-alpha.20260511172128` already generates these values. Earlier scaffolds (or hand edits) must be aligned. Any deviation from the 8 values above is **HIGH** unless `MIGRATION_REPORT.md` documents the post-performance result. See `bank-official-rules.md` Regla 9h.1 for the canonical source.
 
+**Rule 16b — Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05).** Every helm (`dev/test/prod`) must declare the env var `JAVA_OPTIONS` with this exact value (Alexis Padilla / Kyndryl mail, 2026-05):
+
+```yaml
+env:
+  - name: "JAVA_OPTIONS"
+    value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
+```
+
+The 4 flags are referential — they let the JVM adapt heap to the pod's memory limit (Rule 16) and use G1 with string deduplication for the typical migration footprint. Values may change after performance tests; until then, deviating is **HIGH** (checklist Block 7.5f). See `bank-official-rules.md` Regla 9h.2.
+
 **Rule 16c — Helm values must be concrete:** NEVER leave placeholders `<...>` or
 `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` in active Helm lines, and do not add inline
 comments on `name:`/`value:` lines in Helm env vars. If a real environment value

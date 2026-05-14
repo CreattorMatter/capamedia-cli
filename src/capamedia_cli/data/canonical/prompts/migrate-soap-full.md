@@ -211,6 +211,7 @@ Forbidden dependencies:
 - No unresolved placeholders: `<pendiente_validar>`, `TODO`, `TBD`,
   `VALIDAR`, `REVISAR`, or `not_probed`.
 - Helm capacity baseline (Banco Pichincha official, 2026-05): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` + `hpa` baseline. Values are **referential** to let pods start; refined after performance tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required values: `resources.requests` (cpu=`50m`, memory=`350Mi`), `resources.limits` (cpu=`200m`, memory=`500Mi`), `hpa.minReplicas=1`, `hpa.maxReplicas=1`, HPA CPU `averageValue=100m`.
+- Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05, Alexis Padilla / Kyndryl): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Lets the JVM adapt heap to the pod's memory limit and use G1 with string deduplication. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
 
 ## Peer Review Gate
 
