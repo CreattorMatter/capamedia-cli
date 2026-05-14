@@ -514,14 +514,16 @@ def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
     check = _by_id(results, "8.1")
 
     assert check.status == "fail"
-    assert check.severity == "medium"
-    assert "3.5.14" in check.detail
+    # Snyk 2026-05: Spring Boot baseline subio a 4.0.6 con severidad HIGH
+    # (7 CVEs HIGH transitivas en versiones < 4.0.0).
+    assert check.severity == "high"
+    assert "4.0.6" in check.detail
 
 
 def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
+        "plugins { id 'org.springframework.boot' version '4.0.6' }\n",
         encoding="utf-8",
     )
 
@@ -535,7 +537,7 @@ def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
 def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '4.0.6' }\n"
         "dependencies {\n"
         "  def undertowVersion = '2.4.0.RC4'\n"
         "  implementation 'org.springframework.boot:spring-boot-starter-undertow'\n"
@@ -556,7 +558,7 @@ def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
 def test_block_8_accepts_default_embedded_server_without_undertow(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '4.0.6' }\n"
         "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n",
         encoding="utf-8",
     )
@@ -572,7 +574,7 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     build_gradle = root / "build.gradle"
     build_gradle.write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.13' }\n",
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
         encoding="utf-8",
     )
 
@@ -582,7 +584,7 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
     report = run_autofix_loop(root, rerun)
 
     assert report.total_applied == 1
-    assert "version '3.5.14'" in build_gradle.read_text(encoding="utf-8")
+    assert "version '4.0.6'" in build_gradle.read_text(encoding="utf-8")
 
 
 def test_block_14_detects_placeholder_projectkey(tmp_path: Path) -> None:
