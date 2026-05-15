@@ -11,6 +11,7 @@ import typer
 
 from capamedia_cli.commands.review import (
     _autodetect_review_paths,
+    _ensure_fabrics_metadata_from_legacy,
     _find_single_subdir,
     _relocate_generated_reports,
     _resolve_workspace_root,
@@ -206,6 +207,66 @@ def test_run_official_passes_utf8_encoding(tmp_path: Path) -> None:
     assert call_kwargs.get("errors") == "replace", (
         "subprocess.run DEBE recibir errors='replace' como salvavidas extra"
     )
+
+
+def test_review_writes_fabrics_metadata_from_was_legacy_when_missing(tmp_path: Path) -> None:
+    """clone-migrated puede traer legacy+destino sin metadata Fabrics.
+
+    En ese caso review debe reconstruir la metadata minima desde legacy para
+    que validate_hexagonal.py aplique la matriz MCP correcta.
+    """
+    workspace = tmp_path / "wstecnicos0008"
+    project = workspace / "destino" / "tnd-msa-sp-wstecnicos0008"
+    legacy = workspace / "legacy" / "ws-wstecnicos0008-was"
+    project.mkdir(parents=True)
+    web_inf = legacy / "wstecnicos0008-infraestructura" / "src" / "main" / "webapp" / "WEB-INF"
+    wsdl_dir = web_inf / "wsdl"
+    wsdl_dir.mkdir(parents=True)
+    (web_inf / "web.xml").write_text("<web-app><servlet/></web-app>", encoding="utf-8")
+    java_dir = (
+        legacy
+        / "wstecnicos0008-infraestructura"
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "pichincha"
+        / "tecnicos"
+    )
+    java_dir.mkdir(parents=True)
+    (java_dir / "WSTecnicos0008.java").write_text(
+        "package com.pichincha.tecnicos;\npublic class WSTecnicos0008 {}\n",
+        encoding="utf-8",
+    )
+    (wsdl_dir / "WSTecnicos0008Request.wsdl").write_text(
+        '<?xml version="1.0"?>\n'
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">\n'
+        '<portType name="WSTecnicos0008">\n'
+        '<operation name="ConsultarAtributosTransaccion01"/>\n'
+        '<operation name="ConsultarAtributosTransaccion02"/>\n'
+        '</portType>\n'
+        '</definitions>\n',
+        encoding="utf-8",
+    )
+
+    generated, reason = _ensure_fabrics_metadata_from_legacy(
+        workspace,
+        project,
+        legacy,
+        "wstecnicos0008",
+    )
+
+    metadata_path = workspace / ".capamedia" / "fabrics.json"
+    assert generated is True
+    assert "legacy" in reason
+    assert metadata_path.exists()
+    data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert data["source_kind"] == "was"
+    assert data["tecnologia"] == "was"
+    assert data["project_type"] == "soap"
+    assert data["web_framework"] == "mvc"
+    assert data["invoca_bancs"] == "false"
+    assert data["operation_count"] == "2"
 
 
 # ---------------------------------------------------------------------------

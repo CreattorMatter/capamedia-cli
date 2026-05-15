@@ -143,6 +143,13 @@ def _resolve_workspace_root(project_path: Path) -> Path:
     return project_path
 
 
+def _service_name_from_project(project_path: Path) -> str:
+    """Infer the legacy service name from a migrated project folder name."""
+    name = project_path.name.strip().lower()
+    match = re.match(r"^[a-z]{3}-msa-sp-(?P<service>[a-z0-9_-]+)$", name)
+    return match.group("service") if match else name
+
+
 def _auto_generate_reports_from_local_legacy(
     workspace_root: Path,
     legacy_path: Path | None,
@@ -191,6 +198,80 @@ def _auto_generate_reports_from_local_legacy(
     _write_secrets_report(analysis, workspace_root, legacy_path)
 
     return (True, f"generado desde {legacy_path}")
+
+
+def _web_framework_for_analysis(source_kind: str, project_type: str) -> str:
+    if project_type == "soap":
+        return "mvc"
+    if source_kind == "was":
+        return "mvc"
+    return "webflux"
+
+
+def _ensure_fabrics_metadata_from_legacy(
+    workspace_root: Path,
+    project_path: Path,
+    legacy_path: Path | None,
+    service_name: str,
+) -> tuple[bool, str]:
+    """Create minimal Fabrics metadata from local legacy when it is missing.
+
+    `clone-migrated` can bring an already migrated repo plus legacy without the
+    old `.capamedia/fabrics.json`. The official validator still needs that
+    metadata to apply the MCP matrix, so we reconstruct only the deterministic
+    fields from `legacy_analyzer`.
+    """
+    metadata_path = workspace_root / ".capamedia" / "fabrics.json"
+    if metadata_path.exists():
+        return (False, "fabrics.json ya existe")
+    if not legacy_path or not legacy_path.is_dir():
+        return (False, "sin legacy local para inferir metadata Fabrics")
+
+    try:
+        from capamedia_cli.core.legacy_analyzer import analyze_legacy
+    except ImportError as exc:
+        return (False, f"import error: {exc}")
+
+    umps_root = workspace_root / "umps" if (workspace_root / "umps").is_dir() else None
+    try:
+        analysis = analyze_legacy(
+            legacy_path,
+            service_name=service_name,
+            umps_root=umps_root,
+        )
+    except Exception as exc:
+        return (False, f"analyze_legacy fallo: {type(exc).__name__}: {exc}")
+
+    op_count = analysis.wsdl.operation_count if analysis.wsdl else 0
+    project_type = analysis.framework_recommendation or (
+        "soap" if op_count and op_count > 1 else "rest"
+    )
+    source_kind = analysis.source_kind or ""
+    tecnologia = "bus" if source_kind in {"iib", "bus"} else source_kind
+    metadata = {
+        "service": service_name,
+        "status": "ok",
+        "detail": "metadata inferida desde legacy local por capamedia review",
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "project_name": project_path.name,
+        "project_path": str(project_path),
+        "wsdl_file_path": str(analysis.wsdl.path) if analysis.wsdl else "",
+        "tecnologia": tecnologia,
+        "project_type": project_type,
+        "web_framework": _web_framework_for_analysis(source_kind, project_type),
+        "invoca_bancs": str(bool(analysis.has_bancs)).lower(),
+        "operation_count": str(op_count),
+        "source_kind": source_kind,
+        "mcp_source": "legacy-inferred",
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return (True, f"inferida desde {legacy_path}")
 
 
 def _relocate_generated_reports(
@@ -452,6 +533,7 @@ def review(
         workspace_root = _resolve_workspace_root(project_path)
 
     legacy_path = legacy.resolve() if legacy else None
+    service_name = _service_name_from_project(project_path)
 
     console.print(
         Panel.fit(
@@ -472,7 +554,7 @@ def review(
     # los reportes de Block 19 (properties) + secrets no existen. Los
     # generamos on-the-fly desde el legacy local si esta disponible.
     generated, reason = _auto_generate_reports_from_local_legacy(
-        workspace_root, legacy_path, project_path.name,
+        workspace_root, legacy_path, service_name,
     )
     if generated:
         console.print(
@@ -495,7 +577,7 @@ def review(
                 detect_source_kind,
             )
 
-            source_type = detect_source_kind(legacy_path, project_path.name)
+            source_type = detect_source_kind(legacy_path, service_name)
             has_bancs, _ = detect_bancs_connection(legacy_path)
         except Exception:
             pass
@@ -684,6 +766,17 @@ def review(
             "\n[bold cyan]Fase 4[/bold cyan] Validador oficial del banco "
             "(validate_hexagonal.py)"
         )
+        metadata_generated, metadata_reason = _ensure_fabrics_metadata_from_legacy(
+            workspace_root,
+            project_path,
+            legacy_path,
+            service_name,
+        )
+        if metadata_generated:
+            console.print(
+                f"  [dim]Metadata Fabrics inferida para validador oficial: "
+                f"{metadata_reason}[/dim]"
+            )
         official_passed, official_total, official_report = _run_official_validator(
             project_path
         )

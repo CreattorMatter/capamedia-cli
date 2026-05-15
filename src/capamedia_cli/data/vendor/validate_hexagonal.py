@@ -248,20 +248,25 @@ def _count_wsdl_operations(wsdl_path: Path) -> tuple[int, list[str]]:
 
 
 def _detect_framework(root: Path) -> dict[str, bool]:
-    """Scan build files and Java sources to detect WebFlux / MVC / SOAP usage."""
+    """Scan build files and Java sources to detect WebFlux / MVC / SOAP usage.
+
+    Spring WS SOAP runs on the servlet/MVC stack even when the project does not
+    declare spring-boot-starter-web explicitly. Fabrics SOAP projects normally
+    use spring-boot-starter-web-services, @Endpoint and MessageDispatcherServlet.
+    """
     flags = {"webflux": False, "mvc": False, "soap": False}
 
     # ── Regex patterns ─────────────────────────────────────────────────────────
     # pom.xml — match the exact artifactId inside a <dependency> block
     _pom_mvc  = re.compile(r'<artifactId>\s*spring-boot-starter-web\s*</artifactId>')
     _pom_flux = re.compile(r'<artifactId>\s*spring-boot-starter-webflux\s*</artifactId>')
-    _pom_soap = re.compile(r'<artifactId>\s*(?:spring-ws-core|cxf-spring-boot-starter|cxf-rt-frontend-jaxws)\s*</artifactId>')
+    _pom_soap = re.compile(r'<artifactId>\s*(?:spring-boot-starter-web-services|spring-ws-core|cxf-spring-boot-starter|cxf-rt-frontend-jaxws)\s*</artifactId>')
 
     # build.gradle / build.gradle.kts — dependency string literals
     # Covers both:  'group:artifact:version'  and  group: "g", name: "a"
     _gradle_mvc  = re.compile(r'spring-boot-starter-web(?!flux)["\'\s]')
     _gradle_flux = re.compile(r'spring-boot-starter-webflux')
-    _gradle_soap = re.compile(r'(?:spring-ws-core|cxf-spring-boot-starter|cxf-rt-frontend-jaxws)')
+    _gradle_soap = re.compile(r'(?:spring-boot-starter-web-services|spring-ws-core|cxf-spring-boot-starter|cxf-rt-frontend-jaxws)')
 
     # ── pom.xml ────────────────────────────────────────────────────────────────
     for build_file in root.glob("**/pom.xml"):
@@ -272,6 +277,7 @@ def _detect_framework(root: Path) -> dict[str, bool]:
             flags["mvc"] = True
         if _pom_soap.search(content):
             flags["soap"] = True
+            flags["mvc"] = True
 
     # ── build.gradle / build.gradle.kts ───────────────────────────────────────
     for build_file in list(root.glob("**/build.gradle")) + list(root.glob("**/build.gradle.kts")):
@@ -282,14 +288,21 @@ def _detect_framework(root: Path) -> dict[str, bool]:
             flags["mvc"] = True
         if _gradle_soap.search(content):
             flags["soap"] = True
+            flags["mvc"] = True
 
     # ── Java sources — reactive types and SOAP annotations ────────────────────
     for java_file in find_java_files(root):
         content = file_content(java_file)
         if "Mono<" in content or "Flux<" in content or "WebClient" in content:
             flags["webflux"] = True
-        if "@Endpoint" in content or "WebServiceTemplate" in content:
+        if (
+            "@Endpoint" in content
+            or "WebServiceTemplate" in content
+            or "MessageDispatcherServlet" in content
+            or "DefaultWsdl11Definition" in content
+        ):
             flags["soap"] = True
+            flags["mvc"] = True
 
     return flags
 

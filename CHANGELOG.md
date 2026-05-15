@@ -4,6 +4,31 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.24.2] - 2026-05-15
+
+### Fixed - WAS SOAP + Spring WS review false positive
+
+- `validate_hexagonal.py` ahora considera `spring-boot-starter-web-services`,
+  `@Endpoint`, `MessageDispatcherServlet` y `DefaultWsdl11Definition` como
+  senales validas de `SOAP + MVC`. Esto corrige el falso positivo observado en
+  `wstecnicos0008`, donde el proyecto tenia SOAP real pero el validador decia
+  `MVC no detectado`.
+- `capamedia review` ahora reconstruye una metadata Fabrics minima desde el
+  `legacy` local cuando falta `.capamedia/fabrics.json` (caso habitual de
+  `clone-migrated`). Asi el validador oficial puede aplicar la matriz MCP sin
+  depender de metadata efimera generada en el pasado.
+- `review` normaliza el nombre del servicio desde `<namespace>-msa-sp-<svc>`
+  antes de analizar legacy, evitando que el analisis use el artifactId completo
+  como `service_name`.
+
+### Tests
+
+- Agregadas regresiones para:
+  - WAS + WSDL 2 operaciones + Spring WS sin `spring-boot-starter-web` -> debe
+    pasar como `SOAP + MVC`.
+  - `review` sin `fabrics.json` -> genera metadata minima desde legacy WAS.
+- Validacion local: **833 passed**.
+
 ## [0.24.1] - 2026-05-15
 
 ### Added — Hexagonal dependency direction + catalog.name pattern (peer-review wstecnicos0008)

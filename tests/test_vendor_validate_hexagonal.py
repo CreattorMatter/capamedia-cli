@@ -53,6 +53,40 @@ def _write_mvc_build(project: Path) -> None:
     )
 
 
+def _write_spring_ws_build(project: Path) -> None:
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "build.gradle").write_text(
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web-services' }\n",
+        encoding="utf-8",
+    )
+
+
+def _write_spring_ws_endpoint(project: Path) -> None:
+    endpoint = (
+        project
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "pichincha"
+        / "sp"
+        / "infrastructure"
+        / "input"
+        / "adapter"
+        / "soap"
+        / "impl"
+        / "SvcEndpoint.java"
+    )
+    endpoint.parent.mkdir(parents=True, exist_ok=True)
+    endpoint.write_text(
+        "package com.pichincha.sp.infrastructure.input.adapter.soap.impl;\n"
+        "import org.springframework.ws.server.endpoint.annotation.Endpoint;\n"
+        "@Endpoint\n"
+        "class SvcEndpoint {}\n",
+        encoding="utf-8",
+    )
+
+
 def _write_fabrics_metadata(
     workspace: Path,
     *,
@@ -121,6 +155,36 @@ def test_vendor_validator_allows_was_single_op_mvc(tmp_path: Path) -> None:
     assert len(results) == 1
     assert results[0].passed is True
     assert "REST + MVC" in results[0].message
+
+
+def test_vendor_validator_allows_was_multi_op_spring_ws_without_web_starter(tmp_path: Path) -> None:
+    """Spring WS SOAP usa servlet/MVC aunque no declare spring-boot-starter-web.
+
+    Regresion real: wstecnicos0008 declara spring-boot-starter-web-services,
+    tiene @Endpoint y WSDL 2 ops. El validador no debe fallar con
+    "MVC no detectado".
+    """
+    validator = _load_vendor_validator()
+    workspace = tmp_path / "wstecnicos0008"
+    project = workspace / "destino" / "tnd-msa-sp-wstecnicos0008"
+    _write_spring_ws_build(project)
+    _write_spring_ws_endpoint(project)
+    _write_wsdl(
+        project / "src" / "main" / "resources" / "legacy" / "WSTecnicos0008Request.wsdl",
+        operations=2,
+    )
+    _write_fabrics_metadata(
+        workspace,
+        source_kind="was",
+        tecnologia="was",
+        invoca_bancs=False,
+    )
+
+    results = validator.check_wsdl(project)
+
+    assert len(results) == 1
+    assert results[0].passed is True
+    assert "SOAP + MVC" in results[0].message
 
 
 def test_vendor_validator_rejects_bancs_library_for_was(tmp_path: Path) -> None:
