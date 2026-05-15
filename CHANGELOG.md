@@ -4,6 +4,36 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.24.1] - 2026-05-15
+
+### Added — Hexagonal dependency direction + catalog.name pattern (peer-review wstecnicos0008)
+
+Tres checks nuevos detectados en peer-review de `tct-msa-sp-wstecnicos0008` (branch `feature/dev-BTHCCC-5954`):
+
+- **Check 1.7** (HIGH): clases bajo `infrastructure/input/**` no pueden inyectar output ports. Caso real: `SoapResponseHelper.java` (línea 32) inyectando `TransactionMetadataPort` — cortocircuita la application layer. El flujo correcto es `Controller → InputPort → Service → OutputPort → Adapter`. Si un helper de infra/input necesita datos de un output port, los recibe vía parámetro desde el Service.
+
+- **Check 1.3c ampliado** (HIGH): además de detectar `*ConfigOutputPort` por nombre, ahora también detecta cuando un Java en `infrastructure/config/**` (típicamente con `@ConfigurationProperties`) **implementa cualquier `*Port`**. Caso real: `TransactionMetadataProperties` (`infrastructure/config/`) implementaba `TransactionMetadataPort` sin el sufijo `Config` — la heurística vieja no lo atrapaba. Refuerza Regla 9j sin duplicar.
+
+- **Check 7.1c** (HIGH): `metadata.name` en `catalog-info.yaml` debe matchear `^[a-z]{3}-msa-sp-[a-z0-9_-]+$` (componente migrado), no `tpl-middleware` ni `tpl-bus-omnicanal` (proyectos Azure DevOps). Implementa la Regla 9 que ya existía solo en textual ("nombre real del componente, no el proyecto Azure"). Bug real: `name: tpl-middleware` en wstecnicos0008.
+
+### Changed — `hexagonal.md` con matiz infra/input vs infra/output/adapter
+
+- Sección "Dirección de dependencias" ampliada con bloque "Matiz dentro de `infrastructure/`":
+  - `infrastructure/input/**` solo consume **input ports**.
+  - `infrastructure/output/adapter/**` **implementa** output ports.
+  - `infrastructure/config/**` puede referenciar ports para `@Bean` wiring pero NUNCA `implements *Port` (eso es config disfrazada — Check 1.3c).
+- No agrego regla nueva en `bank-official-rules.md`: los principios ya están en Regla 1 (capas) y Regla 9 (catalog); los nuevos checks solo los hacen ejecutables.
+
+### Tests
+
+- **829 passed**, 0 fallos. +15 tests (`tests/test_block_1_hexagonal_direction.py`, `tests/test_block_7_catalog_name.py`).
+
+### Migration notes
+
+- Servicios en producción con `SoapResponseHelper` (u otro helper en `infrastructure/input/`) que inyecte un output port van a fallar Check 1.7 HIGH. Refactor: mover el helper a `application/util/` o que el Service le pase el valor por parámetro.
+- Servicios con `metadata.name: tpl-middleware` van a fallar Check 7.1c HIGH. Fix: cambiar a `<namespace>-msa-sp-<servicio>`.
+- No hay autofix automático para estos casos (requieren refactor semántico).
+
 ## [0.24.0] - 2026-05-15
 
 ### Changed — Spring Boot baseline 4.0.6 (BREAKING, CVE-driven)

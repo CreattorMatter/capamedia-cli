@@ -336,6 +336,24 @@ grep -l "public abstract class.*Port\|public abstract class.*InputPort\|public a
 
 Esperado: **0 archivos**. Abstract classes para puertos es desviación del patron hexagonal. **HIGH**.
 
+### Check 1.3c — Config no es output port (dos heurísticas)
+
+Implementado en `run_block_1`. Origen: Regla 9j de `bank-official-rules.md`. Ampliado (2026-05) tras detectar `TransactionMetadataPort` en `wstecnicos0008` (`feature/dev-BTHCCC-5954`) que era `@ConfigurationProperties` disfrazado de output port sin el sufijo `Config`.
+
+```bash
+# (a) Por nombre — caso obvio
+grep -rl "implements\s*\w*ConfigOutputPort" <PATH>/src/main/java/
+
+# (b) Por implementador en infrastructure/config/ — caso real wstecnicos0008
+for f in $(find <PATH>/src/main/java/com/pichincha/sp/infrastructure/config -name "*.java"); do
+  grep -l "implements\s\+\w\+Port" "$f"
+done
+```
+
+**Veredicto:** cualquier match en alguna de las dos heurísticas → **HIGH**.
+
+**Por qué:** un output port representa una **dependencia externa** (BANCS, repo, queue). Si el "port" lo implementa una clase en `infrastructure/config/` (típicamente con `@ConfigurationProperties`), el "port" en realidad es configuración (valores de `spring.application.name`, env vars, etc.). Eso debe ser `@ConfigurationProperties` o `@Value`, no port.
+
 ### Check 1.4 — UN SOLO output port Bancs [FB-JG]
 
 ```bash
@@ -357,6 +375,29 @@ grep -l "extends.*Port\s" <PATH>/src/main/java/com/pichincha/sp/infrastructure/
 ```
 
 Esperado: **0 archivos** (deben usar `implements` sobre interfaces). **MEDIUM**.
+
+### Check 1.7 — `infrastructure/input/` NO consume output ports
+
+Implementado en `run_block_1`. Origen: peer-review de `wstecnicos0008` branch `feature/dev-BTHCCC-5954` reportó: *"Violación A: infraestructura consumiendo output ports — `SoapResponseHelper.java` inyecta `TransactionMetadataPort`"*.
+
+```bash
+# Detectar inyeccion de output ports en archivos bajo infrastructure/input/
+for f in $(find <PATH>/src/main/java/com/pichincha/sp/infrastructure/input -name "*.java"); do
+  grep -l "application\.\(output\.port\|port\.output\)" "$f"
+done
+```
+
+**Veredicto:** cualquier archivo bajo `infrastructure/input/**` que inyecta (campo `private final` o parámetro constructor) un tipo cuyo nombre vive en `application/output/port/` o `application/port/output/` → **HIGH**.
+
+**Por qué:** el flujo hexagonal correcto es:
+
+```
+Controller (infra/input) → InputPort → Service (application) → OutputPort → Adapter (infra/output/adapter)
+```
+
+Si un helper de `infra/input/` (controllers, soap helpers, mappers de request) **inyecta** un output port, está cortocircuitando la application layer. Lo correcto es que el helper reciba los datos vía parámetro desde el Service.
+
+**Caso especial — port que parece config:** si el "output port" solo expone strings derivados de `spring.application.name` (como `TransactionMetadataPort.recursoPrefix() / componente()`), el bug real es que **no debería ser un port**, sino `@ConfigurationProperties`. Ese caso lo detecta también el **Check 1.3c** ampliado (port implementado por archivo en `infrastructure/config/**`).
 
 ### Check 1.6 — Service Purity: CERO métodos privados en services [FB-JG]
 
@@ -1020,6 +1061,27 @@ grep -E "<owner>|<lifecycle>|<domain>|<system>|swaggerhub\.com|definition:" <PAT
 ```
 
 Cualquier match → **HIGH** (placeholders sin completar).
+
+### Check 7.1c — `metadata.name` es el componente, NO el proyecto Azure [BANCO]
+
+Implementado en `run_block_7`. Origen: Regla 9 de `bank-official-rules.md` (línea: *"nombre real del componente, no el proyecto Azure"*). Bug detectado en `wstecnicos0008` branch `feature/dev-BTHCCC-5954`:
+
+```yaml
+metadata:
+  namespace: tct-middleware
+  name: tpl-middleware        # ✘ tpl-middleware es el PROYECTO Azure
+```
+
+```bash
+grep -E "^\s*name:" <PATH>/catalog-info.yaml | head -1
+```
+
+**Veredicto:**
+- `metadata.name` igual a `tpl-middleware` o `tpl-bus-omnicanal` (proyectos Azure) → **HIGH**.
+- `metadata.name` no matchea `^[a-z]{3}-msa-sp-[a-z0-9_-]+$` → **HIGH**.
+- Matchea (ej. `tnd-msa-sp-wsclientes0011`, `tct-msa-sp-wstecnicos0008`) → ✅ **PASS**.
+
+**Por qué:** el proyecto Azure DevOps `tpl-middleware` contiene **muchos** repos. El componente del catalog Backstage debe identificar al servicio puntual, no al proyecto. La nomenclatura canónica es `<namespace>-msa-sp-<servicio>` (donde `<namespace>` puede ser `tnd`, `tct`, `csg`, `tia`, `tpr`, `tmp` según la tribu).
 
 ### Check 7.2 — `azure-pipelines.yml` alineado [PDF-OFICIAL]
 
