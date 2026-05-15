@@ -1245,7 +1245,20 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
-    # 1.3c - Config/env vars no son puertos de salida
+    # 1.3c - Config/env vars no son puertos de salida.
+    # Detecta el anti-patron con DOS heuristicas complementarias:
+    #
+    # (a) por nombre: archivos `*ConfigOutputPort.java` o clases que
+    #     `implements *ConfigOutputPort`. Cubre el caso obvio.
+    #
+    # (b) por implementador: un Java en `infrastructure/config/**` que
+    #     `implements *Port` (cualquier nombre) — la senal mas fuerte de
+    #     "Config disfrazada de output port" porque @ConfigurationProperties
+    #     vive en infrastructure/config/. Caso real: wstecnicos0008
+    #     (branch feature/dev-BTHCCC-5954) donde
+    #     infrastructure/config/TransactionMetadataProperties.java implementa
+    #     application/output/port/TransactionMetadataPort.java sin el sufijo
+    #     "Config" que (a) requeria.
     config_ports = [
         str(f.relative_to(ctx.migrated_path))
         for pattern in (
@@ -1259,7 +1272,22 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
         for f in src_java.rglob("*.java")
         if re.search(r"implements\s+\w*ConfigOutputPort\b", _read_or_empty(f))
     ]
-    config_offenders = sorted(set(config_ports + config_impls))
+    # (b) Heuristica por ubicacion del implementador
+    infra_config_port_impls: list[str] = []
+    for pattern_glob in (
+        "infrastructure/config/**/*.java",
+        "infrastructure/config/*.java",
+    ):
+        for f in src_java.rglob(pattern_glob):
+            text = _read_or_empty(f)
+            # Solo flaggear si implementa un *Port (no si solo lo usa)
+            impl_match = re.search(r"implements\s+(?P<port>\w+Port)\b", text)
+            if impl_match:
+                port_name = impl_match.group("port")
+                infra_config_port_impls.append(
+                    f"{_relative_display(f, ctx.migrated_path)} implements {port_name}"
+                )
+    config_offenders = sorted(set(config_ports + config_impls + infra_config_port_impls))
     if config_offenders:
         results.append(
             CheckResult(
@@ -1411,6 +1439,76 @@ def run_block_1(ctx: CheckContext) -> list[CheckResult]:
         results.append(CheckResult("1.5", "Block 1", "Application no importa infrastructure", "fail", severity="high", detail=f"{len(bad_imports)} archivo(s) violan la regla"))
     else:
         results.append(CheckResult("1.5", "Block 1", "Application no importa infrastructure", "pass"))
+
+    # 1.7 - infrastructure/input/** NO consume output ports.
+    # Direccion de dependencias hexagonal: solo infrastructure/output/adapter/
+    # IMPLEMENTA output ports. infrastructure/input/ (controllers, helpers,
+    # mappers) debe consumir input ports y recibir datos via parametros desde
+    # la application layer. Si un helper inyecta un *OutputPort, esta
+    # cortocircuitando la application layer (caso: SoapResponseHelper inyectando
+    # TransactionMetadataPort en wstecnicos0008, branch feature/dev-BTHCCC-5954).
+    output_port_names = set()
+    for pattern in (
+        "application/output/port/*.java",
+        "application/port/output/*.java",
+    ):
+        for f in src_java.rglob(pattern):
+            output_port_names.add(f.stem)
+
+    infra_input_violations: list[str] = []
+    if output_port_names:
+        # Pattern: campo `private final XxxPort` o parametro `XxxPort xxxPort`
+        # donde XxxPort es alguno de los detectados en application/output/port.
+        names_pattern = "|".join(re.escape(name) for name in sorted(output_port_names))
+        injection_re = re.compile(
+            rf"\b(?:private\s+final|@\w+\s+)?\s*(?P<port>{names_pattern})\s+\w+\b"
+        )
+        for pattern_glob in (
+            "infrastructure/input/**/*.java",
+            "infrastructure/input/*.java",
+        ):
+            for f in src_java.rglob(pattern_glob):
+                text = _read_or_empty(f)
+                # Filtrar: imports de output port sin uso de instancia tampoco son violacion.
+                # Buscamos referencia REAL en campo o parametro de constructor.
+                if not re.search(r"import\s+.+\.application\.(?:output\.port|port\.output)\.", text):
+                    continue
+                # Buscar el patron de inyeccion dentro de la clase (no en import lines)
+                stripped_text = re.sub(r"^import\s+[^;]+;", "", text, flags=re.MULTILINE)
+                for m in injection_re.finditer(stripped_text):
+                    port_name = m.group("port")
+                    rel = _relative_display(f, ctx.migrated_path)
+                    infra_input_violations.append(f"{rel} inyecta '{port_name}'")
+                    break  # uno por archivo basta
+    if infra_input_violations:
+        results.append(
+            CheckResult(
+                "1.7",
+                "Block 1",
+                "infrastructure/input/ NO consume output ports",
+                "fail",
+                severity="high",
+                detail="; ".join(infra_input_violations[:6]),
+                suggested_fix=(
+                    "El flujo hexagonal correcto es: Controller (infra/input) -> "
+                    "InputPort -> Service (application) -> OutputPort -> Adapter "
+                    "(infra/output/adapter). Si un helper de infra/input necesita "
+                    "datos de un output port, recibirlos via parametro desde el "
+                    "Service. Si el 'port' es en realidad configuracion (solo "
+                    "expone strings de spring.application.name, etc.), reemplazar "
+                    "por @ConfigurationProperties (ver Check 1.3c)."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "1.7",
+                "Block 1",
+                "infrastructure/input/ NO consume output ports",
+                "pass",
+            )
+        )
 
     return results
 
@@ -1791,6 +1889,65 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     ),
                 )
             )
+
+        # 7.1c - metadata.name debe ser el COMPONENTE migrado, no el proyecto Azure.
+        # Regla 9 de bank-official-rules.md: "nombre real del componente, no el
+        # proyecto Azure". Patron: <ns>-msa-sp-<svc> (ej tnd-msa-sp-wsclientes0011,
+        # tct-msa-sp-wstecnicos0008). Bug detectado en wstecnicos0008 branch
+        # feature/dev-BTHCCC-5954: `name: tpl-middleware` (tpl-middleware es el
+        # PROYECTO Azure que contiene varios repos, no el componente).
+        if catalog_name:
+            component_name_re = re.compile(r"^[a-z]{3}-msa-sp-[a-z0-9_-]+$")
+            azure_project_patterns = {"tpl-middleware", "tpl-bus-omnicanal"}
+            if catalog_name in azure_project_patterns:
+                results.append(
+                    CheckResult(
+                        "7.1c",
+                        "Block 7",
+                        "catalog-info metadata.name es el componente, no el proyecto Azure",
+                        "fail",
+                        severity="high",
+                        detail=(
+                            f"metadata.name='{catalog_name}' es el nombre del proyecto "
+                            "Azure DevOps, no del componente. Debe ser "
+                            "<namespace>-msa-sp-<servicio>."
+                        ),
+                        suggested_fix=(
+                            "Cambiar `metadata.name` por `<namespace>-msa-sp-<servicio>` "
+                            "(ej. tnd-msa-sp-wsclientes0011). El nombre del proyecto Azure "
+                            "ya esta en `annotations.dev.azure.com/project-repo`."
+                        ),
+                    )
+                )
+            elif not component_name_re.match(catalog_name):
+                results.append(
+                    CheckResult(
+                        "7.1c",
+                        "Block 7",
+                        "catalog-info metadata.name es el componente, no el proyecto Azure",
+                        "fail",
+                        severity="high",
+                        detail=(
+                            f"metadata.name='{catalog_name}' no matchea el patron "
+                            "<ns>-msa-sp-<svc> requerido por Regla 9 (bank-official-rules.md)."
+                        ),
+                        suggested_fix=(
+                            "Renombrar `metadata.name` al patron canonico "
+                            "`<namespace>-msa-sp-<servicio>` (3 letras de namespace + "
+                            "'-msa-sp-' + servicio en minusculas)."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.1c",
+                        "Block 7",
+                        "catalog-info metadata.name es el componente, no el proyecto Azure",
+                        "pass",
+                        detail=f"metadata.name={catalog_name}",
+                    )
+                )
 
     if pipeline.exists() and catalog.exists():
         pipeline_namespace = _pipeline_kubernetes_namespace(ctx.migrated_path)
