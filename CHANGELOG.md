@@ -4,6 +4,57 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [0.24.0] - 2026-05-15
+
+### Changed — Spring Boot baseline 4.0.6 (BREAKING, CVE-driven)
+
+- **Baseline subido de `3.5.14` a `4.0.6`** (Snyk reports 2026-05, decision del equipo: Jean Pierre Garcia / Alexis Padilla). Resuelve **7 CVEs HIGH transitivas** con un solo bump:
+  - 3 Jackson 3.0.1 (via `logstash-logback-encoder@9.0`).
+  - 4 Netty 4.1.132 (via `spring-boot-starter-webflux`).
+- **Check 8.1 severity MEDIUM → HIGH** — pasa de "outdated" a "CVE-equivalente". Servicios ya migrados en `3.5.14` van a fallar `capamedia check`. Esperado y solicitado por el equipo ("actualizar a TODOS").
+- Template `migrate-rest-full.md` actualizado: plugin `4.0.6`, sin pin explicito de `jackson-*` (BOM gestiona), sin bloque `dependencyManagement` con `io.netty:netty-codec-http:4.1.132.Final` (era el bug).
+
+### Added — Check 8.7 (Netty pin manual prohibido)
+
+- Detecta `dependency 'io.netty:*:VERSION'` dentro de `dependencyManagement { dependencies { ... } }` con tracking de braces (no da falso positivo en comentarios ni `implementation` directa). Severidad **HIGH**.
+- Autofix `fix_remove_netty_pin` elimina los pins. Idempotente. Preserva el resto del archivo.
+- Autofix `fix_spring_boot_plugin_version` **ampliado**: ahora tambien actualiza `spring_boot_version` en `migration-context.json` cuando difiere.
+
+### Added — Block 7 capacity & runtime baseline oficial (mail capacity 2026-05)
+
+- **Check 7.5d** (HIGH): `hpa.minReplicas` y `maxReplicas` = `1` en los 3 helms. Deroga reglas viejas tipo "replicaCount >= 2".
+- **Check 7.5e** (HIGH): `resources.requests/limits` con valores exactos (`50m/350Mi requests; 200m/500Mi limits`).
+- **Check 7.5f** (HIGH): env var `JAVA_OPTIONS` con valor exacto `-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC`. Comparacion por set de tokens (orden de flags irrelevante).
+- Autofixes `fix_helm_capacity_baseline` y `fix_helm_java_options`: reescriben valores que difieren. No inyectan keys faltantes (modificar `env:` sin contexto es propenso a romper el chart).
+- Reglas canonicas nuevas en `bank-official-rules.md`: Regla 9h.1 (capacity) y Regla 9h.2 (JAVA_OPTIONS).
+
+### Added — Block 5 patterns from QA report WSClientes0011 (2026-05)
+
+- **Check 5.5b** (MEDIUM): mensajes de error con `Normalizer.normalize` / `stripAccents` / `replaceAll("\\s+", " ")` aplicados al texto del catalogo. Detecta diferencias de tildes y dobles espacios que QA reporta como FAIL.
+- **Check 5.6.1** (MEDIUM): constante `ERROR_TYPE_FATAL` existe en `CatalogExceptionConstants`. Cierra gap heredado del textual.
+- **Check 5.6.5** (HIGH): `BusinessValidationException` mapeada a `FATAL` / `buildFatalResponse` / `buildBancsErrorResponse` dentro de la ventana del catch → bug. Es validacion recuperable (ERROR), no infra (FATAL).
+- **Check 5.8** (MEDIUM): fechas no informadas en `adapter/bancs/` con valor `01011901` / `LocalDate.MIN` / `LocalDate.of(1901,1,1)`. Convencion BANCS = alto valor `31129999`.
+- Autofix `fix_bve_not_fatal`: reescribe `buildFatalResponse → buildErrorResponse`, `setTipo("FATAL") → "ERROR"`, `ERROR_TYPE_FATAL → ERROR_TYPE_ERROR` dentro de ventana de catch BVE. No toca FATAL en otros catches.
+
+### Added — Block 15 patterns (QA WSClientes0011 ticket BTHCCC-6826, 2026-05)
+
+- **Check 15.2 / 15.3** (HIGH): `error.recurso` y `error.componente` con nombre LEGACY (`WSClientes0011`, `ORQTransferencias0003`, etc.) → bug. Aplica a WAS/BUS/ORQ. Solo se aceptan: nombre del componente migrado (`<ns>-msa-sp-<svc>`), `ApiClient`, `TX<NNNNNN>`.
+- Autofix `fix_legacy_name_in_error_payload`: reescribe el literal cuando coincide con el sufijo del componente migrado. No toca referencias a otros servicios.
+- Regla canonica `bank-official-rules.md` 9j.
+
+### Tests
+
+- **816 passed**, 0 fallos. Test suite crecio de 736 (en `0.23.41`) a 816 (+80 nuevos).
+- Tests fixture actualizados: `3.5.14` → `4.0.6` en `test_checklist_rules.py` y `test_documentacion.py`.
+
+### Migration notes
+
+- Servicios ya en produccion con Spring Boot `3.5.14`: van a fallar Check 8.1 HIGH en su proximo `capamedia check`. Correr `capamedia ai doublecheck` para autofix:
+  - Actualiza plugin en `build.gradle` a `4.0.6`.
+  - Actualiza `spring_boot_version` en `migration-context.json`.
+  - Elimina pins manuales de `io.netty:*` del `dependencyManagement`.
+- Una vez aplicado el autofix, validar manualmente que el codigo compila con SB 4 (puede haber breaking API changes Spring Boot 3 → 4 que requieren ajustes manuales en el codigo del servicio).
+
 ## [0.23.30] - 2026-04-29
 
 ### Added - Slash command `/edge-cases`
