@@ -620,9 +620,10 @@ def _build_batch_migrate_prompt(
         - Verifica Gradle seguridad: no dejes spring-boot-starter-undertow,
           io.undertow:* ni undertowVersion; usar servidor embebido default
           Tomcat para MVC/Spring WS o Netty para WebFlux.
-        - Verifica que metadata.namespace de catalog-info.yaml sea
-          <prefijo>-middleware segun metadata.name (csg-msa-sp-* ->
-          csg-middleware) y que KUBERNETES_NAMESPACE coincida.
+        - Verifica que metadata.name de catalog-info.yaml sea tpl-middleware.
+          metadata.namespace debe ser <prefijo>-middleware segun el componente
+          migrado (spring.application.name o carpeta; csg-msa-sp-* ->
+          csg-middleware) y KUBERNETES_NAMESPACE debe coincidir.
         - Si es WAS con JPA/Hikari, connection-test-query depende del motor:
           SQL Server=SELECT 1; Oracle=SELECT 1 from dual.
         - Verifica Helm: no dejes placeholders <...> ni marcadores

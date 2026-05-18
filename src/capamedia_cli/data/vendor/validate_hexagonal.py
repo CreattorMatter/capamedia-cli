@@ -1291,7 +1291,7 @@ def _expected_catalog_metadata(root: Path) -> dict[str, str]:
     prefix = component.split("-", 1)[0] if "-" in component else component[:3]
     return {
         "namespace": f"{prefix}-middleware",
-        "name": component,
+        "name": "tpl-middleware",
     }
 
 

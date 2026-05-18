@@ -4,6 +4,52 @@ Todos los cambios notables en `capamedia-cli` estan documentados aqui.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning [SemVer](https://semver.org/lang/es/).
 
+## [Unreleased]
+
+## [0.24.3] - 2026-05-18
+
+### Added - Configuracion de PAT validada
+
+- Nuevo comando top-level `capamedia pat <PERSONAL_ACCESS_TOKEN>` para usar el
+  mismo PAT en Azure Artifacts y Azure DevOps.
+- El comando prueba el PAT contra Azure DevOps y Azure Artifacts antes de
+  persistir variables o registrar Fabrics. Si falla, informa el motivo y no
+  guarda el token.
+- `auth configure-user` persiste credenciales del usuario y entradas de PATH
+  sin imprimir secretos.
+
+### Added - Discovery desde WSDL/XSD
+
+- `discovery` ahora extrae casos de borde/desborde desde WSDL/XSD (`length`,
+  `minLength`, `maxLength`, `pattern`, `enumeration`, `totalDigits`,
+  `fractionDigits`, `minInclusive`, `maxInclusive`) y los expone en el reporte.
+
+### Fixed - Helm JAVA_OPTIONS sin caracteres invisibles
+
+- Check y autofix detectan y reescriben `JAVA_OPTIONS` con caracteres
+  invisibles/no ASCII, evitando fallos de deploy en OpenShift por espacios o
+  separadores corruptos.
+
+### Changed - catalog-info metadata.name vuelve a tpl-middleware
+
+- `Check 7.1c` vuelve a exigir `metadata.name: tpl-middleware` en
+  `catalog-info.yaml`.
+- `metadata.namespace` ya no se deriva de `metadata.name`; se deriva del
+  componente migrado (`spring.application.name` o nombre de carpeta/repo
+  `<namespace>-msa-sp-<svc>`).
+- Los checks/autofixes de `error.recurso` y `error.componente` usan
+  `spring.application.name` o la carpeta del componente, no
+  `catalog-info.metadata.name`.
+
+### Changed - Spring Boot baseline vuelve a 3.5.14
+
+- `SPRING_BOOT_BASELINE_VERSION` vuelve a `3.5.14`.
+- `Check 8.1` y el autofix `fix_spring_boot_plugin_version` ahora elevan
+  versiones menores a `3.5.14`, no a `4.0.6`.
+- Prompts y reglas canonicas dejan de instruir Spring Boot 4.x como baseline
+  general; Spring Boot 4.x queda fuera del baseline salvo aprobacion explicita
+  del banco para un servicio puntual.
+
 ## [0.24.2] - 2026-05-15
 
 ### Fixed - WAS SOAP + Spring WS review false positive
@@ -62,6 +108,9 @@ Tres checks nuevos detectados en peer-review de `tct-msa-sp-wstecnicos0008` (bra
 ## [0.24.0] - 2026-05-15
 
 ### Changed — Spring Boot baseline 4.0.6 (BREAKING, CVE-driven)
+
+> Nota vigente: esta decision fue revertida posteriormente. El baseline actual
+> vuelve a ser Spring Boot `3.5.14`; ver seccion `[Unreleased]`.
 
 - **Baseline subido de `3.5.14` a `4.0.6`** (Snyk reports 2026-05, decision del equipo: Jean Pierre Garcia / Alexis Padilla). Resuelve **7 CVEs HIGH transitivas** con un solo bump:
   - 3 Jackson 3.0.1 (via `logstash-logback-encoder@9.0`).

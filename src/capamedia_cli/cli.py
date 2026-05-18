@@ -4,6 +4,7 @@ Comandos disponibles:
   capamedia install        - instala toolchain (Java, Node, Git, etc.) via winget
   capamedia check-install  - verifica que todo el toolchain este OK
   capamedia auth           - bootstrap de credenciales para Fabrics/Azure/Codex
+  capamedia pat            - configura un PAT unico para Azure Artifacts + Azure DevOps
   capamedia init           - inicializa un proyecto con scaffolding para el harness elegido
   capamedia fabrics        - gestiona el MCP Fabrics (setup y generate)
   capamedia ai migrate     - migra con un engine AI headless (Codex/Claude)
@@ -112,6 +113,7 @@ app.command("version")(version_cmd.version_command)
 app.command("status")(status.status_command)
 app.command("check-install")(check_install.check_install)
 app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
+app.command("pat")(auth.pat)
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("clone-migrated")(clone.clone_migrated_service)

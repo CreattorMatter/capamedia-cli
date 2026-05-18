@@ -313,7 +313,7 @@ proyecto leidas por los interceptors de Optimus:
 ```yaml
 spring:
   application:
-    name: tnd-msa-sp-<service>        # literal, matchea metadata.name del catalog
+    name: tnd-msa-sp-<service>        # literal, nombre del componente migrado
   header:
     channel: digital                  # literal, siempre "digital"
     medium: web                       # literal, siempre "web"
@@ -432,22 +432,23 @@ implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'
 
 ---
 
-## Regla 8.5 - Spring Boot baseline + Jackson/Netty sin pins manuales (CVE-driven)
+## Regla 8.5 - Spring Boot baseline + Jackson/Netty sin pins manuales
 
 **Fuente:** Snyk reports 2026-05 sobre servicios 0076, 0090, 0091 + orquestador
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla). 10 CVEs HIGH
 activas: 3 Jackson 3.0.1 transitivas, 4 Netty 4.1.132 transitivas, 3 Undertow.
 
-**Decision del equipo:** subir baseline a **Spring Boot `4.0.6`** (Jean Pierre:
-"actualizar a TODOS desde el principio con springboot 4.0.6"). Spring Boot 4
-BOM trae Jackson 3.1.x y Netty mas nuevo que parchan las 7 CVEs transitivas
-con un solo bump. Undertow se sigue bloqueando aparte (Regla 8 + Check 8.2).
+**Decision vigente del equipo:** usar **Spring Boot `3.5.14`** como baseline
+aprobado para servicios OLA. Spring Boot 4.x NO es baseline general por
+compatibilidad con arquetipos/librerias actuales del banco. Undertow se sigue
+bloqueando aparte (Regla 8 + Check 8.2) y los pins manuales de Netty/Jackson
+siguen prohibidos porque se quedan atras al proximo CVE.
 
 ### Baseline oficial
 
 ```gradle
 plugins {
-    id 'org.springframework.boot' version '4.0.6'
+    id 'org.springframework.boot' version '3.5.14'
 }
 ```
 
@@ -462,9 +463,8 @@ fuente unica.
   implementation 'com.fasterxml.jackson.core:jackson-core:2.21.2'
   implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml:2.21.2'
   ```
-  Spring Boot 4 BOM los gestiona en `3.1.x`. Pinear explicito es lo que llevo
-  a Snyk 2026-05 (3 CVEs HIGH en Jackson 3.0.1 transitiva del logger porque
-  el pin del template no se actualizo). **Dejar que el BOM mande.**
+  Pinear explicito es lo que llevo a drift en Snyk 2026-05: el pin del
+  template no se actualizo. **Dejar que el BOM mande.**
 
 - **NUNCA agregar `dependency 'io.netty:*:VERSION'` en `dependencyManagement`**
   "para parchar un CVE":
@@ -479,20 +479,20 @@ fuente unica.
   ```
   Snyk 2026-05 encontro 4 CVEs HIGH en `4.1.132.Final` — la misma version
   que el scaffold viejo pinneaba para parchar un CVE anterior. **El pin se
-  transformo en el bug.** Spring Boot 4 BOM gestiona Netty centralmente.
+  transformo en el bug.**
 
 - **NUNCA `replicaCount: 2` en helm** (regla derogada — ver Regla 9h.1).
 
 ### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
 
-- 8.1: plugin `org.springframework.boot` con version < `4.0.6` → HIGH.
+- 8.1: plugin `org.springframework.boot` con version < `3.5.14` → HIGH.
 - 8.2: cualquier dependencia `undertow` activa → HIGH.
 - 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH.
 
 ### Autofix
 
 `fix_spring_boot_version` (clave `"8.1"`):
-1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'4.0.6'`
+1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'3.5.14'`
    en `build.gradle` y `build.gradle.kts`.
 2. Actualiza `spring_boot_version` en `migration-context.json` si difiere.
 
@@ -505,8 +505,8 @@ de bloques `dependencyManagement { dependencies { ... } }`. Idempotente.
 
 **MUST**: archivo `catalog-info.yaml` en la raiz del proyecto con:
 
-- `metadata.namespace: <prefijo>-middleware` (derivado del nombre del componente, por ejemplo `tnd-middleware`)
-- `metadata.name: <namespace>-msa-sp-<servicio>` (nombre real del componente, no el proyecto Azure)
+- `metadata.namespace: <prefijo>-middleware` (derivado del componente migrado, por ejemplo `tnd-middleware`)
+- `metadata.name: tpl-middleware` (literal fijo del catalogo Backstage)
 - `metadata.description`: texto real del servicio (NO `"comming soon"`)
 - `metadata.annotations`:
   - `dev.azure.com/project-repo: <proyecto-azure>/<nombre-repo>` (matchea links[0])
@@ -523,8 +523,8 @@ de bloques `dependencyManagement { dependencies { ... } }`. Idempotente.
 apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
-  namespace: tnd-middleware                           # derivado de metadata.name
-  name: tnd-msa-sp-<svc>                              # componente real
+  namespace: tnd-middleware                           # derivado del componente migrado
+  name: tpl-middleware                                # literal fijo
   description: Consulta de contacto transaccional BANCS   # ✔ real (no "comming soon")
   annotations:
     dev.azure.com/project-repo: tpl-middleware/<namespace>-msa-sp-<svc>    # ✔ matches links[0]
@@ -857,6 +857,11 @@ env:
     value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
 ```
 
+**MUST adicional:** el `value:` debe ser ASCII puro. Separar flags con espacio
+normal `U+0020`; no usar espacios no separables (`U+00A0`) ni otros caracteres
+invisibles copiados desde texto enriquecido, porque OpenShift/Java no los
+separa como argumentos JVM.
+
 **Por que esos flags:**
 - `-XX:InitialRAMPercentage=70.0` y `-XX:MaxRAMPercentage=70.0`: el heap de
   la JVM ocupa 70% del memory limit del pod, dejando margen para metaspace
@@ -875,7 +880,8 @@ env:
 
 **Validacion (Block 7 del checklist, HIGH):**
 - 7.5f: la env var `JAVA_OPTIONS` no esta declarada en algun helm, o su
-  `value:` difiere del baseline oficial.
+  `value:` difiere del baseline oficial, o contiene caracteres no ASCII /
+  invisibles.
 
 El autofix `fix_helm_java_options` reemplaza el `value:` si la env var
 existe y difiere. **No la inyecta si falta** (modificar la lista `env:` sin
@@ -914,8 +920,8 @@ hallazgo de 2026-05 sobre `WSClientes0011`).
 unico, no varia por source type.
 
 **MUST**: el response del microservicio migrado debe poner el **nombre del
-componente MIGRADO** (`spring.application.name` = `catalog-info.yaml`
-`metadata.name` = `<namespace>-msa-sp-<svc>`) en estos dos campos. NUNCA el
+componente MIGRADO** (`spring.application.name` = `<namespace>-msa-sp-<svc>`)
+en estos dos campos. NUNCA el `metadata.name` fijo `tpl-middleware` ni el
 nombre legacy IIB/WAS/ORQ corto (`WSClientes0011`, `ORQTransferencias0003`,
 `UMPClientes0002`, etc.).
 
@@ -943,7 +949,7 @@ constante centralizada, en lugar de literal:
 ```java
 @UtilityClass
 public class CatalogExceptionConstants {
-    // Valor canonico — alinea con catalog-info.yaml metadata.name
+    // Valor canonico — alinea con spring.application.name
     public static final String WS_COMPONENTE = "csg-msa-sp-wsclientes0011";
     public static final String WS_RECURSO_PREFIX = WS_COMPONENTE + "/";
 }

@@ -649,7 +649,7 @@ Cualquier match → **MEDIUM**. Las constantes deben autodocumentarse:
 
 **Referencia:** `CatalogExceptionConstants` debe usar el patrón `CONTEXT_NOUN` con códigos del catálogo oficial `sqb-cfg-errores-errors/errores.xml`: `WS_RECURSO`, `SUCCESS_CODE`, `ERROR_CODE_SERVICE` (9999), `ERROR_CODE_BANCS_INVOKE` (9929), `ERROR_CODE_BANCS_PARSE` (9922), `ERROR_CODE_HEADER` (9927).
 
-> ⚠️ **error.recurso y error.componente — nombre del componente MIGRADO, NUNCA el legacy.** Ambos campos deben referenciar el `spring.application.name` (= `catalog-info.yaml` `metadata.name` = `<namespace>-msa-sp-<svc>`), no el nombre legacy IIB/WAS/ORQ (`WSClientes0011`, `ORQTransferencias0003`, etc.). QA del banco (ticket BTHCCC-6826, mayo 2026) reporta como HIGH cualquier response con el nombre legacy. Validado por Block 15.2 y 15.3.
+> ⚠️ **error.recurso y error.componente — nombre del componente MIGRADO, NUNCA el legacy.** Ambos campos deben referenciar el `spring.application.name` (`<namespace>-msa-sp-<svc>`), no el `metadata.name` fijo `tpl-middleware` ni el nombre legacy IIB/WAS/ORQ (`WSClientes0011`, `ORQTransferencias0003`, etc.). QA del banco (ticket BTHCCC-6826, mayo 2026) reporta como HIGH cualquier response con el nombre legacy. Validado por Block 15.2 y 15.3.
 
 ### Check 3.4 — `postProcessWsdl.groovy` sin decapitalize activo [COMMIT-bf913b9] (solo SOAP)
 
@@ -1044,7 +1044,8 @@ Si el match es en un puerto de application → siempre **HIGH**.
 
 Verificar:
 - `spec.owner: jgarcia@pichincha.com` (NO `<owner>`)
-- `metadata.namespace` debe derivar del prefijo de `metadata.name`: si el micro es `csg-msa-sp-wsreglas0010`, el namespace esperado es `csg-middleware`; si es `tnd-msa-sp-*`, `tnd-middleware`.
+- `metadata.name` debe ser literalmente `tpl-middleware`.
+- `metadata.namespace` debe derivar del prefijo del componente migrado (`spring.application.name` o nombre del repo/carpeta): si el micro es `csg-msa-sp-wsreglas0010`, el namespace esperado es `csg-middleware`; si es `tnd-msa-sp-*`, `tnd-middleware`.
 - `spec.lifecycle: test` (NO `<lifecycle>`)
 - `spec.system: ""` (vacío)
 - `spec.domain: ""` (vacío)
@@ -1062,14 +1063,14 @@ grep -E "<owner>|<lifecycle>|<domain>|<system>|swaggerhub\.com|definition:" <PAT
 
 Cualquier match → **HIGH** (placeholders sin completar).
 
-### Check 7.1c — `metadata.name` es el componente, NO el proyecto Azure [BANCO]
+### Check 7.1c — `metadata.name` fijo `tpl-middleware` [BANCO]
 
-Implementado en `run_block_7`. Origen: Regla 9 de `bank-official-rules.md` (línea: *"nombre real del componente, no el proyecto Azure"*). Bug detectado en `wstecnicos0008` branch `feature/dev-BTHCCC-5954`:
+Implementado en `run_block_7`. Origen: validador oficial del banco para `catalog-info.yaml`.
 
 ```yaml
 metadata:
   namespace: tct-middleware
-  name: tpl-middleware        # ✘ tpl-middleware es el PROYECTO Azure
+  name: tpl-middleware        # correcto: literal fijo
 ```
 
 ```bash
@@ -1077,11 +1078,10 @@ grep -E "^\s*name:" <PATH>/catalog-info.yaml | head -1
 ```
 
 **Veredicto:**
-- `metadata.name` igual a `tpl-middleware` o `tpl-bus-omnicanal` (proyectos Azure) → **HIGH**.
-- `metadata.name` no matchea `^[a-z]{3}-msa-sp-[a-z0-9_-]+$` → **HIGH**.
-- Matchea (ej. `tnd-msa-sp-wsclientes0011`, `tct-msa-sp-wstecnicos0008`) → ✅ **PASS**.
+- `metadata.name: tpl-middleware` → ✅ **PASS**.
+- Cualquier otro valor, incluso `<namespace>-msa-sp-<servicio>` o `tpl-bus-omnicanal` → **HIGH**.
 
-**Por qué:** el proyecto Azure DevOps `tpl-middleware` contiene **muchos** repos. El componente del catalog Backstage debe identificar al servicio puntual, no al proyecto. La nomenclatura canónica es `<namespace>-msa-sp-<servicio>` (donde `<namespace>` puede ser `tnd`, `tct`, `csg`, `tia`, `tpr`, `tmp` según la tribu).
+**Separacion de conceptos:** el `metadata.name` del catalogo queda fijo en `tpl-middleware`. El componente real sigue siendo `<namespace>-msa-sp-<servicio>` y debe vivir en `spring.application.name`, nombre del repo/carpeta, `annotations.dev.azure.com/project-repo` y `links[]`.
 
 ### Check 7.2 — `azure-pipelines.yml` alineado [PDF-OFICIAL]
 
@@ -1223,9 +1223,12 @@ done
   value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
 ```
 
+El valor debe ser ASCII puro: separar flags con espacio normal `U+0020`. No usar `U+00A0` ni caracteres invisibles copiados desde texto enriquecido; OpenShift/Java no los separa como argumentos JVM.
+
 **Veredicto:**
 - La env var `JAVA_OPTIONS` no declarada en algun helm → **HIGH**.
 - `value:` difiere (orden de flags es irrelevante; el conjunto debe matchear exacto) → **HIGH**.
+- `value:` contiene caracteres no ASCII/invisibles en los separadores → **HIGH**.
 - Los 3 helms con el valor canonico → ✅ **PASS**.
 
 **Por que el baseline:**
@@ -1292,16 +1295,16 @@ Cualquier valor numérico debe ser trazable al legacy (Section 15 del ANALYSIS) 
 grep -E "springframework.boot.*version|logstash-logback-encoder|lib-bnc-api-client|peer-review" <PATH>/build.gradle
 ```
 
-**Baseline oficial (Snyk 2026-05 → Spring Boot 4.0.6):**
-- **Spring Boot: `4.0.6`** (decidido por Jean Pierre Garcia / Alexis Padilla tras Snyk reports 2026-05: 7 CVEs HIGH transitivas — 3 Jackson 3.0.1 via `logstash-logback-encoder@9.0`, 4 Netty 4.1.132 via WebFlux. SB 4.0.6 BOM trae Jackson 3.1.x + Netty mas nuevo).
-- **Jackson:** NO pinear `jackson-core`, `jackson-databind`, `jackson-dataformat-xml`. Spring Boot 4 BOM los gestiona. Pinear explicito causa drift al proximo CVE.
-- **Netty:** NO pinear `io.netty:*` en `dependencyManagement`. SB 4 BOM lo gestiona. El pin viejo `4.1.132.Final` es ahora el bug (4 CVEs HIGH). Validado por Check 8.7.
-- **logstash-logback-encoder:** `9.0` (la Jackson 3.x transitiva queda alineada via BOM SB 4).
+**Baseline oficial:**
+- **Spring Boot: `3.5.14`** (baseline vigente aprobado para servicios OLA; Spring Boot 4.x no es baseline general por compatibilidad con arquetipos/librerias actuales del banco).
+- **Jackson:** NO pinear `jackson-core`, `jackson-databind`, `jackson-dataformat-xml`. Pinear explicito causa drift al proximo CVE.
+- **Netty:** NO pinear `io.netty:*` en `dependencyManagement`. El pin viejo `4.1.132.Final` es ahora el bug (4 CVEs HIGH). Validado por Check 8.7.
+- **logstash-logback-encoder:** `9.0`.
 - **lib-bnc-api-client:** `com.pichincha.bnc:lib-bnc-api-client:1.1.0` estable.
 - **Peer Review plugin:** `1.1.0`.
 
 **Veredicto:**
-- Spring Boot < `4.0.6` → ❌ **HIGH** (CVE-equivalente, no solo "outdated"). `capamedia checklist` autofixea el literal del plugin y `migration-context.json` simultaneamente.
+- Spring Boot < `3.5.14` → ❌ **HIGH**. `capamedia checklist` autofixea el literal del plugin y `migration-context.json` simultaneamente.
 - Pin explicito de `jackson-*` con version literal en `build.gradle` → ❌ **HIGH** (mismo principio que Netty: se queda atras al proximo CVE).
 
 ### Check 8.2 — Gradle seguridad: Undertow eliminado
@@ -1385,7 +1388,7 @@ grep -nE "dependency\s+['\"]io\.netty:" <PATH>/build.gradle
 # (filtrar comentarios)
 ```
 
-**Veredicto:** cualquier match dentro de un bloque `dependencyManagement { dependencies { ... } }` → **HIGH**. Sacar el pin: Spring Boot 4 BOM gestiona Netty centralmente y la proxima version del BOM ya incluye los parches.
+**Veredicto:** cualquier match dentro de un bloque `dependencyManagement { dependencies { ... } }` → **HIGH**. Sacar el pin: los pins manuales se quedan atras al proximo CVE.
 
 **Por que es CVE-driven:** pinear una version especifica de una libreria de seguridad (Netty, Jackson) garantiza que **te vas a quedar atras al proximo CVE**. La unica forma sostenible es delegar al BOM que se actualiza con cada bump de Spring Boot. Validado por Snyk 2026-05.
 
@@ -1857,7 +1860,7 @@ grep -rnE "setRecurso\(\s*[\"']" <PATH>/src/main/java/ | head -20
 ```
 
 **Veredicto:**
-- Valor empieza con el `spring.application.name` del componente migrado (= `catalog-info.yaml` `metadata.name` = `<namespace>-msa-sp-<svc>`) y contiene `/` → ✅ **PASS**.
+- Valor empieza con el `spring.application.name` del componente migrado (`<namespace>-msa-sp-<svc>`) y contiene `/` → ✅ **PASS**.
 - Valor empieza con un nombre legacy `(WS|ORQ|UMP)[A-Za-z]*\d{3,}` (ej. `WSClientes0011/Op`, `ORQTransferencias0003/Op`, `UMPClientes0002/Op`) → ❌ **HIGH**. QA del banco reporta este caso como bug bloqueante (ticket BTHCCC-6826, mayo 2026): el response debe llevar el nombre del componente migrado, no el legacy.
 - Valor sin `/` → **MEDIUM** (formato inválido pero no leakeo legacy).
 

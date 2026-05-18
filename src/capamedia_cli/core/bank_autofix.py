@@ -15,6 +15,7 @@ Se reporta como HIGH con hint especifico via `core/self_correction.py`.
 
 from __future__ import annotations
 
+from collections import Counter
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -534,7 +535,7 @@ CATALOG_INFO_TEMPLATE = """apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   namespace: {catalog_namespace}
-  name: {repo_name}
+  name: tpl-middleware
   description: {description}
   annotations:
     dev.azure.com/project-repo: tpl-middleware/{repo_name}
@@ -617,6 +618,27 @@ def _infer_repo_name(project_root: Path) -> str:
         return name
     # fallback
     return name
+
+
+def _read_spring_application_name(project_root: Path) -> str | None:
+    for rel in (
+        Path("src/main/resources/application.yml"),
+        Path("src/main/resources/application.yaml"),
+    ):
+        yml = project_root / rel
+        if not yml.exists():
+            continue
+        try:
+            text = yml.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = re.search(
+            r"(?ms)^\s*spring\s*:\s*.*?^\s*application\s*:\s*.*?^\s*name\s*:\s*['\"]?([^'\"\s#]+)",
+            text,
+        )
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def _catalog_namespace_from_repo(repo_name: str) -> str:
@@ -709,7 +731,7 @@ def fix_catalog_info_scaffold(
         result.notes = "Revisar manualmente: " + ", ".join(manual_notes)
     result.changes.append(
         f"{target.relative_to(project_root)}: generado con "
-        f"namespace={catalog_namespace}, name={repo_name}, lifecycle=test, "
+        f"namespace={catalog_namespace}, name=tpl-middleware, lifecycle=test, "
         f"dependsOn={detected_libs or '[]'}"
     )
     return result
@@ -1089,40 +1111,34 @@ _LEGACY_NAME_RE_FOR_FIX = re.compile(
 )
 
 
-def _read_catalog_metadata_name(project_root: Path) -> str | None:
-    """Read metadata.name from catalog-info.yaml. Returns None if missing."""
-    catalog = project_root / "catalog-info.yaml"
-    if not catalog.exists():
-        return None
-    try:
-        text = catalog.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    match = re.search(
-        r"(?im)^\s*name\s*:\s*['\"]?([a-z]{3}-msa-sp-[a-z0-9_-]+)['\"]?\s*$",
-        text,
-    )
-    return match.group(1).strip() if match else None
+def _read_migrated_component_name(project_root: Path) -> str | None:
+    """Read the migrated component name from application.yml or repo folder."""
+    app_name = _read_spring_application_name(project_root)
+    if app_name and re.match(r"^[a-z]{3}-msa-sp-", app_name.lower()):
+        return app_name
+    if re.match(r"^[a-z]{3}-msa-sp-", project_root.name.lower()):
+        return project_root.name
+    return None
 
 
 def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
     """Reemplaza `setRecurso("WSClientesNNNN/Op")` y `setComponente("WSClientesNNNN")`
-    por el componente migrado leido de `catalog-info.yaml`.
+    por el componente migrado.
 
     Solo aplica el fix si:
-    - catalog-info.yaml expone `metadata.name` en formato `<ns>-msa-sp-<svc>`.
+    - `spring.application.name` o la carpeta exponen `<ns>-msa-sp-<svc>`.
     - El legacy hallado (case-insensitive) coincide con el sufijo del migrado.
       Ej: `WSClientes0011` en setRecurso, migrado `tnd-msa-sp-wsclientes0011`
       -> match (los digitos+stem coinciden). Si el legacy no matchea con el
       migrado, no reemplaza (puede ser un upstream legitimo en logs).
     """
     result = BankAutofixResult(rule="9j", applied=False)
-    catalog_name = _read_catalog_metadata_name(project_root)
-    if not catalog_name:
-        result.notes = "catalog-info.yaml sin metadata.name <ns>-msa-sp-<svc>"
+    component_name = _read_migrated_component_name(project_root)
+    if not component_name:
+        result.notes = "sin spring.application.name/carpeta <ns>-msa-sp-<svc>"
         return result
 
-    migrated_short = catalog_name.rsplit("-msa-sp-", 1)[-1].lower()
+    migrated_short = component_name.rsplit("-msa-sp-", 1)[-1].lower()
 
     java_files: list[Path] = []
     for java in project_root.rglob("*.java"):
@@ -1148,7 +1164,7 @@ def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
             # contra el legacy normalizado (ej. WSClientes0011 -> wsclientes0011).
             if legacy.lower() != migrated_short:
                 return match.group(0)  # legacy distinto: no es bug, no tocar
-            new_value = f'"{catalog_name}{tail}"'
+            new_value = f'"{component_name}{tail}"'
             return f"{setter}({new_value}"
 
         new_text = _LEGACY_NAME_RE_FOR_FIX.sub(_replace, text)
@@ -1156,7 +1172,7 @@ def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
             java.write_text(new_text, encoding="utf-8")
             modified_files.append(java)
             result.changes.append(
-                f"{java.relative_to(project_root)}: nombre legacy reemplazado por '{catalog_name}'"
+                f"{java.relative_to(project_root)}: nombre legacy reemplazado por '{component_name}'"
             )
 
     if modified_files:
@@ -1266,6 +1282,14 @@ HELM_JAVA_OPTIONS_BASELINE_FIX: str = (
 )
 
 
+def _java_options_token_counter(value: str) -> Counter[str]:
+    return Counter(part for part in value.split(" ") if part)
+
+
+def _java_options_has_invalid_chars(value: str) -> bool:
+    return any(ord(ch) > 0x7E or (ch.isspace() and ch != " ") for ch in value)
+
+
 def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
     """Si la env var JAVA_OPTIONS ya existe en helm/<env>.yml con un valor
     distinto al baseline oficial, lo reescribe. NO inyecta la env var si
@@ -1288,7 +1312,7 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
         result.notes = "helm/ vacio"
         return result
 
-    expected_tokens = set(HELM_JAVA_OPTIONS_BASELINE_FIX.split())
+    expected_tokens = _java_options_token_counter(HELM_JAVA_OPTIONS_BASELINE_FIX)
     modified_files: list[Path] = []
     for f in helm_files:
         try:
@@ -1318,8 +1342,11 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
                 )
                 if m:
                     actual_value = m.group("value").strip()
-                    actual_tokens = set(actual_value.split())
-                    if actual_tokens != expected_tokens:
+                    actual_tokens = _java_options_token_counter(actual_value)
+                    if (
+                        actual_tokens != expected_tokens
+                        or _java_options_has_invalid_chars(actual_value)
+                    ):
                         comment = m.group("comment") or ""
                         comment_part = (
                             f" {comment}" if comment else ""
@@ -1358,8 +1385,8 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
 
 # ---------------------------------------------------------------------------
 # Regla 8.7 / Snyk 2026-05 — Eliminar pins manuales de io.netty:* del bloque
-# `dependencyManagement { dependencies { ... } }`. Spring Boot 4 BOM gestiona
-# Netty centralmente; pins manuales se quedan atras al proximo CVE (era
+# `dependencyManagement { dependencies { ... } }`. Los pins manuales se quedan
+# atras al proximo CVE (era
 # exactamente el bug del template viejo con netty-codec-http:4.1.132.Final).
 # ---------------------------------------------------------------------------
 

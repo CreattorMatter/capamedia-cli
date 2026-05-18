@@ -104,7 +104,7 @@ nombre legacy en estos campos. Checklist Block 15.2 y 15.3 lo bloquean en CI.
 | Field | Rule |
 |---|---|
 | `recurso` | `<spring.application.name>/<MÉTODO>` — e.g. `csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion`. **NEVER** `WSClientes0011/...`, `ORQTransferencias0003/...`, or any legacy short name. |
-| `componente` | One of: (a) `spring.application.name` (= `<namespace>-msa-sp-<svc>` = `catalog-info.yaml` `metadata.name`) for errors internal to the migrated service and successful responses; (b) `ApiClient` (or the literal library name) when the error was propagated from an internal library; (c) `TX<NNNNNN>` (6 digits, prefix `TX`) for business errors propagated from the Core Adapter. **NEVER** the legacy short name. |
+| `componente` | One of: (a) `spring.application.name` (= `<namespace>-msa-sp-<svc>`) for errors internal to the migrated service and successful responses; (b) `ApiClient` (or the literal library name) when the error was propagated from an internal library; (c) `TX<NNNNNN>` (6 digits, prefix `TX`) for business errors propagated from the Core Adapter. **NEVER** `catalog-info.yaml` `metadata.name` (`tpl-middleware`) or the legacy short name. |
 | `mensajeNegocio` | `null` or empty string. DataPower populates this. |
 | `backend` | 5-digit code from `sqb-cfg-codigosBackend-config/codigosBackend.xml`. Never hardcode `"00000"`. |
 
@@ -119,8 +119,8 @@ import lombok.experimental.UtilityClass;
 public class CatalogExceptionConstants {
 
     // ⚠️ MANDATORY — recurso/componente del response usan el nombre del
-    // componente MIGRADO (catalog-info.yaml metadata.name), NUNCA el nombre
-    // legacy IIB/WAS/ORQ. Preferentemente inyectar dinamicamente via
+    // componente MIGRADO (spring.application.name), NUNCA metadata.name
+    // (tpl-middleware) ni el legacy IIB/WAS/ORQ. Preferentemente inyectar dinamicamente via
     // @Value("${spring.application.name}") en lugar de literal.
     public static final String WS_RECURSO =
         "<namespace>-msa-sp-<svc>/<Operacion>";   // e.g. "csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion"
@@ -202,16 +202,17 @@ Forbidden dependencies:
 
 ## Catalog, Pipeline, Helm
 
-- `metadata.name` is the component name: `<namespace>-msa-sp-<service>`.
-- `metadata.namespace` derives from `metadata.name`: `tnd-...` ->
-  `tnd-middleware`, `csg-...` -> `csg-middleware`, etc.
+- `metadata.name` is fixed: `tpl-middleware`.
+- `metadata.namespace` derives from the migrated component name
+  (`spring.application.name` / repo folder): `tnd-...` -> `tnd-middleware`,
+  `csg-...` -> `csg-middleware`, etc.
 - `KUBERNETES_NAMESPACE` in `azure-pipelines.yml` must equal
   `metadata.namespace`.
 - Helm env var `name:` / `value:` lines must not contain inline comments.
 - No unresolved placeholders: `<pendiente_validar>`, `TODO`, `TBD`,
   `VALIDAR`, `REVISAR`, or `not_probed`.
 - Helm capacity baseline (Banco Pichincha official, 2026-05): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` + `hpa` baseline. Values are **referential** to let pods start; refined after performance tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required values: `resources.requests` (cpu=`50m`, memory=`350Mi`), `resources.limits` (cpu=`200m`, memory=`500Mi`), `hpa.minReplicas=1`, `hpa.maxReplicas=1`, HPA CPU `averageValue=100m`.
-- Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05, Alexis Padilla / Kyndryl): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Lets the JVM adapt heap to the pod's memory limit and use G1 with string deduplication. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
+- Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05, Alexis Padilla / Kyndryl): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Use ASCII only and separate flags with normal space `U+0020`; never paste `U+00A0` or invisible separators. Lets the JVM adapt heap to the pod's memory limit and use G1 with string deduplication. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
 
 ## Peer Review Gate
 

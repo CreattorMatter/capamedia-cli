@@ -19,6 +19,7 @@ from capamedia_cli.core.discovery import (
     bundled_discovery_workbook,
     classify_edge_cases,
     detect_discovery_workspace,
+    extract_spec_boundary_cases,
     find_discovery_workbook,
     load_discovery_entry,
     parse_azure_path,
@@ -211,6 +212,101 @@ def test_load_discovery_entry_by_service_and_render_markdown(tmp_path: Path) -> 
     assert ".capamedia" in markdown
     assert "tx_description_validation" in markdown
     assert "<pendiente_validar>" in markdown
+
+
+def test_extract_spec_boundary_cases_from_wsdl_and_xsd(tmp_path: Path) -> None:
+    wsdl = tmp_path / "WSClientes0099.wsdl"
+    xsd = tmp_path / "WSClientes0099_InlineSchema1.xsd"
+    wsdl.write_text(
+        """<?xml version="1.0"?>
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <wsdl:types>
+    <xsd:schema>
+      <xsd:element name="CIF">
+        <xsd:simpleType>
+          <xsd:restriction base="xsd:string">
+            <xsd:maxLength value="6"/>
+          </xsd:restriction>
+        </xsd:simpleType>
+      </xsd:element>
+    </xsd:schema>
+  </wsdl:types>
+</wsdl:definitions>
+""",
+        encoding="utf-8",
+    )
+    xsd.write_text(
+        """<?xml version="1.0"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:simpleType name="CanalType">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="01"/>
+      <xsd:enumeration value="02"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+  <xsd:simpleType name="MontoType">
+    <xsd:restriction base="xsd:decimal">
+      <xsd:totalDigits value="5"/>
+      <xsd:fractionDigits value="2"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+  <xsd:simpleType name="EmailType">
+    <xsd:restriction base="xsd:string">
+      <xsd:pattern value="[^@]+@[^@]+"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+  <xsd:element name="canal" type="CanalType"/>
+  <xsd:element name="monto" type="MontoType"/>
+  <xsd:element name="correo" type="EmailType"/>
+</xsd:schema>
+""",
+        encoding="utf-8",
+    )
+    artifacts = [
+        DiscoverySpecArtifact(path=wsdl, kind="wsdl"),
+        DiscoverySpecArtifact(path=xsd, kind="xsd"),
+    ]
+
+    cases = extract_spec_boundary_cases(artifacts)
+
+    assert {case.field for case in cases} == {"CIF", "canal", "monto", "correo"}
+    by_field = {case.field: case for case in cases}
+    assert "maxLength=6" in by_field["CIF"].constraint
+    assert by_field["CIF"].invalid_value == "XXXXXXX"
+    assert "enumeration=01|02" in by_field["canal"].constraint
+    assert by_field["canal"].invalid_value == "__INVALID_ENUM__"
+    assert "totalDigits=5" in by_field["monto"].constraint
+    assert "fractionDigits=2" in by_field["monto"].constraint
+    assert "pattern=[^@]+@[^@]+" in by_field["correo"].constraint
+
+
+def test_render_discovery_markdown_includes_spec_boundary_cases(tmp_path: Path) -> None:
+    xsd = tmp_path / "svc.xsd"
+    xsd.write_text(
+        """<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:element name="identificacion">
+    <xsd:simpleType>
+      <xsd:restriction base="xsd:string">
+        <xsd:maxLength value="10"/>
+      </xsd:restriction>
+    </xsd:simpleType>
+  </xsd:element>
+</xsd:schema>
+""",
+        encoding="utf-8",
+    )
+    probe = DiscoverySpecProbe(
+        status="ok",
+        artifacts=[DiscoverySpecArtifact(path=xsd, kind="xsd")],
+    )
+
+    markdown = render_discovery_markdown(DiscoveryEntry(service="WSClientes0099"), spec_probe=probe)
+
+    assert "### Casos de desborde desde WSDL/XSD" in markdown
+    assert "identificacion" in markdown
+    assert "maxLength=10" in markdown
+    assert "XXXXXXXXXXX" in markdown
 
 
 def test_load_discovery_entry_by_migrated_name(tmp_path: Path) -> None:

@@ -24,7 +24,7 @@ def _make_workspace(tmp_path: Path) -> Path:
     (workspace / "legacy" / "sqb-msa-wsclientes9999").mkdir(parents=True)
 
     (migrated / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '4.0.6' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
         "dependencies { implementation 'org.springframework.boot:spring-boot-starter-webflux' }\n",
         encoding="utf-8",
     )
@@ -134,7 +134,7 @@ def test_build_service_documentation_collects_project_evidence(tmp_path: Path) -
 
     assert doc.service_name == "WSClientes9999"
     assert doc.migrated_name == "tnd-msa-sp-wsclientes9999"
-    assert doc.spring_boot_version == "4.0.6"
+    assert doc.spring_boot_version == "3.5.14"
     assert doc.gradle_version == "8.14"
     assert doc.framework == "WebFlux"
     assert doc.operations == ["ActualizarContactoTransaccional31"]

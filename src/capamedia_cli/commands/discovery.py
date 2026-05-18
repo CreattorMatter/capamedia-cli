@@ -23,6 +23,7 @@ from capamedia_cli.core.discovery import (
     DiscoverySpecProbe,
     DiscoveryWorkspaceContext,
     detect_discovery_workspace,
+    extract_spec_boundary_cases,
     find_discovery_workbook,
     load_discovery_entry,
     rank_spec_candidate,
@@ -314,6 +315,24 @@ def discovery_edge_cases(
                     console.print(
                         f"[green]OK[/green] {len(copied_artifacts)} WSDL/XSD copiado(s) a cache local: {destination}"
                     )
+            boundary_cases = extract_spec_boundary_cases(probe.artifacts)
+            if boundary_cases:
+                boundary_table = Table(
+                    title="Casos de desborde desde WSDL/XSD",
+                    title_style="bold cyan",
+                )
+                boundary_table.add_column("Campo", style="cyan")
+                boundary_table.add_column("Restriccion")
+                boundary_table.add_column("Valor invalido")
+                boundary_table.add_column("Fuente")
+                for case in boundary_cases[:20]:
+                    boundary_table.add_row(
+                        case.field,
+                        case.constraint,
+                        case.invalid_value,
+                        case.source,
+                    )
+                console.print(boundary_table)
         else:
             console.print(f"[yellow]SPEC {probe.status.upper()}[/yellow] {probe.error}")
 

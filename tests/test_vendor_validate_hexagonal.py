@@ -204,7 +204,7 @@ def test_vendor_validator_rejects_bancs_library_for_was(tmp_path: Path) -> None:
     assert "no clasifica" in result.message
 
 
-def test_vendor_validator_catalog_metadata_uses_component_name(tmp_path: Path) -> None:
+def test_vendor_validator_catalog_metadata_uses_tpl_middleware_name(tmp_path: Path) -> None:
     validator = _load_vendor_validator()
     project = tmp_path / "csg-msa-sp-wsreglas0010"
     project.mkdir()
@@ -215,7 +215,7 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   namespace: csg-middleware
-  name: csg-msa-sp-wsreglas0010
+  name: tpl-middleware
   description: Servicio migrado
   annotations:
     dev.azure.com/project-repo: tpl-middleware/csg-msa-sp-wsreglas0010

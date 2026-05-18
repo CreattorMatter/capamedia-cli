@@ -394,6 +394,8 @@ env:
     value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
 ```
 
+Use only plain ASCII characters in the value. Separate flags with normal space `U+0020`; never paste non-breaking spaces (`U+00A0`) or invisible characters, because OpenShift/Java will not split them as JVM arguments.
+
 The 4 flags are referential — they let the JVM adapt heap to the pod's memory limit (Rule 16) and use G1 with string deduplication for the typical migration footprint. Values may change after performance tests; until then, deviating is **HIGH** (checklist Block 7.5f). See `bank-official-rules.md` Regla 9h.2.
 
 **Rule 16c — Helm values must be concrete:** NEVER leave placeholders `<...>` or
@@ -557,7 +559,7 @@ public record CustomerBancsDtoResponse(
 - **CRITICAL — error.recurso and error.componente: use the migrated component name, NOT the legacy name.** The `WS_RECURSO` literal must start with the `spring.application.name` of the migrated component (`<namespace>-msa-sp-<svc>`, e.g. `tnd-msa-sp-wsclientes0011`), never with the legacy IIB/WAS/ORQ short name (`WSClientes0011`, `ORQTransferencias0003`). QA del banco (ticket BTHCCC-6826, mayo 2026) reporta como HIGH cualquier response que traiga el nombre legacy.
   - Correct: `public static final String WS_RECURSO = "tnd-msa-sp-wsclientes0011/ConsultarIdentificacion01";`
   - Incorrect: `public static final String WS_RECURSO = "WSClientes0024/ConsultarIdentificacion01";` ← uses legacy name
-  - Better still: read it dynamically from `${spring.application.name}` (see Block 4.12 below) so the value cannot drift from `catalog-info.yaml` / `settings.gradle`.
+  - Better still: read it dynamically from `${spring.application.name}` (see Block 4.12 below) so the value cannot drift from the deployed component / `settings.gradle`.
 - NEVER magic numbers in code
 
 ### Conventional Commits
@@ -851,10 +853,10 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Update to `4.0.6` in `build.gradle`. **Why 4.0.6 and not 3.x:** Snyk reports 2026-05 found 7 transitive CVEs HIGH against `3.5.14` (3 Jackson 3.0.1 via `logstash-logback-encoder@9.0`, 4 Netty 4.1.132 via WebFlux). Spring Boot 4.0.6 BOM brings Jackson 3.1.x and a newer Netty that patch all 7. Decided by the team (Jean Pierre Garcia / Alexis Padilla, Slack 2026-05).
+1. **Spring Boot version:** Use `3.5.14` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
 2. **Peer Review plugin:** Update to `1.1.0`
-3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Spring Boot 4 BOM manages them (3.1.x). Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE". Spring Boot 4 BOM manages Netty. Old scaffolds that pinned `io.netty:netty-codec-http:4.1.132.Final` for a previous CVE are now the source of 4 new CVEs — remove them. Blocked by Check 8.4.
+3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
+4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE". Old scaffolds that pinned `io.netty:netty-codec-http:4.1.132.Final` for a previous CVE are now the source of 4 new CVEs — remove them. Blocked by Check 8.7.
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -887,7 +889,7 @@ WebFlux dependency block to WAS REST/MVC services:
 plugins {
     id 'jacoco'
     id 'java'
-    id 'org.springframework.boot' version '4.0.6'
+    id 'org.springframework.boot' version '3.5.14'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.0'
 }
@@ -975,8 +977,8 @@ dependencies {
     implementation 'org.glassfish.jaxb:jaxb-runtime:4.0.5'
 
     // Common utilities. NOTE: NEVER pin jackson-core / jackson-databind /
-    // jackson-dataformat-xml here — Spring Boot 4 BOM manages them (3.1.x).
-    // Pinning explicit versions causes drift on the next CVE.
+    // jackson-dataformat-xml here. Pinning explicit versions causes drift on
+    // the next CVE.
     implementation 'org.apache.commons:commons-lang3:3.18.0'
     implementation 'org.mapstruct:mapstruct:1.6.3'
 
@@ -998,8 +1000,7 @@ dependencyManagement {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
     }
     // NOTE: NEVER add `dependency 'io.netty:*:VERSION'` blocks here to "patch
-    // a CVE". Spring Boot 4 BOM manages Netty centrally. Old scaffolds that
-    // pinned `netty-codec-http:4.1.132.Final` for a previous CVE became the
+    // a CVE". Old scaffolds that pinned `netty-codec-http:4.1.132.Final` became the
     // source of 4 new CVEs in Snyk 2026-05. The next bump in the BOM closes
     // them — manual pins do not. Blocked by checklist Check 8.4.
 }
@@ -2506,8 +2507,8 @@ public class CatalogExceptionConstants {
         "Detailed error information:";
 
     // ⚠️ MANDATORY — error.recurso and error.componente carry the MIGRATED
-    // component name (spring.application.name = catalog-info.yaml metadata.name
-    // = <namespace>-msa-sp-<svc>), NEVER the legacy IIB/WAS/ORQ short name.
+    // component name (spring.application.name = <namespace>-msa-sp-<svc>),
+    // NEVER catalog-info metadata.name (tpl-middleware) or the legacy short name.
     // QA del banco (ticket BTHCCC-6826, 2026-05) reporta como HIGH cualquier
     // response que traiga "WSClientes0011", "ORQTransferencias0003" o similar
     // en estos dos campos. Checklist Block 15.2 y 15.3 lo bloquean automatico.
@@ -2518,7 +2519,7 @@ public class CatalogExceptionConstants {
     //   3) "TX<NNNNNN>"              (business error from Core Adapter, 6 digits)
     //
     // Prefer reading the value at runtime from ${spring.application.name}
-    // (inject via @Value) so the constant cannot drift from catalog-info.yaml.
+    // (inject via @Value) so the constant cannot drift from the deployed component.
     public static final String WS_RECURSO =
         "<namespace>-msa-sp-<svc>/<Operacion>";   // e.g. "tnd-msa-sp-wsclientes0011/ConsultarDatosIdentificacion"
     public static final String WS_COMPONENTE =

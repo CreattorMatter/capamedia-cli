@@ -89,9 +89,11 @@ happy-path JSON son error salvo evidencia legacy explicita.
 
 ## Paso 1.6 - Deployment metadata y Helm limpios
 
-- `metadata.namespace` en `catalog-info.yaml` debe salir del prefijo de
-  `metadata.name`: `csg-msa-sp-*` -> `csg-middleware`,
-  `tnd-msa-sp-*` -> `tnd-middleware`, etc.
+- `metadata.name` en `catalog-info.yaml` debe ser literalmente
+  `tpl-middleware`.
+- `metadata.namespace` en `catalog-info.yaml` debe salir del prefijo del
+  componente migrado (`spring.application.name` o nombre del repo/carpeta):
+  `csg-msa-sp-*` -> `csg-middleware`, `tnd-msa-sp-*` -> `tnd-middleware`, etc.
 - `KUBERNETES_NAMESPACE` en `azure-pipelines.yml` debe coincidir con
   `metadata.namespace`.
 - `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml` no pueden contener
@@ -105,9 +107,9 @@ happy-path JSON son error salvo evidencia legacy explicita.
 ## Paso 1.7 - error.recurso / error.componente sin nombre legacy
 
 El response del servicio migrado debe llevar el **nombre del componente
-MIGRADO** (`spring.application.name` = `catalog-info.yaml` `metadata.name` =
-`<namespace>-msa-sp-<svc>`) en `error.recurso` y `error.componente`. NUNCA el
-nombre legacy IIB/WAS/ORQ corto. Aplica a WAS, BUS y ORQ.
+MIGRADO** (`spring.application.name` = `<namespace>-msa-sp-<svc>`) en
+`error.recurso` y `error.componente`. NUNCA el `metadata.name` fijo
+`tpl-middleware` ni el nombre legacy IIB/WAS/ORQ corto. Aplica a WAS, BUS y ORQ.
 
 ```bash
 # Senal de bug (QA del banco lo reporta como HIGH bloqueante):
@@ -121,8 +123,8 @@ Valores aceptados para `componente`:
 3. `TX<NNNNNN>` (error de negocio desde Core Adapter, 6 digitos)
 
 Si el doublecheck detecta el patron legacy, lo flaggea como HIGH y propone el
-reemplazo por la constante `WS_COMPONENTE` alineada al `metadata.name` del
-`catalog-info.yaml`. Si el autofix encuentra `setRecurso("WSClientesNNNN/Op")`
+reemplazo por la constante `WS_COMPONENTE` alineada al `spring.application.name`.
+Si el autofix encuentra `setRecurso("WSClientesNNNN/Op")`
 o `setComponente("WSClientesNNNN")` con literal trazable al componente
 migrado, lo aplica automaticamente. Validado por checklist Block 15.2 y 15.3.
 

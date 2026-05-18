@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+import xml.etree.ElementTree as ET
 
 DISCOVERY_DEFAULT_SHEET = "Validacion de servicios"
 DISCOVERY_WORKBOOK_NAME = "Discovery_Servicios_Complejidad OLA 1.xlsx"
@@ -64,6 +65,15 @@ class DiscoverySpecProbe:
     resolved_path: str = ""
     requested_path: str = ""
     error: str = ""
+
+
+@dataclass(frozen=True)
+class SpecBoundaryCase:
+    field: str
+    constraint: str
+    invalid_value: str
+    source: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -385,6 +395,175 @@ def classify_edge_cases(
     return cases
 
 
+_XSD_FACET_ORDER = (
+    "length",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "enumeration",
+    "totalDigits",
+    "fractionDigits",
+    "minInclusive",
+    "maxInclusive",
+)
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _clean_qname(value: str) -> str:
+    return value.split(":", 1)[-1] if value else ""
+
+
+def _parse_xml(path: Path) -> ET.Element | None:
+    try:
+        return ET.fromstring(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ET.ParseError):
+        return None
+
+
+def _restriction_facets(simple_type: ET.Element) -> dict[str, list[str]]:
+    facets: dict[str, list[str]] = {}
+    for node in simple_type.iter():
+        if _xml_local_name(node.tag) != "restriction":
+            continue
+        for child in list(node):
+            facet = _xml_local_name(child.tag)
+            if facet not in _XSD_FACET_ORDER:
+                continue
+            value = child.attrib.get("value", "").strip()
+            if value:
+                facets.setdefault(facet, []).append(value)
+    return facets
+
+
+def _constraint_text(facets: dict[str, list[str]]) -> str:
+    parts: list[str] = []
+    for facet in _XSD_FACET_ORDER:
+        values = facets.get(facet)
+        if not values:
+            continue
+        parts.append(f"{facet}={'|'.join(values)}")
+    return "; ".join(parts)
+
+
+def _int_value(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _number_value(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _invalid_value_for_facets(facets: dict[str, list[str]]) -> tuple[str, str]:
+    if facets.get("enumeration"):
+        return "__INVALID_ENUM__", "valor fuera de la enumeracion permitida"
+    if facets.get("pattern"):
+        return "__INVALID_PATTERN__", "valor que no cumple el pattern XSD"
+    if facets.get("length"):
+        size = _int_value(facets["length"][0])
+        if size is not None:
+            return "X" * min(size + 1, 80), f"longitud distinta de {size}"
+    if facets.get("maxLength"):
+        size = _int_value(facets["maxLength"][0])
+        if size is not None:
+            return "X" * min(size + 1, 80), f"longitud mayor a {size}"
+    if facets.get("minLength"):
+        size = _int_value(facets["minLength"][0])
+        if size is not None:
+            return "" if size > 0 else "X", f"longitud menor a {size}"
+    if facets.get("totalDigits"):
+        digits = _int_value(facets["totalDigits"][0])
+        if digits is not None:
+            return "9" * min(digits + 1, 80), f"mas de {digits} digitos"
+    if facets.get("fractionDigits"):
+        digits = _int_value(facets["fractionDigits"][0])
+        if digits is not None:
+            return "0." + ("1" * min(digits + 1, 20)), f"mas de {digits} decimales"
+    if facets.get("minInclusive"):
+        value = _number_value(facets["minInclusive"][0])
+        if value is not None:
+            return str(int(value - 1) if value.is_integer() else value - 1), "valor menor al minimo"
+    if facets.get("maxInclusive"):
+        value = _number_value(facets["maxInclusive"][0])
+        if value is not None:
+            return str(int(value + 1) if value.is_integer() else value + 1), "valor mayor al maximo"
+    return "INVALID", "valor invalido segun restriccion XSD"
+
+
+def extract_spec_boundary_cases(artifacts: list[DiscoverySpecArtifact]) -> list[SpecBoundaryCase]:
+    """Extract QA boundary/overflow cases from WSDL/XSD simpleType facets.
+
+    The spec repo is the authoritative source for XML contract limits. We read
+    both WSDL inline schemas and external XSDs, then generate one invalid value
+    per constrained field so QA prompts can exercise overflow/negative cases.
+    """
+    roots: list[tuple[Path, ET.Element]] = []
+    for artifact in artifacts:
+        if artifact.path.suffix.lower() not in {".wsdl", ".xsd"}:
+            continue
+        root = _parse_xml(artifact.path)
+        if root is not None:
+            roots.append((artifact.path, root))
+
+    named_types: dict[str, dict[str, list[str]]] = {}
+    for _, root in roots:
+        for node in root.iter():
+            if _xml_local_name(node.tag) != "simpleType":
+                continue
+            name = node.attrib.get("name", "").strip()
+            if name:
+                facets = _restriction_facets(node)
+                if facets:
+                    named_types[name] = facets
+
+    cases: list[SpecBoundaryCase] = []
+    seen: set[tuple[str, str]] = set()
+    for path, root in roots:
+        for element in root.iter():
+            if _xml_local_name(element.tag) != "element":
+                continue
+            field = element.attrib.get("name") or _clean_qname(element.attrib.get("ref", ""))
+            if not field:
+                continue
+
+            facets: dict[str, list[str]] = {}
+            type_name = _clean_qname(element.attrib.get("type", ""))
+            if type_name in named_types:
+                facets = named_types[type_name]
+            else:
+                for child in list(element):
+                    if _xml_local_name(child.tag) == "simpleType":
+                        facets = _restriction_facets(child)
+                        break
+            if not facets:
+                continue
+
+            constraint = _constraint_text(facets)
+            key = (field, constraint)
+            if key in seen:
+                continue
+            seen.add(key)
+            invalid_value, reason = _invalid_value_for_facets(facets)
+            cases.append(
+                SpecBoundaryCase(
+                    field=field,
+                    constraint=constraint,
+                    invalid_value=invalid_value,
+                    source=path.name,
+                    reason=reason,
+                )
+            )
+    return cases
+
+
 def load_discovery_entry(
     workbook_path: Path,
     service_name: str,
@@ -487,6 +666,11 @@ def render_discovery_markdown(
     copied_artifacts: list[Path] | None = None,
 ) -> str:
     lines: list[str] = []
+    spec_boundary_cases = (
+        extract_spec_boundary_cases(spec_probe.artifacts)
+        if spec_probe and spec_probe.artifacts
+        else []
+    )
     lines.append("## Discovery / edge cases")
     lines.append("")
     lines.append(f"- **Servicio discovery:** `{entry.service}`")
@@ -527,6 +711,11 @@ def render_discovery_markdown(
     if spec_probe and spec_probe.artifacts:
         artifact_names = ", ".join(artifact.path.name for artifact in spec_probe.artifacts)
         lines.append(f"- spec_artifacts: {artifact_names}")
+    if spec_boundary_cases:
+        boundary_summary = ", ".join(
+            f"{case.field}({case.constraint})" for case in spec_boundary_cases[:20]
+        )
+        lines.append(f"- spec_boundary_cases: {boundary_summary}")
     if copied_artifacts:
         copied_names = ", ".join(str(path) for path in copied_artifacts)
         lines.append(f"- copied_artifacts: {copied_names}")
@@ -549,6 +738,21 @@ def render_discovery_markdown(
 
     if entry.edge_cases:
         lines.append("### Discovery edge-case coverage")
+        lines.append("")
+
+    if spec_boundary_cases:
+        lines.append("### Casos de desborde desde WSDL/XSD")
+        lines.append("")
+        lines.append("| Campo | Restriccion XSD | Valor invalido sugerido | Fuente | Motivo |")
+        lines.append("|---|---|---|---|---|")
+        for case in spec_boundary_cases:
+            constraint = case.constraint.replace("|", "\\|")
+            invalid_value = case.invalid_value.replace("|", "\\|")
+            reason = case.reason.replace("|", "\\|")
+            lines.append(
+                f"| `{case.field}` | `{constraint}` | `{invalid_value}` | "
+                f"`{case.source}` | {reason} |"
+            )
         lines.append("")
 
     if spec_probe:

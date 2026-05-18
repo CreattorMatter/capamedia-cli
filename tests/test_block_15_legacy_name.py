@@ -19,16 +19,24 @@ from capamedia_cli.core.checklist_rules import CheckContext, run_block_15
 
 
 def _make_migrated_with_catalog(tmp_path: Path, catalog_name: str = "tnd-msa-sp-wsclientes0011") -> Path:
-    """Create a minimal migrated project with catalog-info.yaml metadata.name set."""
+    """Create a minimal migrated project with component name available."""
     root = tmp_path / "migrated"
     src_java = root / "src" / "main" / "java" / "com" / "pichincha" / "sp" / "infrastructure"
     src_java.mkdir(parents=True)
+    resources = root / "src" / "main" / "resources"
+    resources.mkdir(parents=True)
+    (resources / "application.yml").write_text(
+        "spring:\n"
+        "  application:\n"
+        f"    name: {catalog_name}\n",
+        encoding="utf-8",
+    )
 
     (root / "catalog-info.yaml").write_text(
         "apiVersion: backstage.io/v1alpha1\n"
         "kind: Component\n"
         "metadata:\n"
-        f"  name: {catalog_name}\n"
+        "  name: tpl-middleware\n"
         "  namespace: tnd-middleware\n"
         "spec:\n"
         "  type: service\n",
@@ -290,7 +298,7 @@ def test_15_2_passes_and_15_3_fails_independently(tmp_path: Path) -> None:
 
 
 def test_autofix_replaces_legacy_name_in_setters(tmp_path: Path) -> None:
-    """Si catalog-info.yaml tiene metadata.name y el legacy hallado coincide
+    """Si spring.application.name existe y el legacy hallado coincide
     con el sufijo del migrado, el autofix reemplaza el literal."""
     root = _make_migrated_with_catalog(tmp_path, catalog_name="tnd-msa-sp-wsclientes0011")
     f = _write_java(
@@ -330,8 +338,8 @@ def test_autofix_skips_when_legacy_unrelated_to_migrated(tmp_path: Path) -> None
     assert f.read_text(encoding="utf-8") == original
 
 
-def test_autofix_skips_when_catalog_missing(tmp_path: Path) -> None:
-    """Sin catalog-info.yaml no hay forma de saber el nombre canonico. Skip."""
+def test_autofix_skips_when_component_name_missing(tmp_path: Path) -> None:
+    """Sin spring.application.name/carpeta canonica no hay nombre canonico. Skip."""
     root = tmp_path / "no-catalog"
     src_java = root / "src" / "main" / "java" / "com" / "pichincha" / "sp" / "infrastructure"
     src_java.mkdir(parents=True)
@@ -344,7 +352,7 @@ def test_autofix_skips_when_catalog_missing(tmp_path: Path) -> None:
     result = fix_legacy_name_in_error_payload(root)
 
     assert result.applied is False
-    assert "catalog" in result.notes.lower()
+    assert "spring.application.name" in result.notes
 
 
 def test_autofix_idempotent(tmp_path: Path) -> None:

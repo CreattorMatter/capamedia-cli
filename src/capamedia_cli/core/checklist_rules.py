@@ -8,6 +8,7 @@ Los bloques son espejo de `prompts/post-migracion/03-checklist.md` del repo orig
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import re
 import subprocess
@@ -139,6 +140,36 @@ def _catalog_metadata_name(root: Path) -> str:
     text = _read_or_empty(catalog)
     match = re.search(r"(?im)^\s*name\s*:\s*['\"]?([^'\"\s#]+)", text)
     return match.group(1).strip() if match else ""
+
+
+CATALOG_METADATA_NAME = "tpl-middleware"
+
+
+def _spring_application_name(root: Path) -> str:
+    for rel in (
+        Path("src/main/resources/application.yml"),
+        Path("src/main/resources/application.yaml"),
+    ):
+        data = _load_yaml_mapping(root / rel)
+        spring = data.get("spring")
+        if not isinstance(spring, dict):
+            continue
+        app = spring.get("application")
+        if not isinstance(app, dict):
+            continue
+        name = app.get("name")
+        if name is not None:
+            return str(name).strip()
+    return ""
+
+
+def _migrated_component_name(root: Path) -> str:
+    app_name = _spring_application_name(root)
+    if re.match(r"^[a-z]{3}-msa-sp-", app_name.lower()):
+        return app_name
+    if re.match(r"^[a-z]{3}-msa-sp-", root.name.lower()):
+        return root.name
+    return app_name or root.name
 
 
 def _expected_catalog_namespace(project_name: str) -> str:
@@ -358,6 +389,23 @@ HELM_JAVA_OPTIONS_BASELINE: str = (
 )
 
 
+def _java_options_token_counter(value: str) -> Counter[str]:
+    return Counter(part for part in value.split(" ") if part)
+
+
+def _java_options_invalid_chars(value: str) -> list[str]:
+    invalid: list[str] = []
+    seen: set[int] = set()
+    for ch in value:
+        codepoint = ord(ch)
+        if codepoint in seen:
+            continue
+        if codepoint > 0x7E or (ch.isspace() and ch != " "):
+            invalid.append(f"U+{codepoint:04X}")
+            seen.add(codepoint)
+    return invalid
+
+
 def _helm_java_options_issues(helm_files: list[Path], root: Path) -> list[str]:
     """Check 7.5f helper: env var JAVA_OPTIONS debe existir con el valor exacto
     del baseline en los 3 helms (dev/test/prod).
@@ -368,7 +416,7 @@ def _helm_java_options_issues(helm_files: list[Path], root: Path) -> list[str]:
     mismatch' con el valor real.
     """
     issues: list[str] = []
-    expected_tokens = set(HELM_JAVA_OPTIONS_BASELINE.split())
+    expected_tokens = _java_options_token_counter(HELM_JAVA_OPTIONS_BASELINE)
     for f in helm_files:
         text = _read_or_empty(f)
         rel = _relative_display(f, root)
@@ -405,7 +453,16 @@ def _helm_java_options_issues(helm_files: list[Path], root: Path) -> list[str]:
                     f"{rel}:L{pos + 1} - JAVA_OPTIONS sin `value:` siguiente"
                 )
                 continue
-            actual_tokens = set(value_line.split())
+            invalid_chars = _java_options_invalid_chars(value_line)
+            if invalid_chars:
+                issues.append(
+                    f"{rel}:L{pos + 1} - JAVA_OPTIONS contiene caracteres "
+                    f"no ASCII/invisibles ({', '.join(invalid_chars)}); debe "
+                    f"usar espacios ASCII normales y valor "
+                    f"'{HELM_JAVA_OPTIONS_BASELINE}'"
+                )
+                continue
+            actual_tokens = _java_options_token_counter(value_line)
             if actual_tokens != expected_tokens:
                 issues.append(
                     f"{rel}:L{pos + 1} - JAVA_OPTIONS value: '{value_line}' -> "
@@ -596,9 +653,8 @@ def _undertow_gradle_artifacts(gradle_file: Path, root: Path) -> list[str]:
 # Detecta pins manuales de io.netty:* dentro de bloques `dependencyManagement {
 # dependencies { ... } }`. Snyk 2026-05: 4 CVEs HIGH se filtraron porque el
 # template tenia `dependency 'io.netty:netty-codec-http:4.1.132.Final'` (un
-# pin que ahora es el problema). Spring Boot 4 BOM gestiona Netty central —
-# cualquier pin manual es scaffold viejo o intento de parche que se va a
-# quedar atras en el proximo CVE.
+# pin que ahora es el problema). Cualquier pin manual es scaffold viejo o
+# intento de parche que se va a quedar atras en el proximo CVE.
 _NETTY_PIN_RE = re.compile(
     r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s*"
     r"['\"]io\.netty:[^:]+:[^'\"]+['\"]",
@@ -1840,8 +1896,9 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
     pipeline = ctx.migrated_path / "azure-pipelines.yml"
     catalog = ctx.migrated_path / "catalog-info.yaml"
     if catalog.exists():
-        catalog_name = _catalog_metadata_name(ctx.migrated_path) or ctx.migrated_path.name
-        expected_catalog_namespace = _expected_catalog_namespace(catalog_name)
+        catalog_name = _catalog_metadata_name(ctx.migrated_path)
+        component_name = _migrated_component_name(ctx.migrated_path)
+        expected_catalog_namespace = _expected_catalog_namespace(component_name)
         catalog_namespace = _catalog_metadata_namespace(ctx.migrated_path)
         if expected_catalog_namespace and catalog_namespace and catalog_namespace != expected_catalog_namespace:
             results.append(
@@ -1852,11 +1909,12 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     "fail",
                     severity="high",
                     detail=(
-                        f"metadata.name='{catalog_name}' espera metadata.namespace="
+                        f"componente='{component_name}' espera metadata.namespace="
                         f"'{expected_catalog_namespace}', encontrado '{catalog_namespace}'"
                     ),
                     suggested_fix=(
-                        "Alinear `metadata.namespace` con el prefijo del micro: "
+                        "Alinear `metadata.namespace` con el prefijo del componente "
+                        "migrado (`spring.application.name` o nombre de carpeta): "
                         "`<primeras-3-letras>-middleware`."
                     ),
                 )
@@ -1880,74 +1938,49 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     "fail",
                     severity="high",
                     detail=(
-                        f"metadata.name='{catalog_name}' espera metadata.namespace="
+                        f"componente='{component_name}' espera metadata.namespace="
                         f"'{expected_catalog_namespace}', pero metadata.namespace no esta definido"
                     ),
                     suggested_fix=(
-                        "Definir `metadata.namespace` con el prefijo del micro: "
+                        "Definir `metadata.namespace` con el prefijo del componente "
+                        "migrado (`spring.application.name` o nombre de carpeta): "
                         "`<primeras-3-letras>-middleware`."
                     ),
                 )
             )
 
-        # 7.1c - metadata.name debe ser el COMPONENTE migrado, no el proyecto Azure.
-        # Regla 9 de bank-official-rules.md: "nombre real del componente, no el
-        # proyecto Azure". Patron: <ns>-msa-sp-<svc> (ej tnd-msa-sp-wsclientes0011,
-        # tct-msa-sp-wstecnicos0008). Bug detectado en wstecnicos0008 branch
-        # feature/dev-BTHCCC-5954: `name: tpl-middleware` (tpl-middleware es el
-        # PROYECTO Azure que contiene varios repos, no el componente).
-        if catalog_name:
-            component_name_re = re.compile(r"^[a-z]{3}-msa-sp-[a-z0-9_-]+$")
-            azure_project_patterns = {"tpl-middleware", "tpl-bus-omnicanal"}
-            if catalog_name in azure_project_patterns:
-                results.append(
-                    CheckResult(
-                        "7.1c",
-                        "Block 7",
-                        "catalog-info metadata.name es el componente, no el proyecto Azure",
-                        "fail",
-                        severity="high",
-                        detail=(
-                            f"metadata.name='{catalog_name}' es el nombre del proyecto "
-                            "Azure DevOps, no del componente. Debe ser "
-                            "<namespace>-msa-sp-<servicio>."
-                        ),
-                        suggested_fix=(
-                            "Cambiar `metadata.name` por `<namespace>-msa-sp-<servicio>` "
-                            "(ej. tnd-msa-sp-wsclientes0011). El nombre del proyecto Azure "
-                            "ya esta en `annotations.dev.azure.com/project-repo`."
-                        ),
-                    )
+        # 7.1c - metadata.name debe ser el proyecto Backstage/Azure del catalogo.
+        # El componente real sigue viviendo en spring.application.name y en el
+        # nombre del repo/carpeta `<namespace>-msa-sp-<svc>`.
+        if catalog_name != CATALOG_METADATA_NAME:
+            results.append(
+                CheckResult(
+                    "7.1c",
+                    "Block 7",
+                    "catalog-info metadata.name fijo",
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"metadata.name esperado '{CATALOG_METADATA_NAME}', "
+                        f"encontrado '{catalog_name or '(vacio)'}'"
+                    ),
+                    suggested_fix=(
+                        f"Definir `metadata.name: {CATALOG_METADATA_NAME}`. "
+                        "El nombre del micro queda en `spring.application.name`, "
+                        "`annotations.dev.azure.com/project-repo` y los links."
+                    ),
                 )
-            elif not component_name_re.match(catalog_name):
-                results.append(
-                    CheckResult(
-                        "7.1c",
-                        "Block 7",
-                        "catalog-info metadata.name es el componente, no el proyecto Azure",
-                        "fail",
-                        severity="high",
-                        detail=(
-                            f"metadata.name='{catalog_name}' no matchea el patron "
-                            "<ns>-msa-sp-<svc> requerido por Regla 9 (bank-official-rules.md)."
-                        ),
-                        suggested_fix=(
-                            "Renombrar `metadata.name` al patron canonico "
-                            "`<namespace>-msa-sp-<servicio>` (3 letras de namespace + "
-                            "'-msa-sp-' + servicio en minusculas)."
-                        ),
-                    )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "7.1c",
+                    "Block 7",
+                    "catalog-info metadata.name fijo",
+                    "pass",
+                    detail=f"metadata.name={catalog_name}",
                 )
-            else:
-                results.append(
-                    CheckResult(
-                        "7.1c",
-                        "Block 7",
-                        "catalog-info metadata.name es el componente, no el proyecto Azure",
-                        "pass",
-                        detail=f"metadata.name={catalog_name}",
-                    )
-                )
+            )
 
     if pipeline.exists() and catalog.exists():
         pipeline_namespace = _pipeline_kubernetes_namespace(ctx.migrated_path)
@@ -2242,8 +2275,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 suggested_fix=(
                     "Dejar version literal aprobada en build.gradle: "
                     f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
-                    "El baseline es CVE-driven (Snyk 2026-05): Spring Boot < 4.0.0 "
-                    "trae 7 CVEs HIGH transitivas (Jackson + Netty)."
+                    "Mantener Spring Boot en el baseline aprobado por el banco."
                 ),
             )
         )
@@ -2263,7 +2295,6 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     severity="high",
                     detail=(
                         f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION} "
-                        f"(7 CVEs HIGH transitivas Jackson+Netty, Snyk 2026-05): "
                         + ", ".join(outdated)
                     ),
                     suggested_fix=(
@@ -2271,8 +2302,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                         f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
                         "Tambien actualizar `spring_boot_version` en "
                         "`migration-context.json` y eliminar pins explicitos de "
-                        "jackson-* y io.netty:* del template (Spring Boot 4 BOM "
-                        "los gestiona)."
+                        "jackson-* y io.netty:* del template."
                     ),
                 )
             )
@@ -2327,7 +2357,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     # Origen: Snyk 2026-05 reporto 4 CVEs HIGH (netty-codec, netty-codec-http2,
     # netty-codec-dns) en `4.1.132.Final` — la version que el scaffold viejo
     # habia pinneado manualmente para parchar un CVE anterior. La unica forma
-    # de mantener Netty al dia es dejar que Spring Boot 4 BOM lo gestione.
+    # sostenible es no pinnear transitivas manualmente.
     netty_pins: list[str] = []
     for gradle_file in gradle_files:
         netty_pins.extend(
@@ -2347,8 +2377,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 ),
                 suggested_fix=(
                     "Eliminar todos los `dependency 'io.netty:*:VERSION'` del "
-                    "bloque dependencyManagement. Spring Boot 4 BOM gestiona "
-                    "Netty centralmente. Pins manuales se quedan atras al "
+                    "bloque dependencyManagement. Pins manuales se quedan atras al "
                     "proximo CVE (Snyk 2026-05: 4 CVEs HIGH en 4.1.132.Final "
                     "que el pin viejo introdujo)."
                 ),
@@ -2508,12 +2537,12 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
         )
 
     # 15.2 - recurso con formato <componente-migrado>/<method>
-    # El nombre antes del '/' debe ser el spring.application.name (= metadata.name
-    # del catalog-info.yaml = <namespace>-msa-sp-<svc>), NUNCA el nombre legacy
+    # El nombre antes del '/' debe ser el spring.application.name
+    # (<namespace>-msa-sp-<svc>), NUNCA el metadata.name del catalog-info ni el legacy
     # IIB/WAS/ORQ como 'WSClientes0011' o 'ORQTransferencias0003'.
     # QA reporta como bug HIGH cuando el response trae el nombre legacy.
     recurso_matches = _grep_files(src_java, r"setRecurso\s*\(\s*[\"']")
-    catalog_name = _catalog_metadata_name(ctx.migrated_path)
+    component_name = _migrated_component_name(ctx.migrated_path)
     if not recurso_matches:
         results.append(
             CheckResult(
@@ -2556,7 +2585,7 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     suggested_fix=(
                         "Reemplazar el nombre legacy (WS*/ORQ*/UMP*) por el "
                         "spring.application.name del componente migrado "
-                        f"({catalog_name or '<namespace>-msa-sp-<svc>'}). "
+                        f"({component_name or '<namespace>-msa-sp-<svc>'}). "
                         "QA del banco rechaza el response cuando recurso/componente "
                         "trae el nombre legacy IIB/WAS."
                     ),
@@ -2573,7 +2602,7 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     detail="setRecurso encontrado pero ninguno tiene '/' en el valor",
                     suggested_fix=(
                         "Formato esperado: "
-                        f"'{catalog_name or '<namespace>-msa-sp-<svc>'}/<metodo>'"
+                        f"'{component_name or '<namespace>-msa-sp-<svc>'}/<metodo>'"
                     ),
                 )
             )
@@ -2627,7 +2656,7 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     ),
                     suggested_fix=(
                         "Reemplazar el nombre legacy por uno de: "
-                        f"(a) {catalog_name or '<namespace>-msa-sp-<svc>'} para errores "
+                        f"(a) {component_name or '<namespace>-msa-sp-<svc>'} para errores "
                         "internos del servicio migrado y respuestas exitosas, "
                         "(b) 'ApiClient' para errores propagados desde lib-bnc-api-client, "
                         "(c) 'TX<NNNNNN>' (6 digitos) para errores de negocio desde "

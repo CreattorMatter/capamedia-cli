@@ -38,7 +38,7 @@ Este prompt **no implementa codigo**. Es un router que:
 2. `capamedia fabrics generate` — deja `destino/<namespace>-msa-sp-<servicio>/` con el scaffold base.
 3. Ejecutar desde la raiz del workspace, no desde `destino/`.
 
-`<namespace>` es el codigo de tribu (`tnd`, `csg`, `tia`, etc.) que sale de `.capamedia/config.yaml` o del `metadata.name` del `catalog-info.yaml` que ya genero Fabrics. Nunca asumir `tnd-`.
+`<namespace>` es el codigo de tribu (`tnd`, `csg`, `tia`, etc.) que sale de `.capamedia/config.yaml`, `spring.application.name` o el nombre del repo/carpeta que ya genero Fabrics. Nunca asumir `tnd-`; `catalog-info.yaml` `metadata.name` queda fijo en `tpl-middleware`.
 
 ## Paso 1 — Detectar modo (matriz MCP)
 

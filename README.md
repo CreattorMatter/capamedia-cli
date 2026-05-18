@@ -114,6 +114,28 @@ Y opcionalmente escribe un `auth.env` con:
 - `CAPAMEDIA_AZDO_PAT`
 - `OPENAI_API_KEY`
 
+Si usas el mismo Personal Access Token para Azure Artifacts y Azure DevOps
+(PAT con permisos amplios), el camino simple es:
+
+```bash
+capamedia pat <PERSONAL_ACCESS_TOKEN>
+```
+
+Para una VDI/Windows donde ademas queres dejar el PATH configurado en el
+usuario sin editar variables a mano:
+
+```bash
+capamedia pat <PERSONAL_ACCESS_TOKEN> \
+  --path "%APPDATA%\\Python\\Python314\\Scripts"
+```
+
+Esto persiste `CAPAMEDIA_ARTIFACT_TOKEN`, `ARTIFACT_TOKEN`,
+`CAPAMEDIA_AZDO_PAT`, `AZURE_DEVOPS_EXT_PAT`, agrega el `--path` al PATH del
+usuario y registra Fabrics global + `~/.npmrc` con ese mismo PAT. Antes de
+persistir nada prueba el PAT contra Azure DevOps y Azure Artifacts; si falla,
+sale con el motivo y no guarda el token. No imprime los secretos; hay que abrir
+una terminal nueva para que Windows vea las vars.
+
 Si no queres usar `auth bootstrap`, tambien podes hacer cada paso por separado:
 
 ```bash

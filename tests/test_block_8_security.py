@@ -1,4 +1,4 @@
-"""Tests for Block 8 security upgrade (Snyk 2026-05 → Spring Boot 4.0.6).
+"""Tests for Block 8 security baseline (Spring Boot 3.5.14).
 
 Cubre los cambios de seguridad CVE-driven decididos por el equipo
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla, 2026-05):
@@ -11,10 +11,7 @@ Cubre los cambios de seguridad CVE-driven decididos por el equipo
   build.gradle.
 
 Justificacion:
-- 7 CVEs HIGH transitivas en Spring Boot 3.5.14 (3 Jackson 3.0.1 + 4 Netty
-  4.1.132).
-- Spring Boot 4.0.6 BOM trae Jackson 3.1.x + Netty mas nuevo que parchan
-  las 7 con un solo bump.
+- Spring Boot 3.5.14 es el baseline aprobado para los servicios OLA.
 - Pins manuales (Jackson o Netty) son anti-patron: se quedan atras al
   proximo CVE — exactamente lo que paso con netty-codec-http:4.1.132.Final
   que se metio para parchar un CVE y se transformo en el bug nuevo.
@@ -50,9 +47,9 @@ def _find(results, check_id):
 # ---------------------------------------------------------------------------
 
 
-def test_baseline_is_4_0_6() -> None:
-    """El baseline declarado en version_policy.py debe ser 4.0.6 desde Snyk 2026-05."""
-    assert SPRING_BOOT_BASELINE_VERSION == "4.0.6"
+def test_baseline_is_3_5_14() -> None:
+    """El baseline declarado en version_policy.py debe ser 3.5.14."""
+    assert SPRING_BOOT_BASELINE_VERSION == "3.5.14"
 
 
 # ---------------------------------------------------------------------------
@@ -61,9 +58,9 @@ def test_baseline_is_4_0_6() -> None:
 
 
 def test_8_1_severity_is_high_for_old_version(tmp_path: Path) -> None:
-    """Spring Boot < 4.0.6 → HIGH (antes era MEDIUM, subio por Snyk 2026-05)."""
+    """Spring Boot < 3.5.14 -> HIGH."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.13' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -71,7 +68,7 @@ def test_8_1_severity_is_high_for_old_version(tmp_path: Path) -> None:
 
     assert check.status == "fail"
     assert check.severity == "high"
-    assert "CVE" in check.detail or "Snyk" in check.detail
+    assert "3.5.14" in check.detail
 
 
 def test_8_1_severity_high_when_version_missing(tmp_path: Path) -> None:
@@ -90,9 +87,9 @@ def test_8_1_severity_high_when_version_missing(tmp_path: Path) -> None:
     assert check.severity == "high"
 
 
-def test_8_1_passes_for_4_0_6(tmp_path: Path) -> None:
+def test_8_1_passes_for_3_5_14(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '4.0.6' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -101,10 +98,10 @@ def test_8_1_passes_for_4_0_6(tmp_path: Path) -> None:
     assert check.status == "pass"
 
 
-def test_8_1_passes_for_4_0_7_newer(tmp_path: Path) -> None:
+def test_8_1_passes_for_3_5_15_newer(tmp_path: Path) -> None:
     """Versiones mas nuevas que el baseline tambien pasan."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '4.0.7' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.15' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -125,7 +122,7 @@ def test_8_7_detects_netty_codec_http_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencyManagement {
     dependencies {
@@ -153,7 +150,7 @@ def test_8_7_detects_any_netty_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencyManagement {
     dependencies {
@@ -176,7 +173,7 @@ def test_8_7_passes_without_netty_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencyManagement {
     imports {
@@ -199,7 +196,7 @@ def test_8_7_ignores_netty_in_comments(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencyManagement {
     // NEVER: dependency 'io.netty:netty-codec-http:4.1.132.Final'
@@ -223,7 +220,7 @@ def test_8_7_ignores_netty_dependencies_outside_dependency_management(tmp_path: 
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencies {
     implementation 'io.netty:netty-handler:4.1.132.Final'
@@ -248,7 +245,7 @@ def test_autofix_removes_netty_codec_http_pin(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencyManagement {
     dependencies {
@@ -275,7 +272,7 @@ def test_autofix_idempotent(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 dependencyManagement { imports { mavenBom 'foo:bar:1.0' } }
 """,
     )
@@ -299,7 +296,7 @@ def test_autofix_preserves_other_dependencies(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '4.0.6' }
+plugins { id 'org.springframework.boot' version '3.5.14' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'

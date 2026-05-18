@@ -162,6 +162,29 @@ env:
     assert check.status == "pass"
 
 
+def test_7_5f_non_breaking_space_is_high(tmp_path: Path) -> None:
+    """U+00A0 parece espacio, pero OpenShift/Java no lo separa como flag."""
+    root = _make_minimal_project(tmp_path)
+    bad_value = HELM_JAVA_OPTIONS_BASELINE.replace(
+        " -XX:MaxRAMPercentage", "\u00a0-XX:MaxRAMPercentage"
+    )
+    body = f"""\
+env:
+  - name: "JAVA_OPTIONS"
+    value: "{bad_value}"
+"""
+    _write_helm(root, "dev", body)
+    _write_helm(root, "test", _baseline_helm_with_java_opts())
+    _write_helm(root, "prod", _baseline_helm_with_java_opts())
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_7(ctx)
+    check = _find(results, "7.5f")
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "U+00A0" in check.detail
+
+
 def test_7_5f_skips_when_no_helm_dir(tmp_path: Path) -> None:
     """Si no hay helm/, el check no se emite."""
     root = _make_minimal_project(tmp_path)
@@ -210,6 +233,29 @@ def test_autofix_replaces_missing_flag(tmp_path: Path) -> None:
     assert result.applied is True
     text = f.read_text(encoding="utf-8")
     assert "-XX:+UseStringDeduplication" in text
+
+
+def test_autofix_replaces_non_breaking_space(tmp_path: Path) -> None:
+    """Si JAVA_OPTIONS tiene U+00A0, el autofix reescribe con espacios ASCII."""
+    root = _make_minimal_project(tmp_path)
+    bad_value = HELM_JAVA_OPTIONS_BASELINE.replace(
+        " -XX:MaxRAMPercentage", "\u00a0-XX:MaxRAMPercentage"
+    )
+    f = _write_helm(
+        root,
+        "dev",
+        f"""\
+env:
+  - name: "JAVA_OPTIONS"
+    value: "{bad_value}"
+""",
+    )
+
+    result = fix_helm_java_options(root)
+    text = f.read_text(encoding="utf-8")
+    assert result.applied is True
+    assert "\u00a0" not in text
+    assert HELM_JAVA_OPTIONS_BASELINE in text
 
 
 def test_autofix_does_NOT_inject_when_missing(tmp_path: Path) -> None:

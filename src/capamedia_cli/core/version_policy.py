@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import re
 
-# Baseline oficial decidido tras Snyk reports 2026-05 (Slack: kevin armas /
-# Jean Pierre Garcia / Alexis Padilla):
-#   - 10 CVEs HIGH activas: 3 Jackson 3.0.1 (transitiva de
-#     logstash-logback-encoder 9.0), 4 Netty 4.1.132 (transitiva de WebFlux
-#     3.5.14, ademas pinneada en dependencyManagement viejo), 3 Undertow.
-#   - Snyk recomienda subir `spring-boot-starter-webflux` >= 4.0.0.
-#   - Jean Pierre confirma "4.0.6 mejor de una vez" (mas nueva que la
-#     recomendacion minima de Snyk).
-# Spring Boot 4.0.6 ya trae Jackson 3.1.x y Netty mas nuevo por BOM, lo cual
-# resuelve las 7 CVEs transitivas con un solo bump. Undertow se sigue
-# bloqueando por Check 8.2.
-SPRING_BOOT_BASELINE_VERSION = "4.0.6"
+# Baseline oficial aprobado para servicios OLA.
+#
+# Nota 2026-05: se descarto usar Spring Boot 4.x como baseline general por
+# compatibilidad con los arquetipos/librerias actuales del banco. La mitigacion
+# de riesgos transitivos se mantiene por reglas especificas: sin Undertow
+# activo (Check 8.2) y sin pins manuales de io.netty:* (Check 8.7).
+SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 
 
 def parse_numeric_version(version: str) -> tuple[int, ...]:

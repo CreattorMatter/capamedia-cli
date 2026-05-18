@@ -263,7 +263,7 @@ def test_catalog_info_generated(tmp_path: Path) -> None:
     ci = repo_dir / "catalog-info.yaml"
     content = ci.read_text(encoding="utf-8")
     assert "namespace: tnd-middleware" in content
-    assert "name: tnd-msa-sp-wsclientes0007" in content
+    assert "name: tpl-middleware" in content
     assert "lifecycle: test" in content
     assert "owner: ops@pichincha.com" in content
     assert "tnd-msa-sp-wsclientes0007" in content

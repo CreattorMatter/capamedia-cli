@@ -416,12 +416,15 @@ def test_block_7_passes_clean_helm_env_value(tmp_path: Path) -> None:
 
 def test_block_7_fails_when_pipeline_namespace_differs_from_catalog(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
-    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n  application:\n    name: tnd-msa-sp-wsclientes0026\n",
+        encoding="utf-8",
+    )
     (root / "catalog-info.yaml").write_text(
         "apiVersion: backstage.io/v1alpha1\n"
         "kind: Component\n"
         "metadata:\n"
-        "  name: tnd-msa-sp-wsclientes0026\n"
+        "  name: tpl-middleware\n"
         "  namespace: tnd-middleware\n",
         encoding="utf-8",
     )
@@ -443,12 +446,15 @@ def test_block_7_fails_when_pipeline_namespace_differs_from_catalog(tmp_path: Pa
 
 def test_block_7_fails_when_catalog_namespace_does_not_match_project_prefix(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
-    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n  application:\n    name: csg-msa-sp-wsreglas0010\n",
+        encoding="utf-8",
+    )
     (root / "catalog-info.yaml").write_text(
         "apiVersion: backstage.io/v1alpha1\n"
         "kind: Component\n"
         "metadata:\n"
-        "  name: csg-msa-sp-wsreglas0010\n"
+        "  name: tpl-middleware\n"
         "  namespace: tnd-middleware\n",
         encoding="utf-8",
     )
@@ -465,10 +471,13 @@ def test_block_7_fails_when_catalog_namespace_does_not_match_project_prefix(tmp_
 
 def test_block_7_accepts_catalog_namespace_matching_project_prefix(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
-    (root / "src/main/resources/application.yml").write_text("app:\n  name: test\n", encoding="utf-8")
+    (root / "src/main/resources/application.yml").write_text(
+        "spring:\n  application:\n    name: csg-msa-sp-wsreglas0010\n",
+        encoding="utf-8",
+    )
     (root / "catalog-info.yaml").write_text(
         "metadata:\n"
-        "  name: csg-msa-sp-wsreglas0010\n"
+        "  name: tpl-middleware\n"
         "  namespace: csg-middleware\n",
         encoding="utf-8",
     )
@@ -514,16 +523,14 @@ def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
     check = _by_id(results, "8.1")
 
     assert check.status == "fail"
-    # Snyk 2026-05: Spring Boot baseline subio a 4.0.6 con severidad HIGH
-    # (7 CVEs HIGH transitivas en versiones < 4.0.0).
     assert check.severity == "high"
-    assert "4.0.6" in check.detail
+    assert "3.5.14" in check.detail
 
 
 def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '4.0.6' }\n",
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
         encoding="utf-8",
     )
 
@@ -537,7 +544,7 @@ def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
 def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '4.0.6' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
         "dependencies {\n"
         "  def undertowVersion = '2.4.0.RC4'\n"
         "  implementation 'org.springframework.boot:spring-boot-starter-undertow'\n"
@@ -558,7 +565,7 @@ def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
 def test_block_8_accepts_default_embedded_server_without_undertow(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '4.0.6' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
         "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n",
         encoding="utf-8",
     )
@@ -574,7 +581,7 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     build_gradle = root / "build.gradle"
     build_gradle.write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
+        "plugins { id 'org.springframework.boot' version '3.5.13' }\n",
         encoding="utf-8",
     )
 
@@ -584,7 +591,7 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
     report = run_autofix_loop(root, rerun)
 
     assert report.total_applied == 1
-    assert "version '4.0.6'" in build_gradle.read_text(encoding="utf-8")
+    assert "version '3.5.14'" in build_gradle.read_text(encoding="utf-8")
 
 
 def test_block_14_detects_placeholder_projectkey(tmp_path: Path) -> None:
