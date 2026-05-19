@@ -1400,10 +1400,10 @@ def _show_secrets_table(analysis, ws: Path, legacy_dest: Path) -> None:
         unique = sorted({h.jndi for h in audit.jndi_references_unknown})
         console.print(
             f"\n[yellow]Aviso:[/yellow] {len(unique)} JNDI detectado(s) pero "
-            "NO estan en el catalogo oficial: "
+            "NO tienen mapping automatico (fuera del catalogo o ambiguos): "
             f"[dim]{', '.join(unique)}[/dim]\n"
-            "  Consultar con SRE y/o agregar al catalogo en "
-            "[cyan]bank-secrets.md[/cyan] si es un JNDI nuevo."
+            "  Consultar con SRE y/o completar el mapping en "
+            "[cyan]bank-secrets.md[/cyan]."
         )
 
 

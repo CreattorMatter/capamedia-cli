@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from capamedia_cli.core.secrets_detector import (
+    AMBIGUOUS_SECRETS_CATALOG,
     SECRETS_CATALOG,
     audit_secrets,
     scan_jndi_references,
@@ -16,14 +17,47 @@ def _mk(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_catalog_has_six_entries_from_bptpsre() -> None:
-    """El catalogo debe tener exactamente las 6 entradas del PDF oficial."""
-    assert len(SECRETS_CATALOG) == 6
+def test_catalog_has_entries_from_bptpsre() -> None:
+    """El catalogo contiene las entradas oficiales conocidas por el CLI."""
+    assert len(SECRETS_CATALOG) == 73
     # Claves criticas
     assert "jndi.tecnicos.cataloga" in SECRETS_CATALOG
     assert "jndi.clientes.conclient" in SECRETS_CATALOG
     assert "jndi.sar.creditos" in SECRETS_CATALOG
     assert "jndi.bddvia" in SECRETS_CATALOG
+    # Entradas ampliadas del catalogo de secretos WAS.
+    assert SECRETS_CATALOG["jdbc/notifica"] == (
+        "TOTPAUT",
+        "CCC-ORACLE-NOTIFICA-TOTPAUT-USER",
+        "CCC-ORACLE-NOTIFICA-TOTPAUT-PASS",
+    )
+    assert SECRETS_CATALOG["GEOLOCALIZACION_JNDI"] == (
+        "TOTPAUT",
+        "CCC-ORACLE-GEOLOCALIZACION-TOTPAUT-USER",
+        "CCC-ORACLE-GEOLOCALIZACION-TOTPAUT-PASSWORD",
+    )
+    assert SECRETS_CATALOG["jndi.internexo.cliente"] == (
+        "internexo",
+        "CCC-SQLSERVER-INTERNEXO-CLIENTE-USER",
+        "CCC-SQLSERVER-INTERNEXO-CLIENTE-PASS",
+    )
+    assert SECRETS_CATALOG["AutogestionWeb/jdni"] == (
+        "ClientesPreaprobados",
+        "CCC-SQLSERVER-AUTOGESTIONWEB-CLIENTES-PREAPROBADOS-USER",
+        "CCC-SQLSERVER-AUTOGESTIONWEB-CLIENTES-PREAPROBADOS-PASS",
+    )
+
+
+def test_catalog_keeps_conflicting_jndi_as_ambiguous() -> None:
+    """JNDI duplicados con secrets distintos no se mapean automaticamente."""
+    assert "jndi.xa.tecnicos.cataloga" not in SECRETS_CATALOG
+    assert "jndi.sfi" not in SECRETS_CATALOG
+    assert "jndi.tecnicos.autorizador" not in SECRETS_CATALOG
+    assert set(AMBIGUOUS_SECRETS_CATALOG) == {
+        "jndi.xa.tecnicos.cataloga",
+        "jndi.sfi",
+        "jndi.tecnicos.autorizador",
+    }
 
 
 def test_catalog_secret_naming_uses_hyphens() -> None:
@@ -112,6 +146,31 @@ def test_scan_jndi_in_properties(tmp_path: Path) -> None:
     assert "jndi.sar.creditos" in jndis
 
 
+def test_scan_catalog_values_that_are_not_jndi_prefix(tmp_path: Path) -> None:
+    """Detecta entradas de catalogo tipo jdbc/*, constantes *_JNDI y jdni."""
+    root = tmp_path / "legacy"
+    _mk(
+        root / "WEB-INF" / "ibm-web-bnd.xml",
+        """<web-bnd>
+  <resource-ref><jndi-name>jdbc/notifica</jndi-name></resource-ref>
+  <resource-ref><jndi-name>AutogestionWeb/jdni</jndi-name></resource-ref>
+</web-bnd>""",
+    )
+    _mk(
+        root / "conf" / "service.properties",
+        "GEOLOCALIZACION_JNDI=GEOLOCALIZACION_JNDI\n",
+    )
+    _mk(
+        root / "src" / "Dao.java",
+        'new InitialContext().lookup("jdbc/omni");',
+    )
+
+    hits = scan_jndi_references([root])
+    values = {h.jndi for h in hits}
+
+    assert {"jdbc/notifica", "AutogestionWeb/jdni", "GEOLOCALIZACION_JNDI", "jdbc/omni"} <= values
+
+
 def test_scan_deduplicates_same_jndi_same_file(tmp_path: Path) -> None:
     """Si el mismo JNDI aparece N veces en el mismo archivo, solo 1 hit."""
     root = tmp_path / "legacy"
@@ -178,6 +237,21 @@ def test_audit_reports_unknown_jndi(tmp_path: Path) -> None:
     assert len(audit.secrets_required) == 0
     assert len(audit.jndi_references_unknown) >= 1
     assert audit.jndi_references_unknown[0].jndi == "jndi.custom.loquesea"
+
+
+def test_audit_reports_ambiguous_jndi_without_secret_mapping(tmp_path: Path) -> None:
+    """Un JNDI ambiguo se reporta para decision humana, no como secret valido."""
+    root = tmp_path / "legacy"
+    _mk(
+        root / "persistence.xml",
+        '<persistence><jta-data-source>jndi.sfi</jta-data-source></persistence>',
+    )
+
+    audit = audit_secrets(root, service_kind="was", has_database=True)
+
+    assert audit.applies
+    assert audit.secrets_required == []
+    assert [hit.jndi for hit in audit.jndi_references_unknown] == ["jndi.sfi"]
 
 
 def test_audit_scans_umps_too(tmp_path: Path) -> None:

@@ -6,6 +6,20 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.24.4] - 2026-05-19
+
+### Added - Catalogo de secrets WAS ampliado
+
+- `SECRETS_CATALOG` pasa de 6 a 73 datasource/JNDI mapeados a secretos Key
+  Vault.
+- El detector ahora reconoce valores `jndi.*`, `jdbc/*` y constantes exactas
+  del catalogo en XML, Java `@Resource`/`InitialContext.lookup(...)` y
+  properties.
+- Los JNDI duplicados con secretos conflictivos se detectan pero quedan como
+  ambiguos, sin mapear a `SecretRequirement` automaticamente:
+  `jndi.xa.tecnicos.cataloga`, `jndi.sfi`,
+  `jndi.tecnicos.autorizador`.
+
 ## [0.24.3] - 2026-05-18
 
 ### Added - Configuracion de PAT validada

@@ -178,18 +178,18 @@ def _render_secrets_section(workspace: Path, source_type: str, has_bancs: bool) 
         )
     else:
         console.print(
-            "  [dim]BD detectada pero sin JNDI en el catalogo oficial[/dim]"
+            "  [dim]BD detectada pero sin JNDI con mapping automatico[/dim]"
         )
 
     if unknown:
         unique_jndi = sorted({h.get("jndi") for h in unknown if h.get("jndi")})
         console.print(
-            f"\n  [yellow]JNDI fuera del catalogo oficial ({len(unique_jndi)}):[/yellow]"
+            f"\n  [yellow]JNDI fuera del catalogo o ambiguo ({len(unique_jndi)}):[/yellow]"
         )
         for j in unique_jndi:
             console.print(f"    [yellow]?[/yellow] {j}")
         console.print(
-            "    [dim]-> consultar con SRE; si es nuevo, agregar a bank-secrets.md[/dim]"
+            "    [dim]-> consultar con SRE; si es nuevo o ambiguo, completar bank-secrets.md[/dim]"
         )
 
 
