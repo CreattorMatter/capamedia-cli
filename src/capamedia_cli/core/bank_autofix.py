@@ -1401,9 +1401,9 @@ _NETTY_PIN_LINE_RE = re.compile(
 def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
     """Elimina pins manuales de `io.netty:*:VERSION` del `build.gradle`.
 
-    Solo opera sobre lineas dentro de bloques `dependencyManagement` o
-    `dependencies` con version literal. Mantiene el resto del archivo intacto.
-    Idempotente. Skip si no hay build.gradle.
+    Solo opera sobre lineas dentro de bloques `dependencyManagement`, igual que
+    el checker 8.7. Mantiene el resto del archivo intacto. Idempotente. Skip si
+    no hay build.gradle.
     """
     result = BankAutofixResult(rule="8.7", applied=False)
     gradle_files = [
@@ -1427,7 +1427,7 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         if "io.netty:" not in text:
             continue
 
-        new_text, n = _NETTY_PIN_LINE_RE.subn("", text)
+        new_text, n = _remove_netty_pins_from_dependency_management(text)
         if n > 0 and new_text != text:
             # Limpiar lineas blancas dobles que pueden haber quedado
             new_text = re.sub(r"\n{3,}", "\n\n", new_text)
@@ -1443,6 +1443,50 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
     else:
         result.notes = "no se encontraron pins de io.netty:* en build.gradle"
     return result
+
+
+def _remove_netty_pins_from_dependency_management(text: str) -> tuple[str, int]:
+    """Remove active io.netty pins only while inside dependencyManagement."""
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    removed = 0
+    in_dep_mgmt = False
+    brace_depth = 0
+    dep_mgmt_brace = -1
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        opens = raw_line.count("{")
+        closes = raw_line.count("}")
+        is_comment = not stripped or stripped.startswith(("//", "/*", "*"))
+
+        if (
+            not in_dep_mgmt
+            and not is_comment
+            and "dependencyManagement" in stripped
+            and "{" in raw_line
+        ):
+            in_dep_mgmt = True
+            dep_mgmt_brace = brace_depth + opens
+            output.append(raw_line)
+            brace_depth += opens - closes
+            continue
+
+        if in_dep_mgmt and not is_comment and _NETTY_PIN_LINE_RE.match(raw_line):
+            removed += 1
+            brace_depth += opens - closes
+            if brace_depth < dep_mgmt_brace:
+                in_dep_mgmt = False
+                dep_mgmt_brace = -1
+            continue
+
+        output.append(raw_line)
+        brace_depth += opens - closes
+        if in_dep_mgmt and brace_depth < dep_mgmt_brace:
+            in_dep_mgmt = False
+            dep_mgmt_brace = -1
+
+    return "".join(output), removed
 
 
 # ---------------------------------------------------------------------------

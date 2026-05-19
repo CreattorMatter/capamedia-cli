@@ -323,3 +323,30 @@ dependencyManagement {
     assert "spring-boot-starter-webflux" in text
     assert "lib-bnc-api-client:1.1.0" in text
     assert "spring-cloud-dependencies:2025.0.0" in text
+
+
+def test_autofix_preserves_direct_netty_dependency_outside_dependency_management(tmp_path: Path) -> None:
+    """El autofix debe seguir el mismo alcance del checker: solo dependencyManagement."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'io.netty:netty-handler:4.1.132.Final'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.0.0'
+    }
+}
+""",
+    )
+
+    result = fix_remove_netty_pin(root)
+
+    text = f.read_text(encoding="utf-8")
+    assert result.applied is False
+    assert "io.netty:netty-handler:4.1.132.Final" in text
