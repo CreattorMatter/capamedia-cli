@@ -6,6 +6,40 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.24.5] - 2026-05-15
+
+### Fixed - `capamedia clone` ya no oculta el motivo real del fallo
+
+Origen: `capamedia clone orqclientes0027` fallaba con un generico "no se
+encontro en ningun proyecto Azure conocido" que ocultaba si el problema era
+el repo (404) o el PAT (401/403). Reportado por Jean Pierre.
+
+- **Fix A — error real visible:** `_resolve_azure_repo` ahora acumula el
+  error de cada intento de clone (antes los descartaba con `_err`). Cuando
+  todos fallan, el CLI lista cada repo probado con su error de git, y la
+  funcion `_classify_clone_failures` clasifica el conjunto en
+  `auth` / `not_found` / `mixed` para dar el tip correcto.
+  - El marker de auth es especifico (`401 unauthorized`, no `401` suelto)
+    para no confundir `TF401019` (codigo de "repo no existe") con un fallo
+    de autenticacion.
+- **Fix B — flag `--legacy-repo`:** permite pasar el nombre exacto del repo
+  legacy cuando ningun patron de `AZURE_FALLBACK_PATTERNS` matchea (caso ORQ
+  con nomenclatura no estandar). Se prueba en `tpl-bus-omnicanal`,
+  `tpl-integration-services-was` y `tpl-middleware`.
+- **Fix C — validacion de PAT antes del clone:** nueva funcion
+  `core/auth.probe_azure_devops_pat()` que verifica el scope del PAT contra
+  Azure DevOps ANTES de probar los patrones. Si el PAT fue rechazado
+  (401/403 — tipicamente por reusar el token de Artifacts, scope
+  `Packaging`, en `CAPAMEDIA_AZDO_PAT`), el clone aborta temprano con un
+  mensaje claro en vez de "no encontrado".
+
+### Tests
+
+- `tests/test_clone_legacy_resolution.py` (nuevo): 11 casos para
+  `_classify_clone_failures` y `_resolve_azure_repo` (attempts + override).
+- `tests/test_auth.py`: +5 casos para `probe_azure_devops_pat`.
+- `tests/test_clone.py`: 2 tests actualizados a la firma de 4 elementos.
+
 ## [0.24.4] - 2026-05-19
 
 ### Added - Catalogo de secrets WAS ampliado

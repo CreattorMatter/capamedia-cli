@@ -220,3 +220,90 @@ def test_root_pat_command_stops_when_pat_validation_fails(monkeypatch) -> None:
     assert configured is False
     assert "Azure DevOps devolvio 401 Unauthorized" in result.output
     assert "bad-token" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# probe_azure_devops_pat — Fix C: validacion de PAT antes del clone
+# ---------------------------------------------------------------------------
+
+
+def test_probe_pat_no_pat_when_env_empty(monkeypatch) -> None:
+    """Sin PAT en ninguna env var -> ('no_pat', ...)."""
+    from capamedia_cli.core.auth import probe_azure_devops_pat
+
+    monkeypatch.delenv("CAPAMEDIA_AZDO_PAT", raising=False)
+    monkeypatch.delenv("AZURE_DEVOPS_EXT_PAT", raising=False)
+
+    status, detail = probe_azure_devops_pat()
+    assert status == "no_pat"
+    assert "PAT" in detail
+
+
+def test_probe_pat_ok_on_http_200(monkeypatch) -> None:
+    """urlopen devuelve 200 -> ('ok', ...)."""
+    import capamedia_cli.core.auth as auth_mod
+
+    monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "valid-pat")
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(auth_mod, "urlopen", lambda *a, **k: _FakeResponse())
+
+    status, _detail = auth_mod.probe_azure_devops_pat()
+    assert status == "ok"
+
+
+def test_probe_pat_denied_on_401(monkeypatch) -> None:
+    """urlopen lanza HTTPError 401 -> ('denied', menciona scope Code Read)."""
+    import capamedia_cli.core.auth as auth_mod
+    from urllib.error import HTTPError
+
+    monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "wrong-scope-pat")
+
+    def _raise_401(*a, **k):
+        raise HTTPError("url", 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(auth_mod, "urlopen", _raise_401)
+
+    status, detail = auth_mod.probe_azure_devops_pat()
+    assert status == "denied"
+    assert "Code (Read)" in detail
+
+
+def test_probe_pat_denied_on_403(monkeypatch) -> None:
+    """urlopen lanza HTTPError 403 -> ('denied', ...)."""
+    import capamedia_cli.core.auth as auth_mod
+    from urllib.error import HTTPError
+
+    monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "forbidden-pat")
+
+    def _raise_403(*a, **k):
+        raise HTTPError("url", 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(auth_mod, "urlopen", _raise_403)
+
+    status, _detail = auth_mod.probe_azure_devops_pat()
+    assert status == "denied"
+
+
+def test_probe_pat_unreachable_on_urlerror(monkeypatch) -> None:
+    """urlopen lanza URLError (red/proxy) -> ('unreachable', ...)."""
+    import capamedia_cli.core.auth as auth_mod
+    from urllib.error import URLError
+
+    monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "any-pat")
+
+    def _raise_urlerror(*a, **k):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr(auth_mod, "urlopen", _raise_urlerror)
+
+    status, _detail = auth_mod.probe_azure_devops_pat()
+    assert status == "unreachable"

@@ -170,12 +170,39 @@ def _canonical_service_from_repo_name(repo_name: str) -> str:
     return ""
 
 
-def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tuple[Path | None, str, str]:
+def _resolve_azure_repo(
+    service_name: str,
+    dest_root: Path,
+    shallow: bool,
+    *,
+    override_repo: str | None = None,
+) -> tuple[Path | None, str, str, list[tuple[str, str]]]:
     """Intenta clonar el servicio probando todos los patrones Azure conocidos.
 
+    `override_repo`: si se pasa (flag `--legacy-repo`), se usa ese nombre de
+    repo exacto en vez de los patrones. Se prueba en cada proyecto Azure
+    conocido (bus/was/middleware) hasta que uno funcione. Util cuando un ORQ
+    o servicio tiene una nomenclatura no contemplada en AZURE_FALLBACK_PATTERNS.
+
     Returns:
-      (path_clonado, project_key, repo_name) o (None, "", "") si nada funciona.
+      (path_clonado, project_key, repo_name, attempts) donde `attempts` es la
+      lista de (repo_name, error) de cada intento fallido — vacia si el primer
+      intento funciono. Si nada funciona, path_clonado es None y `attempts`
+      tiene el detalle de TODOS los intentos para que el caller lo muestre.
     """
+    attempts: list[tuple[str, str]] = []
+
+    # Fix B: override explicito del nombre del repo legacy.
+    if override_repo:
+        repo_name = override_repo.strip()
+        for project_key in ("bus", "was", "middleware"):
+            dest = dest_root / "legacy" / repo_name
+            ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+            if ok:
+                return (dest, project_key, repo_name, [])
+            attempts.append((f"{AZURE_PROJECTS[project_key]}/{repo_name}", err))
+        return (None, "", "", attempts)
+
     svc = service_name.lower()
     service_candidates = [svc]
     for candidate in _orq_alias_candidates(svc):
@@ -186,20 +213,68 @@ def _resolve_azure_repo(service_name: str, dest_root: Path, shallow: bool) -> tu
         for project_key, pattern in AZURE_FALLBACK_PATTERNS:
             repo_name = pattern.format(svc=candidate_svc)
             dest = dest_root / "legacy" / repo_name
-            ok, _err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
+            ok, err = _git_clone(repo_name, dest, project_key=project_key, shallow=shallow)
             if ok:
-                return (dest, project_key, repo_name)
+                return (dest, project_key, repo_name, attempts)
+            attempts.append((f"{AZURE_PROJECTS[project_key]}/{repo_name}", err))
     split_root = dest_root / "legacy" / "_repo"
     split_repos: list[str] = []
     for suffix in WAS_SPLIT_REPO_SUFFIXES:
         repo_name = f"{svc}-{suffix}"
         dest = split_root / repo_name
-        ok, _err = _git_clone(repo_name, dest, project_key="was", shallow=shallow)
+        ok, err = _git_clone(repo_name, dest, project_key="was", shallow=shallow)
         if ok:
             split_repos.append(repo_name)
+        else:
+            attempts.append((f"{AZURE_PROJECTS['was']}/{repo_name}", err))
     if split_repos:
-        return (split_root, "was", " + ".join(split_repos))
-    return (None, "", "")
+        return (split_root, "was", " + ".join(split_repos), [])
+    return (None, "", "", attempts)
+
+
+def _classify_clone_failures(attempts: list[tuple[str, str]]) -> str:
+    """Clasifica el conjunto de errores de clone en 'auth' | 'not_found' | 'mixed'.
+
+    'auth'      -> todos los intentos fallaron por autenticacion/permiso.
+    'not_found' -> todos fallaron por repo inexistente.
+    'mixed'     -> combinacion (o errores de red/timeout).
+    """
+    if not attempts:
+        return "mixed"
+    # NOTA: los markers de codigo HTTP son especificos ("401 unauthorized",
+    # no "401" suelto) porque `TF401019` — el codigo de Azure para "repo no
+    # existe" — contiene la subcadena "401" y daria un falso positivo de auth.
+    auth_markers = (
+        "authentication failed",
+        "could not read username",
+        "terminal prompts disabled",
+        "tf400813",
+        "403 forbidden",
+        "401 unauthorized",
+        "http 401",
+        "http 403",
+        "no tienes permisos",
+        "no tiene permisos",
+    )
+    not_found_markers = (
+        "not found",
+        "repository not found",
+        "does not exist",
+        "tf401019",
+    )
+    saw_auth = False
+    saw_not_found = False
+    for _repo, err in attempts:
+        lowered = err.lower()
+        if any(m in lowered for m in auth_markers):
+            saw_auth = True
+        elif any(m in lowered for m in not_found_markers):
+            saw_not_found = True
+    if saw_auth and not saw_not_found:
+        return "auth"
+    if saw_not_found and not saw_auth:
+        return "not_found"
+    return "mixed"
 
 
 def _resolve_ump_repo(
@@ -815,6 +890,16 @@ def clone_service(
         bool,
         typer.Option("--shallow", help="Clone superficial (--depth 1) para ahorrar tiempo"),
     ] = False,
+    legacy_repo: Annotated[
+        str | None,
+        typer.Option(
+            "--legacy-repo",
+            help="Nombre exacto del repo legacy en Azure DevOps cuando ningun "
+            "patron conocido lo encuentra (ej. ORQ con nomenclatura no estandar). "
+            "Se prueba en los proyectos tpl-bus-omnicanal / tpl-integration-services-was / "
+            "tpl-middleware.",
+        ),
+    ] = None,
     skip_tx: Annotated[
         bool,
         typer.Option("--skip-tx", help="No clonar los repos de TX individuales (sqb-cfg-<TX>-TX)"),
@@ -894,13 +979,60 @@ def clone_service(
         )
     else:
         console.print("\n[bold]1. Legacy no esta local. Probando proyectos Azure...[/bold]")
-        legacy_dest, project_key, repo_name = _resolve_azure_repo(service_name, ws, shallow)
-        if legacy_dest is None:
-            console.print("[red]FAIL[/red] no se encontro en ningun proyecto Azure conocido")
+
+        # Fix C: validar el PAT ANTES de probar patrones. Sin esto, un PAT sin
+        # scope `Code (Read)` hace fallar TODOS los clones y el error sale como
+        # "no encontrado" (falso negativo). El caso clasico es copiar el token
+        # de Artifacts (scope Packaging) al CAPAMEDIA_AZDO_PAT.
+        from capamedia_cli.core.auth import probe_azure_devops_pat
+
+        pat_status, pat_detail = probe_azure_devops_pat()
+        if pat_status == "denied":
+            console.print(f"[red]FAIL[/red] PAT de Azure DevOps invalido: {pat_detail}")
             console.print(
-                "[yellow]Tip:[/yellow] verifica que el servicio exista o agrega un nuevo "
-                "patron a AZURE_FALLBACK_PATTERNS en clone.py."
+                "[yellow]Tip:[/yellow] regenera un PAT con scope [bold]Code (Read)[/bold] "
+                "en Azure DevOps y exportalo en [cyan]CAPAMEDIA_AZDO_PAT[/cyan]. "
+                "No reuses el token de Artifacts."
             )
+            raise typer.Exit(1)
+        if pat_status == "no_pat":
+            console.print(
+                "[yellow]Aviso:[/yellow] no hay PAT en CAPAMEDIA_AZDO_PAT; el clone "
+                "depende del Git Credential Manager cacheado."
+            )
+        elif pat_status == "unreachable":
+            console.print(f"[yellow]Aviso:[/yellow] no se pudo prevalidar el PAT — {pat_detail}")
+
+        legacy_dest, project_key, repo_name, attempts = _resolve_azure_repo(
+            service_name, ws, shallow, override_repo=legacy_repo
+        )
+        if legacy_dest is None:
+            failure_kind = _classify_clone_failures(attempts)
+            console.print(
+                f"[red]FAIL[/red] no se pudo clonar el legacy "
+                f"({len(attempts)} repo(s) probado(s)):"
+            )
+            for repo_full, err in attempts:
+                console.print(f"  [dim]-[/dim] {repo_full} [red]->[/red] {err}")
+            if failure_kind == "auth":
+                console.print(
+                    "[yellow]Tip:[/yellow] todos los intentos fallaron por "
+                    "autenticacion/permiso. Tu PAT no tiene acceso de lectura a "
+                    "estos repos — regeneralo con scope [bold]Code (Read)[/bold]."
+                )
+            elif failure_kind == "not_found":
+                console.print(
+                    "[yellow]Tip:[/yellow] ningun repo existe con esos nombres. "
+                    "Verifica el nombre real del repo y pasalo con "
+                    "[cyan]--legacy-repo <nombre-exacto>[/cyan], o agrega el patron "
+                    "a AZURE_FALLBACK_PATTERNS en clone.py."
+                )
+            else:
+                console.print(
+                    "[yellow]Tip:[/yellow] revisa los errores de arriba. Si el repo "
+                    "existe con otro nombre, pasalo con "
+                    "[cyan]--legacy-repo <nombre-exacto>[/cyan]."
+                )
             raise typer.Exit(1)
         resolved_service_name = _canonical_service_from_repo_name(repo_name)
         if resolved_service_name and resolved_service_name != service_name:
