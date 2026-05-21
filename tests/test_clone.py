@@ -176,7 +176,7 @@ def test_resolve_azure_repo_supports_was_split_repos(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
 
-    path, project_key, repo_name = _resolve_azure_repo(
+    path, project_key, repo_name, _attempts = _resolve_azure_repo(
         "wsclientes0154", tmp_path, shallow=True
     )
 
@@ -211,7 +211,9 @@ def test_resolve_azure_repo_expands_orq_aliases(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.setattr("capamedia_cli.commands.clone._git_clone", fake_git_clone)
 
-    path, project_key, repo_name = _resolve_azure_repo("orq0022", tmp_path, shallow=True)
+    path, project_key, repo_name, _attempts = _resolve_azure_repo(
+        "orq0022", tmp_path, shallow=True
+    )
 
     assert path == tmp_path / "legacy" / "sqb-msa-orqclientes0022"
     assert project_key == "bus"
