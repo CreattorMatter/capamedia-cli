@@ -381,47 +381,70 @@ optimus:
 
 ---
 
-## Regla 8 - `lib-bnc-api-client:1.1.0` solo cuando la matriz lo exige
+## Regla 8 - `lib-bnc-api-client` solo cuando la matriz lo exige (version segun OLA)
 
 **MUST**: solo servicios BUS/IIB con `invocaBancs=true` deben declarar la
-libreria BANCS API client del banco en la **version estable** `1.1.0`:
+libreria BANCS API client del banco. La **version depende del OLA del
+servicio**:
+
+| OLA | Version | Notas |
+|-----|---------|-------|
+| OLA 1 | `1.1.0` | Linea base de OLA 1. |
+| OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
 
 ```gradle
+// servicio OLA 1
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
+// servicio OLA 2
+implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'
 ```
 
-**Ahora que la version estable `1.1.0` esta liberada** (Apr 2026), los
-proyectos migrados van con `1.1.0` limpio. Antes estaba disponible solo
-en variante pre-release (`1.1.0-alpha.20260409115137`), que tambien pasaba
-el regex del validador oficial porque contenia el substring `1.1.0`. Esa
-version queda **deprecada** para proyectos nuevos.
+**Que servicios son OLA 2**: la lista oficial vive en `core/ola_policy.py`
+(`OLA2_SERVICES`) — fuente de verdad unica del CLI. Un servicio usa `2.0.0`
+si y solo si esta en esa lista; cualquier otro usa `1.1.0`. Las entregas
+OLA 2 futuras amplian esa lista.
 
 **NEVER**:
 - agregarla en WAS, ORQ o BUS/IIB sin `invocaBancs=true`
 - omitirla en BUS/IIB con `invocaBancs=true` (implementar BANCS client a mano desde cero)
+- usar `1.1.0` en un servicio OLA 2 — necesita `2.0.0` para token y transacciones financieras
+- usar `2.0.0` en un servicio OLA 1
 - usar version `1.0.x` o menor
-- mantener `1.1.0-alpha.*`, `1.1.0-SNAPSHOT`, `1.1.0.RELEASE`, `1.1.0-rc*`,
-  `1.1.0-beta*` en proyectos migrados nuevos. La estable ya salio; ir a ella.
-- usar version sin prefijo `1.1.0` (el check oficial busca substring match)
+- mantener pre-releases (`-alpha.*`, `-SNAPSHOT`, `.RELEASE`, `-rc*`, `-beta*`)
+  en proyectos migrados nuevos
 
 ### Autofix
 
-`capamedia validate-hexagonal auto-fix --rules 8` aplica dos pasos:
+`capamedia validate-hexagonal auto-fix --rules 8` (y `capamedia ai doublecheck`)
+aplican dos pasos:
 
-1. **Normaliza** cualquier variante pre-release de `1.1.0` (`-alpha.*`,
-   `-SNAPSHOT`, `-rc*`, `-beta*`, `.RELEASE`, `.M*`) a `1.1.0` estable.
+1. **Fija la version** a la que corresponde al OLA del servicio. Si la libreria
+   esta declarada con otra version — pre-release, o la version de la otra OLA —
+   la reescribe a la correcta (`1.1.0` OLA 1, `2.0.0` OLA 2).
 2. Si la matriz indica BUS/IIB con `invocaBancs=true` y la libreria no esta
    declarada, la inserta en el bloque `dependencies { }` del `build.gradle`.
    En WAS, ORQ y BUS/IIB sin BANCS no la agrega.
 
+La deteccion es por **nombre de artefacto**, no por version: un `build.gradle`
+correcto en `2.0.0` nunca recibe una segunda linea `1.1.0` en conflicto.
+
 Esta libreria provee: `BancsClient`, `BancsClientHelper`, anotaciones `@BancsService`, mapeos de errores canonicos del banco. Sin ella el codigo se duplica.
 
 ```gradle
-// ✔ OK
+// ✔ OK - servicio OLA 1
 dependencies {
   implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
   // ... resto
 }
+
+// ✔ OK - servicio OLA 2
+dependencies {
+  implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'
+  // ... resto
+}
+
+// ✘ NO - 1.1.0 en un servicio OLA 2 (necesita 2.0.0)
+implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
 
 // ✘ NO - version vieja
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'

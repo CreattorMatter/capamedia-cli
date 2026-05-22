@@ -6,6 +6,61 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-22
+
+### Added - soporte OLA 2 + compuerta de calidad pre-QA `/qa`
+
+**OLA 2 — `lib-bnc-api-client` versionada por OLA**
+
+El plan de librerias del Adaptador BANCS define `lib-bnc-api-client:2.0.0`
+como linea base obligatoria desde OLA 2 (disponible 2026-05-25; suma soporte
+de token y transacciones financieras). OLA 1 sigue en `1.1.0`.
+
+- **`core/ola_policy.py` (nuevo):** fuente de verdad unica — lista de los 25
+  servicios OLA 2 (entrega 1) + `is_ola2()` + `lib_bnc_api_client_version()`
+  (OLA 2 -> `2.0.0`, resto -> `1.1.0`).
+- **`bank_autofix.py` Regla 8 OLA-aware:** el autofix detecta el servicio y
+  fija `lib-bnc-api-client` a la version del OLA; reescribe cualquier version
+  distinta (pre-release o la de la otra OLA).
+- **Bug corregido:** la deteccion de la libreria pasaba por el substring
+  `:1.1.0`. Un `build.gradle` correcto en `2.0.0` fallaba ese test y recibia
+  una segunda linea `1.1.0` en conflicto. Ahora la deteccion es por nombre de
+  artefacto.
+- Canonicos con la Regla 8 reescrita (no apilada): `bank-official-rules.md`,
+  `checklist-rules.md`, `doublecheck.md`, `migrate-rest-full.md`,
+  `was-ump-inline.md`.
+
+**Compuerta de calidad pre-QA — nuevo comando `/qa`**
+
+Incorpora los 2 prompts oficiales del banco (presentacion 2026-05-19) y
+reemplaza al viejo `qa-generator`.
+
+- **`/qa` (nuevo, `prompts/qa.md`):** compuerta en dos pasos. Paso 1 —
+  analisis comparativo legacy vs migrado (diferencias que romperian QA,
+  go/no-go, casos de prueba, config Diffy). Paso 2 — handoff al agente
+  `qe-migration`.
+- **`qe-migration` (nuevo, `agents/qe-migration.md`):** agente QA/QE senior
+  que genera artefactos QA (criterios de aceptacion, casos BDD Gherkin,
+  payloads, matriz de riesgos) bajo `docs/qa/**`. Reemplaza a `qa-generator`
+  (agente + context), que se elimina.
+- **`capamedia qa` retargeteado:** `pack`/`prepare` ahora solo preparan el
+  workspace (clonan legacy + migrado) y apuntan al comando `/qa` canonico.
+  Se elimino la generacion del prompt `/qa` viejo de Copilot.
+
+### Nota
+
+El validador oficial vendored (`validate_hexagonal.py`) sigue chequeando
+`1.1.0` en su Regla 8. Para OLA 2 necesita la version OLA-2 del script del
+banco — actualizar con `capamedia validate-hexagonal sync` cuando este
+disponible. El path nativo del CLI (`check` + `doublecheck` + autofix) ya es
+OLA-aware.
+
+### Tests
+
+- `tests/test_ola_policy.py` (nuevo): 9 casos para la politica OLA 2.
+- `tests/test_bank_autofix.py`: +3 casos para la Regla 8 OLA-aware.
+- `tests/test_qa.py`: reescrito para el nuevo `capamedia qa`.
+
 ## [0.24.5] - 2026-05-15
 
 ### Fixed - `capamedia clone` ya no oculta el motivo real del fallo

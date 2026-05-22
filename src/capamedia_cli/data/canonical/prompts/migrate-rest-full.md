@@ -956,6 +956,9 @@ dependencies {
 
     // Corporate libraries
     implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
+    // lib-bnc-api-client: version segun OLA del servicio — 1.1.0 (OLA 1) o
+    // 2.0.0 (OLA 2; servicios de core/ola_policy.py OLA2_SERVICES). El autofix
+    // de `capamedia ai doublecheck` (Regla 8) la fija a la version correcta.
     implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
 
     // Logging

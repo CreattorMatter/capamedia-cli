@@ -24,7 +24,7 @@ cp prompts/configuracion-claude-code/CLAUDE.md /path/to/tnd-msa-sp-wsclientes000
     analista-legacy.md   <- Subagente para analisis pre-migracion
     migrador.md          <- Subagente para ejecutar la migracion
     validador-hex.md     <- Subagente para validar arquitectura hexagonal
-    qa-generator.md      <- Subagente para generar artefactos QA
+    qe-migration.md      <- Subagente QA/QE: artefactos QA bajo docs/qa/**
   skills/
     pre-migracion/SKILL.md   <- /pre-migracion command
     migrar/SKILL.md          <- /migrate command (legacy alias /migrar)
@@ -57,4 +57,4 @@ pero el flujo recomendado para cualquier IA es el shell flow anterior.
 | `analista-legacy` | Se invoca automaticamente en pre-migracion |
 | `migrador` | Se invoca automaticamente durante la migracion |
 | `validador-hex` | Se invoca despues de cada bloque para verificar hexagonal |
-| `qa-generator` | Se invoca en post-migracion para generar casos de uso |
+| `qe-migration` | Genera artefactos QA (CA, BDD, payloads, riesgos); Paso 2 de `/qa` |

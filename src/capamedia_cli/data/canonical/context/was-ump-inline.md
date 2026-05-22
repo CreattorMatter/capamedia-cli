@@ -49,7 +49,7 @@ reporta como **inline** en el `COMPLEXITY_<svc>.md`.
 - Si la UMP inline tiene **wrapper de BANCS** (invocación TX del core) → se
   migra como un `@Component` output-adapter bajo
   `infrastructure/output/adapter/bancs/` con `BancsClient` del
-  `lib-bnc-api-client:1.1.0`. Es el único caso donde la UMP inline sí se
+  `lib-bnc-api-client` (version segun OLA: 1.1.0 OLA 1, 2.0.0 OLA 2). Es el único caso donde la UMP inline sí se
   convierte en adapter — pero el adapter NO es remoto, usa el BANCS Core
   Adapter local.
 

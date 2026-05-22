@@ -1300,7 +1300,7 @@ grep -E "springframework.boot.*version|logstash-logback-encoder|lib-bnc-api-clie
 - **Jackson:** NO pinear `jackson-core`, `jackson-databind`, `jackson-dataformat-xml`. Pinear explicito causa drift al proximo CVE.
 - **Netty:** NO pinear `io.netty:*` en `dependencyManagement`. El pin viejo `4.1.132.Final` es ahora el bug (4 CVEs HIGH). Validado por Check 8.7.
 - **logstash-logback-encoder:** `9.0`.
-- **lib-bnc-api-client:** `com.pichincha.bnc:lib-bnc-api-client:1.1.0` estable.
+- **lib-bnc-api-client:** version segun OLA del servicio — `1.1.0` (OLA 1) o `2.0.0` (OLA 2, obligatoria desde 2026-05-25). Lista OLA 2 en `core/ola_policy.py`.
 - **Peer Review plugin:** `1.1.0`.
 
 **Veredicto:**

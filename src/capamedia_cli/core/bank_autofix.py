@@ -5,8 +5,9 @@ ejemplos YES/NO. Aqui implementamos los fixes que se pueden aplicar sin AI:
 
 - Regla 4: `@BpLogger` faltante en metodos publicos de @Service
 - Regla 7: `${VAR:default}` en `application.yml` → `${VAR}` (excluye `optimus.web.*`)
-- Regla 8: `com.pichincha.bnc:lib-bnc-api-client:1.1.0` solo para BUS/IIB
-  con invocaBancs=true; en WAS/ORQ/BUS sin BANCS no se agrega.
+- Regla 8: `com.pichincha.bnc:lib-bnc-api-client` (version segun OLA del
+  servicio — 1.1.0 OLA 1, 2.0.0 OLA 2) solo para BUS/IIB con invocaBancs=true;
+  en WAS/ORQ/BUS sin BANCS no se agrega.
 - Regla 9: `catalog-info.yaml` con placeholders literales → esqueleto valido
 
 Regla 6 (Service sin utils) **NO** es autofixeable: requiere refactor semantico.
@@ -15,10 +16,12 @@ Se reporta como HIGH con hint especifico via `core/self_correction.py`.
 
 from __future__ import annotations
 
-from collections import Counter
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -245,21 +248,20 @@ def fix_yml_remove_defaults(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
-# Regla 8 — lib-bnc-api-client en build.gradle
+# Regla 8 — lib-bnc-api-client en build.gradle (version segun OLA)
+#
+# La version depende del OLA del servicio (ver `core/ola_policy.py`):
+#   - OLA 1  -> 1.1.0
+#   - OLA 2  -> 2.0.0  (servicios listados en OLA2_SERVICES)
 # ---------------------------------------------------------------------------
 
 
-REQUIRED_LIBRARY_PREFIX = "com.pichincha.bnc:lib-bnc-api-client:1.1.0"
-_REQUIRED_DEP_LINE = (
-    "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'"
-)
+LIBBNC_ARTIFACT = "com.pichincha.bnc:lib-bnc-api-client"
 
-# Matchea variantes no-estables de 1.1.0 que deben normalizarse a 1.1.0 limpio.
-# Ejemplos: 1.1.0-alpha.20260409115137, 1.1.0-SNAPSHOT, 1.1.0.RELEASE, 1.1.0-rc1
-_LIBBNC_PRE_1_1_0_RE = re.compile(
-    r"(com\.pichincha\.bnc:lib-bnc-api-client:1\.1\.0)"
-    r"[-.](?:alpha|beta|rc|snapshot|release|m)[\w.\-]*",
-    re.IGNORECASE,
+# Matchea la coordenada con CUALQUIER version declarada: estable, pre-release
+# o de la otra OLA. Group 1 = `<artifact>:`, group 2 = la version.
+_LIBBNC_COORD_RE = re.compile(
+    r"(com\.pichincha\.bnc:lib-bnc-api-client:)([0-9][\w.\-]*)"
 )
 
 
@@ -268,23 +270,63 @@ def _requires_bancs_from_matrix(source_type: str | None, has_bancs: bool) -> boo
     return (source_type or "").lower() in {"bus", "iib"} and has_bancs
 
 
+def _detect_service_name(project_root: Path) -> str:
+    """Best-effort: nombre de servicio para decidir el OLA.
+
+    Mira `.capamedia/config.yaml`, `spring.application.name` y el nombre de la
+    carpeta, en ese orden. El resultado se pasa a `core.ola_policy`, que extrae
+    el token de servicio (ej. `tnd-msa-sp-wsclientes0011` -> `wsclientes0011`).
+    """
+    config = project_root / ".capamedia" / "config.yaml"
+    if config.exists():
+        try:
+            import yaml
+
+            data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+            if isinstance(data, dict) and data.get("service_name"):
+                return str(data["service_name"])
+        except Exception:
+            pass
+
+    app_name = _read_spring_application_name(project_root)
+    if app_name:
+        return app_name
+
+    return project_root.name
+
+
 def fix_add_libbnc_dependency(
     project_root: Path,
     *,
     requires_bancs: bool | None = None,
+    service: str | None = None,
 ) -> BankAutofixResult:
-    """Normaliza `lib-bnc-api-client` a `1.1.0` estable y la agrega solo si aplica.
+    """Fija `lib-bnc-api-client` en la version del OLA del servicio.
+
+    Version (ver `core/ola_policy.py`):
+      - OLA 1 (default): 1.1.0
+      - OLA 2 (servicios de `OLA2_SERVICES`): 2.0.0
 
     Comportamiento:
-      1. Si hay `1.1.0-alpha.*` / `1.1.0-SNAPSHOT` / `1.1.0.RELEASE` / etc.,
-         lo reemplaza por `1.1.0` limpio (ahora que la estable esta
-         liberada).
-      2. Si la matriz dice BUS/IIB + invocaBancs=true y no hay ninguna version
-         de la libreria, la inserta en `dependencies { }` o crea el bloque.
-      3. Si la matriz dice WAS/ORQ/BUS sin BANCS, nunca agrega la libreria.
-      4. Si ya esta `1.1.0` limpio, no toca.
+      1. Si la libreria ya esta declarada con una version distinta a la del
+         OLA — incluye pre-releases y la version de la otra OLA — la reescribe
+         a la version correcta. Cubre `1.1.0` en un servicio OLA 2 y `2.0.0`
+         en uno OLA 1.
+      2. Si la matriz dice BUS/IIB + invocaBancs=true y la libreria no esta,
+         la inserta con la version del OLA.
+      3. Si la matriz dice WAS/ORQ/BUS sin BANCS, nunca la agrega.
+
+    La deteccion de "ya esta declarada" es por NOMBRE de artefacto (no por
+    version), de modo que un `build.gradle` correcto en `2.0.0` nunca recibe
+    una segunda linea `1.1.0` en conflicto.
     """
     result = BankAutofixResult(rule="8", applied=False)
+
+    if service is None:
+        service = _detect_service_name(project_root)
+    target_version = lib_bnc_api_client_version(service)
+    label = ola_label(service)
+    required_dep_line = f"    implementation '{LIBBNC_ARTIFACT}:{target_version}'"
 
     gradle_files = [
         f
@@ -308,36 +350,45 @@ def fix_add_libbnc_dependency(
 
         original = text
 
-        # Paso 1: normalizar versiones pre-release de 1.1.0 a 1.1.0 estable
-        normalized, n_replaced = _LIBBNC_PRE_1_1_0_RE.subn(r"\1", text)
-        if n_replaced > 0:
-            text = normalized
+        # Paso 1: reescribir cualquier version declarada a la version del OLA.
+        # Cubre pre-releases (1.1.0-alpha.*, 2.0.0-SNAPSHOT) y la version de la
+        # otra OLA (1.1.0 en un servicio OLA 2, o 2.0.0 en uno OLA 1).
+        present_versions = {m.group(2) for m in _LIBBNC_COORD_RE.finditer(text)}
+        wrong_versions = sorted(present_versions - {target_version})
+        if wrong_versions:
+            text = _LIBBNC_COORD_RE.sub(
+                lambda m: m.group(1) + target_version, text
+            )
             result.changes.append(
-                f"{gf.relative_to(project_root)}: {n_replaced} version(es) "
-                f"pre-release de lib-bnc-api-client normalizada(s) a 1.1.0"
+                f"{gf.relative_to(project_root)}: lib-bnc-api-client "
+                f"{', '.join(wrong_versions)} -> {target_version} ({label})"
             )
 
-        # Paso 2: si aun no esta la libreria, agregarla solo cuando el
-        # contexto MCP la requiere. Sin contexto explicito se trabaja en modo
-        # conservador: normalizar si ya existe, pero no inventar BANCS.
-        if REQUIRED_LIBRARY_PREFIX not in text:
+        # Paso 2: si la libreria no esta y la matriz la requiere, insertarla.
+        # La deteccion es por nombre de artefacto, no por version.
+        if LIBBNC_ARTIFACT not in text:
             if requires_bancs is True:
-                # Insertar dentro del bloque `dependencies { ... }` si existe
                 m = re.search(r"dependencies\s*\{", text)
                 if not m:
                     text = (
                         text.rstrip()
                         + "\n\ndependencies {\n"
-                        + _REQUIRED_DEP_LINE
+                        + required_dep_line
                         + "\n}\n"
                     )
                 else:
                     insert_pos = m.end()
-                    text = text[:insert_pos] + "\n" + _REQUIRED_DEP_LINE + text[insert_pos:]
+                    text = (
+                        text[:insert_pos]
+                        + "\n"
+                        + required_dep_line
+                        + text[insert_pos:]
+                    )
                 result.changes.append(
-                    f"{gf.relative_to(project_root)}: +lib-bnc-api-client:1.1.0"
+                    f"{gf.relative_to(project_root)}: "
+                    f"+lib-bnc-api-client:{target_version} ({label})"
                 )
-            elif n_replaced == 0:
+            elif not wrong_versions:
                 result.notes = (
                     "Regla 8 omitida: lib-bnc-api-client solo aplica a "
                     "BUS/IIB con invocaBancs=true; sin contexto explicito no se agrega"
@@ -349,7 +400,10 @@ def fix_add_libbnc_dependency(
             result.applied = True
 
     if not result.applied and not result.notes:
-        result.notes = "la libreria ya estaba en 1.1.0 estable o no aplica por matriz"
+        result.notes = (
+            f"lib-bnc-api-client ya en {target_version} ({label}) "
+            "o no aplica por matriz"
+        )
     return result
 
 
@@ -1503,10 +1557,12 @@ def run_bank_autofix(
     source_type: str | None = None,
     has_bancs: bool = False,
     requires_bancs: bool | None = None,
+    service: str | None = None,
 ) -> list[BankAutofixResult]:
     """Corre los autofixes del banco. Devuelve resultados por regla.
 
     `rules` permite subset explicito, ej `["4", "7"]`. Default: todos.
+    `service` fija el OLA para la Regla 8; si falta se autodetecta del proyecto.
     """
     wanted = (
         set(rules)
@@ -1525,7 +1581,9 @@ def run_bank_autofix(
         results.append(fix_yml_remove_defaults(project_root))
     if "8" in wanted:
         results.append(
-            fix_add_libbnc_dependency(project_root, requires_bancs=requires_bancs)
+            fix_add_libbnc_dependency(
+                project_root, requires_bancs=requires_bancs, service=service
+            )
         )
     if "8b" in wanted:
         results.append(fix_bancs_autoconfigure_exclude(project_root))

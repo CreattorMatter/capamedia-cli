@@ -112,6 +112,7 @@ def test_full_prompts_are_loaded() -> None:
     assert "migrate-rest-full" in names
     assert "migrate-soap-full" in names
     assert "checklist-rules" in names
+    assert "qa" in names  # compuerta pre-QA (Prompt 1 + handoff a qe-migration)
 
 
 def test_agents_are_loaded() -> None:
@@ -119,7 +120,7 @@ def test_agents_are_loaded() -> None:
     names = {a.name for a in assets["agent"]}
     assert "analista-legacy" in names
     assert "migrador" in names
-    assert "qa-generator" in names
+    assert "qe-migration" in names
     assert "validador-hex" in names
 
 

@@ -13,11 +13,15 @@ def test_qa_command_is_registered() -> None:
     result = runner.invoke(app, ["qa", "--help"])
 
     assert result.exit_code == 0
-    assert "equivalencia" in result.output.lower()
     assert "pack" in result.output
+    assert "prepare" in result.output
 
 
-def test_qa_pack_generates_copilot_prompt_and_cmd_contract(tmp_path: Path) -> None:
+def test_qa_pack_locates_repos_and_writes_metadata(tmp_path: Path) -> None:
+    """qa pack ubica legacy/destino y deja el workspace listo para `/qa`.
+
+    Ya NO genera el prompt Copilot viejo: `/qa` es canonico (capamedia init).
+    """
     service = "wstecnicos0098"
     (tmp_path / "legacy" / f"sqb-msa-{service}").mkdir(parents=True)
     destino = tmp_path / "destino" / f"tnd-msa-sp-{service}"
@@ -30,38 +34,22 @@ def test_qa_pack_generates_copilot_prompt_and_cmd_contract(tmp_path: Path) -> No
     )
 
     assert result.exit_code == 0
-    prompt = tmp_path / ".github" / "prompts" / "qa.prompt.md"
-    assert prompt.exists()
-    content = prompt.read_text(encoding="utf-8")
-    assert "name: qa" in content
-    assert "TRAMAS.txt" in content
-    assert "Command Prompt" in content
-    assert "cmd.exe" in content
-    assert "No uses PowerShell" in content
-    assert "curl.exe" in content
-    assert "Get-Content" in content
-    assert "execute/runInTerminal" in content
-    assert not list(tmp_path.rglob("*.ps1"))
-    assert (tmp_path / "TRAMAS.txt").exists()
+    assert not (tmp_path / ".github" / "prompts" / "qa.prompt.md").exists()
     assert (tmp_path / ".capamedia" / "qa" / "pack.json").exists()
-    settings = tmp_path / ".vscode" / "settings.json"
-    assert settings.exists()
-    settings_content = settings.read_text(encoding="utf-8")
-    assert "terminal.integrated.defaultProfile.windows" in settings_content
-    assert "chat.tools.terminal.terminalProfile.windows" in settings_content
-    assert "Command Prompt" in settings_content
-    assert "cmd.exe" in settings_content
+    config = tmp_path / ".capamedia" / "config.yaml"
+    assert config.exists()
+    assert service in config.read_text(encoding="utf-8")
+    assert "/qa" in result.output
 
 
-def test_qa_prepare_fails_when_repos_are_missing_but_writes_prompt(tmp_path: Path) -> None:
+def test_qa_prepare_fails_when_repos_are_missing(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["qa", "prepare", "wsclientes0076", "--workspace", str(tmp_path)],
     )
 
     assert result.exit_code == 1
-    assert (tmp_path / ".github" / "prompts" / "qa.prompt.md").exists()
-    assert (tmp_path / "TRAMAS.txt").exists()
+    assert (tmp_path / ".capamedia" / "config.yaml").exists()
 
 
 def test_qa_pack_clones_legacy_and_destino_with_namespace(tmp_path: Path, monkeypatch) -> None:
@@ -93,7 +81,12 @@ def test_qa_pack_clones_legacy_and_destino_with_namespace(tmp_path: Path, monkey
     assert calls[0][0] == "sqb-msa-wsclientes0076"
     assert calls[0][2] == "bus"
     assert calls[0][3] is True
-    assert ("csg-msa-sp-wsclientes0076", tmp_path / "destino" / "csg-msa-sp-wsclientes0076", "middleware", True) in calls
+    assert (
+        "csg-msa-sp-wsclientes0076",
+        tmp_path / "destino" / "csg-msa-sp-wsclientes0076",
+        "middleware",
+        True,
+    ) in calls
 
 
 def test_qa_pack_rejects_invalid_namespace(tmp_path: Path) -> None:

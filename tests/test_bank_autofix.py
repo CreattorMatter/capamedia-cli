@@ -239,6 +239,54 @@ def test_libbnc_normalizes_rc_variant(tmp_path: Path) -> None:
     assert "rc1" not in gradle.read_text(encoding="utf-8")
 
 
+def test_libbnc_ola2_service_gets_2_0_0(tmp_path: Path) -> None:
+    """Servicio OLA 2: la libreria se inserta en 2.0.0, no 1.1.0."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text("dependencies {}\n", encoding="utf-8")
+    result = fix_add_libbnc_dependency(
+        tmp_path, requires_bancs=True, service="wsclientes0042"
+    )
+    assert result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "com.pichincha.bnc:lib-bnc-api-client:2.0.0" in updated
+    assert "1.1.0" not in updated
+
+
+def test_libbnc_ola2_service_rewrites_1_1_0_to_2_0_0(tmp_path: Path) -> None:
+    """Servicio OLA 2 con 1.1.0 declarado: se reescribe a 2.0.0 sin duplicar."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "dependencies {\n"
+        "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(
+        tmp_path, requires_bancs=True, service="orqproductos0015"
+    )
+    assert result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "lib-bnc-api-client:2.0.0" in updated
+    assert "1.1.0" not in updated
+    assert updated.count("lib-bnc-api-client") == 1
+
+
+def test_libbnc_ola1_service_rewrites_2_0_0_to_1_1_0(tmp_path: Path) -> None:
+    """Servicio OLA 1 con 2.0.0 declarado por error: se corrige a 1.1.0."""
+    gradle = tmp_path / "build.gradle"
+    gradle.write_text(
+        "implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'\n",
+        encoding="utf-8",
+    )
+    result = fix_add_libbnc_dependency(
+        tmp_path, requires_bancs=True, service="wsclientes0011"
+    )
+    assert result.applied
+    updated = gradle.read_text(encoding="utf-8")
+    assert "lib-bnc-api-client:1.1.0" in updated
+    assert "2.0.0" not in updated
+
+
 # ---------------------------------------------------------------------------
 # Regla 9 — catalog-info.yaml
 # ---------------------------------------------------------------------------

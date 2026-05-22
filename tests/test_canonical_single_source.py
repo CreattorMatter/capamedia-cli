@@ -278,7 +278,7 @@ def test_doublecheck_mentions_post_migration_config_dependency_guards() -> None:
         encoding="utf-8"
     )
 
-    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in content
+    assert "lib-bnc-api-client" in content
     assert "resilience4j-spring-boot3" in content
     assert "CCC_*: valor" in content
     assert "valor concreto debe\n  vivir en los 3 Helm" in content

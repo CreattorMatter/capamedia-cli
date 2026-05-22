@@ -143,10 +143,11 @@ Eso dispara internamente:
    - Regla 4: `@BpLogger` faltante en metodos publicos de `@Service`
    - Regla 6: `StringUtils.*` → Java nativo, extraer records inner del Service
    - Regla 7: `${VAR:default}` → `${VAR}` limpio (preserva `optimus.web.*`)
-   - Regla 8: normalizar `lib-bnc-api-client:1.1.0-alpha.*` → `1.1.0` estable
-     solo si la matriz permite BANCS (BUS/IIB + invocaBancs=true)
-   - Regla Gradle REST/BANCS: `lib-bnc-api-client` debe quedar en
-     `com.pichincha.bnc:lib-bnc-api-client:1.1.0` estable y Resilience4j debe
+   - Regla 8: fijar `lib-bnc-api-client` a la version del OLA del servicio
+     (`1.1.0` OLA 1, `2.0.0` OLA 2) solo si la matriz permite BANCS (BUS/IIB
+     + invocaBancs=true)
+   - Regla Gradle REST/BANCS: `lib-bnc-api-client` debe quedar en la version
+     del OLA del servicio (`1.1.0` OLA 1, `2.0.0` OLA 2) y Resilience4j debe
      usar el starter compatible con Spring Boot 3 (`resilience4j-spring-boot3`)
    - Regla 9: esqueleto inicial de `catalog-info.yaml`
    - Block 19: inyectar valores de `.capamedia/inputs/*.properties` a
@@ -244,7 +245,7 @@ Al final del doublecheck, responder con un resumen:
 - PR_READY / READY_WITH_FOLLOW_UP / BLOCKED_BY_HIGH
 
 ### Fixes aplicados automaticamente
-1. `lib-bnc-api-client` normalizado a 1.1.0 estable
+1. `lib-bnc-api-client` fijado a la version del OLA (1.1.0 OLA 1 / 2.0.0 OLA 2)
 2. `@BpLogger` agregado a 3 metodos de CustomerServiceImpl
 3. 4 env vars `${CCC_*}` reemplazados con valores de umpclientes0025.properties
 ...
