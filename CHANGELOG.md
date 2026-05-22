@@ -6,6 +6,25 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-05-22
+
+### Added - comando `/qacases` (paso 3 del pipeline QA)
+
+Nuevo slash command `/qacases` (`prompts/qacases.md`): toma los specs que
+`/qa` + `qe-migration` dejan en `docs/qa/migration/<ws>/` (test-cases,
+karate-spec, payloads) y desarrolla los casos de uso como tests Karate
+`.feature` ejecutables dentro del microservicio migrado, ademas de preparar
+el proyecto para correrlos (dependencia Karate en `build.gradle`, runner
+JUnit5, `karate-config.js`, recursos de test).
+
+Cierra el pipeline QA: `/qa` Paso 1 (analisis comparativo) -> `/qa` Paso 2
+`qe-migration` (diseno de los casos de uso) -> `/qacases` (implementacion
+ejecutable). No re-genera el documento de casos de uso — lo consume.
+
+### Tests
+
+- `tests/test_canonical.py`: `/qacases` verificado como prompt canonico.
+
 ## [0.25.0] - 2026-05-22
 
 ### Added - soporte OLA 2 + compuerta de calidad pre-QA `/qa`

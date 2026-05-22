@@ -113,6 +113,7 @@ def test_full_prompts_are_loaded() -> None:
     assert "migrate-soap-full" in names
     assert "checklist-rules" in names
     assert "qa" in names  # compuerta pre-QA (Prompt 1 + handoff a qe-migration)
+    assert "qacases" in names  # paso 3: desarrolla los tests Karate ejecutables
 
 
 def test_agents_are_loaded() -> None:
