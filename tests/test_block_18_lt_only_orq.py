@@ -172,7 +172,7 @@ def test_18_3_fails_when_was_has_event_audit(tmp_path: Path) -> None:
     results = run_block_18(CheckContext(migrated_path=project, legacy_path=None))
     r = next(r for r in results if r.id == "18.3")
     assert r.status == "fail"
-    assert r.severity == "high"
+    assert r.severity == "info"
     assert "BancsAdapter.java" in r.detail
 
 

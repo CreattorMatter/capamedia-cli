@@ -551,3 +551,173 @@ def test_autofix_idempotent(tmp_path: Path) -> None:
 
     assert first.applied is True
     assert second.applied is False
+
+
+# ---------------------------------------------------------------------------
+# New Block 5 checks: 5.10 (Controller validation), 5.11 (DTO syntactic validation), 5.12 (DTO Allowlist)
+# ---------------------------------------------------------------------------
+
+
+def test_5_10_controller_missing_validation_fails(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/impl/WSClientes0007Controller.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.impl;
+        public class WSClientes0007Controller {
+            public void handle(Object request) {
+                // Empty handler
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.10")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert "Falta validacion explicita" in check.detail
+
+
+def test_5_10_controller_with_valid_passes(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/impl/WSClientes0007Controller.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.impl;
+        import jakarta.validation.Valid;
+        public class WSClientes0007Controller {
+            public void handle(@Valid Object request) {
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.10")
+
+    assert check is not None
+    assert check.status == "pass"
+
+
+def test_5_10_controller_with_programmatic_passes(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/impl/WSClientes0007Controller.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.impl;
+        public class WSClientes0007Controller {
+            public void handle(Object request) {
+                validator.validate(request);
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.10")
+
+    assert check is not None
+    assert check.status == "pass"
+
+
+def test_5_11_dto_missing_validation_fails(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/dto/CustomerRequestDto.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.dto;
+        public class CustomerRequestDto {
+            private String identificacion;
+            private String tipoIdentificacion;
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.11")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert "DTOs sin anotaciones de validacion" in check.detail
+
+
+def test_5_11_dto_with_validation_passes(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/dto/CustomerRequestDto.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.dto;
+        import jakarta.validation.constraints.NotNull;
+        public class CustomerRequestDto {
+            @NotNull
+            private String identificacion;
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.11")
+
+    assert check is not None
+    assert check.status == "pass"
+
+
+def test_5_12_dto_missing_allowlist_fails(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/dto/CustomerRequestDto.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.dto;
+        import jakarta.validation.constraints.NotNull;
+        public class CustomerRequestDto {
+            @NotNull
+            private String tipoIdentificacion;
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.12")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert "DTOs con campos de opciones sin allowlist" in check.detail
+
+
+def test_5_12_dto_with_allowlist_passes(tmp_path: Path) -> None:
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/rest/dto/CustomerRequestDto.java",
+        """
+        package com.pichincha.sp.infrastructure.input.adapter.rest.dto;
+        import jakarta.validation.constraints.NotNull;
+        import jakarta.validation.constraints.Pattern;
+        public class CustomerRequestDto {
+            @NotNull
+            @Pattern(regexp = "^$|^[CRPOcrpo]$")
+            private String tipoIdentificacion;
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.12")
+
+    assert check is not None
+    assert check.status == "pass"

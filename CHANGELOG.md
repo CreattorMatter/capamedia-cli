@@ -6,6 +6,18 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-05-22
+
+### Changed
+
+- **Compactación AI-Dense**: Rediseñado el prompt canónico `checklist-rules.md` para ocupar menos de 25 KB, eliminando redundancias masivas y previniendo fatiga de contexto o bucles infinitos en el agente corrector.
+- **Sincronización del Autofix**: Alineación del identificador de validación de `slf4j` de `"2.2"` a `"2.5"` en `autofix.py` y `self_correction.py` para asegurar consistencia perfecta entre análisis y auto-corrección.
+
+### Fixed
+
+- **Flexibilización de logs (Checks 2.8 y 2.9)**: Degradada la severidad de advertencia/error de logging no coincidente a `severity="info"` en `checklist_rules.py` para evitar falsos positivos de bloqueo de pipeline en microservicios antiguos y ya migrados como `wsclientes0046`.
+- **Derogación de "Quitar Etiquetas" (Check 18.3)**: Degradada la severidad a `severity="info"` en `checklist_rules.py` para evitar bloqueos en la remoción/preservación de `@EventAudit` en entornos WAS/BUS.
+
 ## [0.26.1] - 2026-05-22
 
 ### Fixed - `<xsd:documentation>` no es contrato exigible

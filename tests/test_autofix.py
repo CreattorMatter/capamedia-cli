@@ -120,7 +120,7 @@ def test_fix_slf4j_to_bplogger_replaces_annotation_and_import(tmp_path: Path) ->
         "@Slf4j\n"
         "public class ClienteService {}\n",
     )
-    result = fix_slf4j_to_bplogger(root, _violation("2.2"))
+    result = fix_slf4j_to_bplogger(root, _violation("2.5"))
     assert result.applied is True
     new_text = file.read_text(encoding="utf-8")
     assert "@BpLogger" in new_text
@@ -139,7 +139,7 @@ def test_fix_lombok_slf4j_removal_only_strips_annotation(tmp_path: Path) -> None
         "@Slf4j\n"
         "public class Utility {}\n",
     )
-    result = fix_lombok_slf4j_removal(root, _violation("2.2"))
+    result = fix_lombok_slf4j_removal(root, _violation("2.5"))
     assert result.applied is True
     text = file.read_text(encoding="utf-8")
     assert "@Slf4j" not in text
@@ -357,7 +357,7 @@ def test_fix_backend_from_catalog_uses_iib_code_for_non_bancs(tmp_path: Path) ->
 
 
 def test_registry_has_at_least_expected_ids() -> None:
-    expected = {"1.3", "2.2", "5.1", "15.1", "15.2", "15.3", "15.4"}
+    expected = {"1.3", "2.5", "5.1", "15.1", "15.2", "15.3", "15.4"}
     assert expected.issubset(set(AUTOFIX_REGISTRY.keys()))
 
 

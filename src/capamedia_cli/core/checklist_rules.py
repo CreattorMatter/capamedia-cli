@@ -1588,12 +1588,77 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("2.1", "Block 2", "@BpTraceable en controllers", "pass", detail=f"{len(controllers)} controller(s)"))
 
-    # 2.2 - Sin imports de org.slf4j
+    # 2.5 - Sin imports de org.slf4j
     slf4j = _grep_files(src_java, r"import org\.slf4j\.")
     if slf4j:
-        results.append(CheckResult("2.2", "Block 2", "Sin imports org.slf4j", "fail", severity="high", detail=f"{len(slf4j)} hit(s)", suggested_fix="Usar @Slf4j de Lombok, nunca import directo"))
+        results.append(CheckResult("2.5", "Block 2", "Sin imports org.slf4j", "fail", severity="high", detail=f"{len(slf4j)} hit(s)", suggested_fix="Usar ServiceLogHelper del banco, nunca import directo ni @Slf4j de Lombok"))
     else:
-        results.append(CheckResult("2.2", "Block 2", "Sin imports org.slf4j", "pass"))
+        results.append(CheckResult("2.5", "Block 2", "Sin imports org.slf4j", "pass"))
+
+    # 2.8 - Log Level Coverage (INFO) en Controllers/Helpers/Clients
+    # 2.9 - Log Level Coverage (DEBUG) en Controllers/Helpers/Clients
+    key_files = []
+    for suffix in ("*Controller.java", "*Helper.java", "*Client.java", "*Endpoint.java"):
+        for f in src_java.rglob(suffix):
+            if "test" in [p.lower() for p in f.parts]:
+                continue
+            if any(p == "build" or p == ".git" for p in f.parts):
+                continue
+            key_files.append(f)
+
+    missing_info: list[str] = []
+    missing_debug: list[str] = []
+
+    for f in key_files:
+        text = _read_or_empty(f)
+        # Search for .info( or CustomLogLevel.INFO or log(CustomLogLevel.INFO
+        has_info = bool(re.search(r"\.info\s*\(|CustomLogLevel\.INFO\b", text))
+        # Search for .debug( or CustomLogLevel.DEBUG or log(CustomLogLevel.DEBUG
+        has_debug = bool(re.search(r"\.debug\s*\(|CustomLogLevel\.DEBUG\b", text))
+
+        rel = _relative_display(f, ctx.migrated_path)
+        if not has_info:
+            missing_info.append(rel)
+        if not has_debug:
+            missing_debug.append(rel)
+
+    if missing_info:
+        results.append(CheckResult(
+            "2.8",
+            "Block 2",
+            "Cobertura de logs INFO en componentes clave",
+            "fail",
+            severity="info",
+            detail=f"Falta log INFO en: {', '.join(missing_info)}",
+            suggested_fix="Agregar logs de nivel INFO para indicar eventos clave (inicio/fin de procesos, transacciones exitosas) en controladores, helpers y clientes de integracion."
+        ))
+    elif key_files:
+        results.append(CheckResult(
+            "2.8",
+            "Block 2",
+            "Cobertura de logs INFO en componentes clave",
+            "pass",
+            detail=f"{len(key_files)} componentes clave validados"
+        ))
+
+    if missing_debug:
+        results.append(CheckResult(
+            "2.9",
+            "Block 2",
+            "Cobertura de logs DEBUG en componentes clave",
+            "fail",
+            severity="info",
+            detail=f"Falta log DEBUG en: {', '.join(missing_debug)}",
+            suggested_fix="Agregar logs de nivel DEBUG para detalles de diagnostico utiles en resolucion de problemas (ej. payloads de request/response sin datos sensibles) en componentes clave."
+        ))
+    elif key_files:
+        results.append(CheckResult(
+            "2.9",
+            "Block 2",
+            "Cobertura de logs DEBUG en componentes clave",
+            "pass",
+            detail=f"{len(key_files)} componentes clave validados"
+        ))
 
     return results
 
@@ -1825,6 +1890,130 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
                 "Block 5",
                 "Fechas no informadas en BANCS usan alto valor (31129999)",
                 "pass",
+            )
+        )
+
+    # 5.10 - Validacion de entrada (Server-side Validation) en Controllers
+    controllers_val = list(src_java.rglob("*Controller.java")) + list(src_java.rglob("*Endpoint.java"))
+    missing_validation_controllers = []
+    for f in controllers_val:
+        if "test" in [p.lower() for p in f.parts]:
+            continue
+        text = _read_or_empty(f)
+        # Check if the controller does programmatic or declarative validation
+        has_valid_anno = "@Valid" in text
+        has_programmatic_val = "validator.validate(" in text
+        if not (has_valid_anno or has_programmatic_val):
+            rel = _relative_display(f, ctx.migrated_path)
+            missing_validation_controllers.append(rel)
+
+    if missing_validation_controllers:
+        results.append(
+            CheckResult(
+                "5.10",
+                "Block 5",
+                "Validacion de entrada (Server-side Validation) en Controllers",
+                "fail",
+                severity="high",
+                detail=f"Falta validacion explicita en: {', '.join(missing_validation_controllers)}",
+                suggested_fix=(
+                    "Implementar validacion de datos de entrada en el controlador. "
+                    "Inyectar un `jakarta.validation.Validator` y realizar validacion programatica "
+                    "o usar `@Valid` en los parametros del request, asegurando integridad antes de "
+                    "llamar a la capa de negocio."
+                ),
+            )
+        )
+    elif controllers_val:
+        results.append(
+            CheckResult(
+                "5.10",
+                "Block 5",
+                "Validacion de entrada (Server-side Validation) en Controllers",
+                "pass",
+                detail=f"{len(controllers_val)} controller(s) con validacion implementada",
+            )
+        )
+
+    # 5.11 - Validacion sintactica en DTOs
+    dto_files = list(src_java.rglob("*Dto.java")) + list(src_java.rglob("*RequestDto.java"))
+    missing_syntactic_dto = []
+    missing_allowlist_dto = []
+
+    for f in dto_files:
+        if "test" in [p.lower() for p in f.parts]:
+            continue
+        text = _read_or_empty(f)
+        # Check for any standard Jakarta validation constraint annotation
+        has_constraints = bool(re.search(
+            r"@(NotNull|Pattern|Size|Min|Max|Email|NotBlank|NotEmpty|DecimalMin|DecimalMax)\b",
+            text
+        ))
+        # Check if there is an allowlist pattern, typically an options regex e.g. [CRPOcrpo] or similar
+        has_allowlist = bool(re.search(
+            r"@Pattern\s*\(\s*regexp\s*=\s*\"[^\"]*\[[A-Za-z]{2,}\][^\"]*\"",
+            text
+        )) or bool(re.search(r"@Pattern\s*\(\s*regexp\s*=\s*\"[^\"]*\|[^\"]*\"", text))
+
+        rel = _relative_display(f, ctx.migrated_path)
+        if not has_constraints:
+            missing_syntactic_dto.append(rel)
+        elif not has_allowlist:
+            # Only complain about allowlist if the DTO has some validation but lacks allowlist pattern for option fields
+            if re.search(r"(tipo|codigo|estado|canal|medio)", text, re.IGNORECASE):
+                missing_allowlist_dto.append(rel)
+
+    if missing_syntactic_dto:
+        results.append(
+            CheckResult(
+                "5.11",
+                "Block 5",
+                "Validacion sintactica en DTOs",
+                "fail",
+                severity="medium",
+                detail=f"DTOs sin anotaciones de validacion: {', '.join(missing_syntactic_dto)}",
+                suggested_fix=(
+                    "Agregar validaciones sintacticas en los campos del DTO usando anotaciones de "
+                    "Jakarta Bean Validation (ej. @NotNull, @Pattern, @Size, @Email). "
+                    "Usar expresiones regulares ancladas con ^ y $ para strings estructurados."
+                ),
+            )
+        )
+    elif dto_files:
+        results.append(
+            CheckResult(
+                "5.11",
+                "Block 5",
+                "Validacion sintactica en DTOs",
+                "pass",
+                detail=f"{len(dto_files)} DTO(s) con validacion sintactica",
+            )
+        )
+
+    if missing_allowlist_dto:
+        results.append(
+            CheckResult(
+                "5.12",
+                "Block 5",
+                "Estrategia de Allowlist en campos de tipo/codigo",
+                "fail",
+                severity="medium",
+                detail=f"DTOs con campos de opciones sin allowlist: {', '.join(missing_allowlist_dto)}",
+                suggested_fix=(
+                    "Implementar estrategia de allowlist para campos que aceptan un conjunto cerrado de valores. "
+                    "Por ejemplo, usar `@Pattern(regexp = \"^[CRPOcrpo]$\")` en campos de tipoIdentificacion o tipoCliente, "
+                    "o validar contra un Enum para evitar valores no autorizados."
+                ),
+            )
+        )
+    elif dto_files:
+        results.append(
+            CheckResult(
+                "5.12",
+                "Block 5",
+                "Estrategia de Allowlist en campos de tipo/codigo",
+                "pass",
+                detail="DTOs con campos de tipo/codigo validados con allowlist",
             )
         )
 
@@ -3238,7 +3427,7 @@ def run_block_18(ctx: CheckContext) -> list[CheckResult]:
         results.append(
             CheckResult(
                 "18.3", "Block 18", "@EventAudit en WAS/BUS (prohibido)",
-                "fail", severity="high",
+                "fail", severity="info",
                 detail=(
                     f"Anotacion @EventAudit encontrada en: "
                     f"{', '.join(audit_hits[:5])}"

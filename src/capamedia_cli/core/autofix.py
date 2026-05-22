@@ -859,7 +859,7 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
 AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "0.2e": [fix_bancs_autoconfigure_exclude_adapter],
     "1.3": [fix_abstract_to_interface],
-    "2.2": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
+    "2.5": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
     "5.1": [fix_bancs_exception_wrapping],
     "8.1": [fix_spring_boot_plugin_version],
     "15.1": [fix_remove_mensajeNegocio_setter],
