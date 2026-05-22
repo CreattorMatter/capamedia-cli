@@ -154,7 +154,7 @@ Trampas descubiertas en analisis reales. Revisalas ACTIVAMENTE.
 **COMPORTAMIENTO:**
 - T06. HTTP status distinto para errores de negocio (legacy SIEMPRE retorna 200)
 - T07. headerOut no echado en rutas de error
-- T08. Validaciones nuevas que el legacy NO tenia (requests antes validos ahora rechazados)
+- T08. Validaciones nuevas que el legacy NO tenia (requests antes validos ahora rechazados) — ej. longitud o patron derivado de la PROSA de `<xsd:documentation>` ("Longitud: 4") en vez de un facet formal del XSD
 - T09. Parseos que tragan errores (stringToBigDecimal catch NFE → return 0)
 - T10. Echo de campo del request vs downstream en la respuesta
   (legacy echa bodyIn.identificacion original; nuevo echa valor normalizado o del downstream)

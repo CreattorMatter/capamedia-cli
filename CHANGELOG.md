@@ -6,6 +6,23 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-05-22
+
+### Fixed - `<xsd:documentation>` no es contrato exigible
+
+Reportado por Jean Pierre: la migracion derivaba validaciones (longitud,
+patron) de la PROSA de `<xsd:documentation>` / `<xsd:annotation>` del XSD
+(ej. "Longitud: 4", "aplica solo para medios digitales"). Eso agrega
+validaciones que el legacy nunca tuvo y rechaza requests antes validos.
+
+- `analisis-servicio.md` (Step C) y `migrate-rest-full.md` (§4.6
+  HeaderRequestValidator): regla explicita — las restricciones exigibles
+  salen SOLO de facets formales del XSD (`xsd:length`, `xsd:maxLength`,
+  `xsd:pattern`, `xsd:enumeration`, `minOccurs`/`maxOccurs`, `nillable`,
+  `type`) o de la validacion real del legacy. El `<xsd:documentation>` es
+  prosa descriptiva: se registra como "intencion documentada", no como regla.
+- `qa.md`: trap T08 ampliado con este patron concreto.
+
 ## [0.26.0] - 2026-05-22
 
 ### Added - comando `/qacases` (paso 3 del pipeline QA)

@@ -174,6 +174,15 @@ Analyze the `.wsdl` and `.xsd` files to extract:
 - For each operation, the complete request structure:
   - All fields with: name, XSD type, minOccurs, maxOccurs, nillable, constraints (pattern, enum, length)
   - Complete hierarchical structure (nested elements)
+  - **`<xsd:annotation>` / `<xsd:documentation>` is descriptive prose, NOT an
+    enforceable constraint.** Extract enforceable constraints ONLY from formal
+    XSD facets (`xsd:length`, `xsd:minLength`/`maxLength`, `xsd:pattern`,
+    `xsd:enumeration`, `xsd:totalDigits`/`fractionDigits`, `minOccurs`/`maxOccurs`,
+    `nillable`, `type`). If a `<xsd:documentation>` says e.g. `Longitud: 4` or
+    `aplica solo para medios digitales` but there is no matching facet, record it
+    as `documented intent (NOT enforced)` — never as a constraint. Deriving a
+    validation from the prose adds a rule the legacy never had and breaks
+    requests that used to be valid.
 - For each operation, the complete response structure:
   - Same depth of detail as the request
 - Fault/error response structure

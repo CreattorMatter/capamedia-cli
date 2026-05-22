@@ -1867,6 +1867,15 @@ public class SoapResponseHelper {
 
 #### 4.6 HeaderRequestValidator
 
+> **El `maxLength` y el `pattern` de cada `checkField(...)` salen de evidencia
+> formal, no de comentarios.** Usa el facet del XSD (`xsd:length`,
+> `xsd:maxLength`, `xsd:pattern`) o la validacion real del legacy (ESQL
+> `IF LENGTH(...)`, validacion Java). El texto de `<xsd:annotation>` /
+> `<xsd:documentation>` es prosa descriptiva, NO el contrato: si dice
+> `Longitud: 4` pero no hay `xsd:maxLength` ni el legacy validaba longitud,
+> NO agregues esa validacion — rechazaria requests que el legacy aceptaba.
+> Los numeros del ejemplo de abajo son ilustrativos del patron.
+
 ```java
 package com.pichincha.sp.infrastructure.input.adapter.rest.util;
 
