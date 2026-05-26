@@ -205,11 +205,20 @@ def _probe_pat_endpoint(name: str, url: str, token: str) -> tuple[str, str, str]
 
 
 def _validate_pat_access(token: str) -> list[tuple[str, str, str]]:
-    """Valida que el PAT sirva para los dos usos que configura `capamedia pat`."""
-    return [
-        _probe_pat_endpoint("Azure DevOps", AZURE_DEVOPS_PROBE_URL, token),
-        _probe_pat_endpoint("Azure Artifacts", AZURE_ARTIFACTS_PROBE_URL, token),
-    ]
+    """Valida que el PAT sirva para los dos usos que configura `capamedia pat`.
+
+    Azure DevOps es critico para clonar; si falla lanza excepcion.
+    Azure Artifacts es secundario; si falla se registra como advertencia.
+    """
+    results = []
+    results.append(_probe_pat_endpoint("Azure DevOps", AZURE_DEVOPS_PROBE_URL, token))
+
+    try:
+        results.append(_probe_pat_endpoint("Azure Artifacts", AZURE_ARTIFACTS_PROBE_URL, token))
+    except RuntimeError as exc:
+        results.append(("Azure Artifacts", "warn", str(exc)))
+
+    return results
 
 
 def _print_pat_validation(results: list[tuple[str, str, str]]) -> None:
@@ -218,7 +227,11 @@ def _print_pat_validation(results: list[tuple[str, str, str]]) -> None:
     table.add_column("Estado", style="bold")
     table.add_column("Detalle")
     for component, status, detail in results:
-        label = "[green]OK[/green]" if status == "ok" else f"[red]{status.upper()}[/red]"
+        label = {
+            "ok": "[green]OK[/green]",
+            "warn": "[yellow]WARN[/yellow]",
+            "fail": "[red]FAIL[/red]",
+        }.get(status, f"[red]{status.upper()}[/red]")
         table.add_row(component, label, detail)
     console.print()
     console.print(table)
@@ -540,6 +553,20 @@ def bootstrap(
             )
         )
 
+    # Persistir credenciales automaticamente para el usuario actual
+    env_payload: dict[str, str] = {}
+    if resolved_artifact:
+        env_payload["CAPAMEDIA_ARTIFACT_TOKEN"] = resolved_artifact
+        env_payload["ARTIFACT_TOKEN"] = resolved_artifact
+    if resolved_azure:
+        env_payload["CAPAMEDIA_AZDO_PAT"] = resolved_azure
+        env_payload["AZURE_DEVOPS_EXT_PAT"] = resolved_azure
+    if resolved_openai:
+        env_payload["OPENAI_API_KEY"] = resolved_openai
+
+    if env_payload:
+        _persist_user_environment(env_payload)
+
     if env_file:
         payload = {
             "CAPAMEDIA_ARTIFACT_TOKEN": resolved_artifact or "",
@@ -562,10 +589,3 @@ def bootstrap(
         table.add_row(component, label, detail)
     console.print()
     console.print(table)
-
-    if resolved_azure and not env_file:
-        console.print()
-        console.print(
-            "[yellow]Recordatorio:[/yellow] el Azure PAT no se persiste solo. "
-            "Dejalo exportado como `CAPAMEDIA_AZDO_PAT` en tu shell/runner o usa `--env-file`."
-        )

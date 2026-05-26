@@ -6,6 +6,14 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### Added
+- **Persistencia Automática de Credenciales**: El comando `capamedia auth bootstrap` ahora persiste automáticamente las credenciales en `~/.capamedia/user.env` (Unix) o en el registro de usuario (Windows), sin obligar a pasar el flag `--env-file` ni requerir exportaciones manuales.
+- **Autocarga de Credenciales**: El módulo `core/auth.py` ahora lee y carga de forma nativa el archivo `~/.capamedia/user.env` al importarse. Esto permite que comandos como `capamedia clone` tengan acceso inmediato al PAT configurado, sin necesidad de configurar `.zshrc`/`.bashrc` de manera manual.
+- **Comando pat Tolerante y No-Bloqueante**: Se optimizó el comando `capamedia pat <token>` para que diferencie entre fallos críticos de autenticación (como 401 en Azure DevOps) y fallos menores de accesos en feeds específicos (como 404 en Azure Artifacts). Ahora, si la conexión principal a Azure DevOps es válida, los fallos de Artifacts se marcan como `WARN` y el comando procede a guardar y configurar las credenciales con total éxito.
+
+### Fixed
+- Se corrigió la invocación de `pip` en el comando `capamedia update` utilizando `sys.executable -m pip` en lugar del comando de terminal directo `pip`. Esto soluciona errores de tipo `No such file or directory: 'pip'` en entornos macOS/Unix y sistemas donde `pip` no está configurado en el PATH global.
+
 ## [0.26.4] - 2026-05-22
 
 ### Fixed - diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica

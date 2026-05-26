@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import base64
 import os
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 AZURE_PAT_ENV_VARS = ("CAPAMEDIA_AZDO_PAT", "AZURE_DEVOPS_EXT_PAT")
 ARTIFACT_TOKEN_ENV_VARS = ("CAPAMEDIA_ARTIFACT_TOKEN", "ARTIFACT_TOKEN")
 OPENAI_API_KEY_ENV_VARS = ("OPENAI_API_KEY",)
+
+
+def _load_user_env_file() -> None:
+    """Carga variables de ~/.capamedia/user.env en os.environ si no estan presentes."""
+    env_file = Path.home() / ".capamedia" / "user.env"
+    if env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if key and value and key not in os.environ:
+                    os.environ[key] = value
+        except Exception:
+            pass
+
+
+_load_user_env_file()
 
 # Endpoint barato de Azure DevOps para verificar que un PAT tiene scope
 # `Code (Read)` — el scope que `git clone` necesita. Listar proyectos requiere

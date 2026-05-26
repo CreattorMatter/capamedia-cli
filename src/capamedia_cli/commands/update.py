@@ -14,6 +14,7 @@ Todos los caminos terminan mostrando la version nueva con `version_command`.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -108,7 +109,7 @@ def update_command(
 
         if dry_run:
             console.print(f"  [dim]$ git -C {editable_source} pull[/dim]")
-            console.print(f"  [dim]$ pip install -e {editable_source} --force-reinstall[/dim]")
+            console.print(f"  [dim]$ {sys.executable} -m pip install -e {editable_source} --force-reinstall[/dim]")
         else:
             console.print("\n[bold]1. git pull[/bold]")
             rc = _run(["git", "pull"], cwd=editable_source)
@@ -121,7 +122,7 @@ def update_command(
 
             console.print("\n[bold]2. pip install -e . --force-reinstall[/bold]")
             rc = _run(
-                ["pip", "install", "-e", str(editable_source), "--force-reinstall"]
+                [sys.executable, "-m", "pip", "install", "-e", str(editable_source), "--force-reinstall"]
             )
             if rc != 0:
                 console.print(f"[red]pip install fallo (exit {rc}).[/red]")
@@ -129,9 +130,9 @@ def update_command(
     else:
         console.print("\n[bold]Fuente detectada:[/bold] pip registry (no-editable)")
         if dry_run:
-            console.print("  [dim]$ pip install --upgrade capamedia-cli[/dim]")
+            console.print(f"  [dim]$ {sys.executable} -m pip install --upgrade capamedia-cli[/dim]")
         else:
-            rc = _run(["pip", "install", "--upgrade", "capamedia-cli"])
+            rc = _run([sys.executable, "-m", "pip", "install", "--upgrade", "capamedia-cli"])
             if rc != 0:
                 console.print(f"[red]pip install --upgrade fallo (exit {rc}).[/red]")
                 raise typer.Exit(code=rc)
