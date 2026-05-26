@@ -6,6 +6,30 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.26.3] - 2026-05-22
+
+### Changed - `log-transaccional-orq.md` reconciliado con el PDF 2026-05-26
+
+Revisado contra `BPTPSRE-Librería Log Transaccional-260526-160408.pdf`
+(versión nueva del oficial). El canónico ya cubría el 95%: 7 reglas
+LT-1..LT-7 + Block 17 del checklist + autofix. Reconciliados 3 puntos:
+
+- **LT-1**: la versión de Spring Boot estaba imprecisa. Reescrito — la lib
+  se compila contra `3.5.12` y es agnóstica (cita literal PDF); el baseline
+  del proyecto sigue siendo `3.5.14` (`SPRING_BOOT_BASELINE_VERSION`).
+- **LT-4 (fuente)**: reemplazada la mención genérica al "repo shared
+  `Plantillas xml-shared`" por el patrón real Azure
+  `sqb-cfg-<TipoTransaccion>-plantillasTransaccional` (branches `master`=
+  prod, `preprod`=test). Sin layering — texto vago reescrito.
+- **LT-4 (fallback)**: agregada la nota oficial — si un `tipoTransaccion`
+  se invoca sin plantilla, el log queda con `lotElastico.bodyIn`/`bodyOut`
+  en `null` (degradación silenciosa, no error).
+
+No incorporado: el catálogo TipoTransacción→Servicio del PDF (es dato vivo,
+incompleto y sin pipeline de mantenimiento) ni la variante MVC con
+`RestClient` (el canónico la excluye a propósito — ORQs en WebFlux, WAS
+sin log transaccional).
+
 ## [0.26.2] - 2026-05-22
 
 ### Changed

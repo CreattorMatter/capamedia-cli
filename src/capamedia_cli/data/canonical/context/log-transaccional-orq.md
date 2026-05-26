@@ -92,9 +92,12 @@ programa de migración no hay ORQs MVC — todos van WebFlux por regla del banco
 implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
 ```
 
-**Prerrequisitos del proyecto** (PDF 2, sección "Prerequisitos"):
-- Spring Boot 3.5.14 o superior compatible (la lib es agnóstica pero se probó
-  contra esa versión).
+**Prerrequisitos del proyecto** (PDF 2, sección "Características" / "Prerequisitos"):
+- **Lib compilada contra Spring Boot `3.5.12` y agnóstica a esa versión**
+  (cita literal PDF 2026-05-26: _"Librería agnóstica a Spring boot 3.5.12"_).
+  El baseline del proyecto sigue siendo **`3.5.14`**
+  (`SPRING_BOOT_BASELINE_VERSION` en `core/version_policy.py`) — la lib es
+  compatible con cualquier 3.5.x del baseline.
 - Java 21.
 
 **Nota sobre la variante MVC**: el PDF 2 documenta también
@@ -250,7 +253,16 @@ componentes"):
 **MUST**: cada tipoTransaccion usado por el ORQ tiene una entrada en
 `xml.template.templates` del yml. El valor viene de env var
 (`XML_TRANSACCION_<NNNN>`) que en Helm se setea con el string XML completo
-desde el ConfigMap o desde el repo shared `Plantillas xml-shared`.
+desde el ConfigMap.
+
+**Fuente de las plantillas** (PDF 2026-05-26, sección "Cápsulas de ayuda"):
+las plantillas viven en repos Azure con el patrón
+`sqb-cfg-<TipoTransaccion>-plantillasTransaccional` (ejemplo:
+`sqb-cfg-201000101-plantillasTransaccional`), con branches `master` =
+producción y `preprod` = test. El equipo de Helm las toma de ahí y las carga
+al ConfigMap como `XML_TRANSACCION_<NNNN>`; nuestro código solo las consume
+vía env var. No hay que clonar el repo de plantillas ni hardcodear el XML
+en el yml.
 
 Formato del template XML (PDF 2, sección "Plantillas"):
 
@@ -284,6 +296,15 @@ Formato del template XML (PDF 2, sección "Plantillas"):
   internos.
 - `<campo nombre="X" fuente="/" nomenclatura="Y">`: mapea `X` del XML source
   al campo `Y` del JSON destino.
+
+**Comportamiento sin plantilla** (PDF 2026-05-26, p.8 nota): si un
+`tipoTransaccion` se invoca pero NO tiene plantilla en
+`xml.template.templates`, el mensaje final en `CE_TRANSACCIONAL` queda con
+`lotElastico.bodyIn` y `lotElastico.bodyOut` en `null` — degradación
+silenciosa, NO un error. El evento se publica pero sin payload mapeado.
+Para una operación nueva sin plantilla, gestionar la creación de la
+plantilla con el equipo dueño del repo `sqb-cfg-<TX>-plantillasTransaccional`
+ANTES de salir a prod.
 
 **NEVER**:
 - Hardcodear el XML en el yml. El template entero va por env var para que cada
