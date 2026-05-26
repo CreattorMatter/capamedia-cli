@@ -1015,11 +1015,44 @@ def clone_service(
             for repo_full, err in attempts:
                 console.print(f"  [dim]-[/dim] {repo_full} [red]->[/red] {err}")
             if failure_kind == "auth":
-                console.print(
-                    "[yellow]Tip:[/yellow] todos los intentos fallaron por "
-                    "autenticacion/permiso. Tu PAT no tiene acceso de lectura a "
-                    "estos repos — regeneralo con scope [bold]Code (Read)[/bold]."
-                )
+                # El diagnostico depende de si el probe (linea ~989) ya valido
+                # el PAT contra la API. Si el probe dio "ok" pero git falla auth,
+                # el problema es la ENTREGA del PAT al subprocess de git, no el
+                # scope. Reportado por Jean Pierre (macOS, git viejo del Xcode CLT
+                # sin soporte de GIT_CONFIG_COUNT, que requiere git >= 2.31).
+                if pat_status == "ok":
+                    console.print(
+                        "[yellow]Tip:[/yellow] el PAT funciona contra la API de Azure "
+                        "DevOps (probe OK), pero git no lo aplica al clone. El CLI "
+                        "inyecta el PAT via [cyan]GIT_CONFIG_COUNT[/cyan] + "
+                        "[cyan]http.extraHeader[/cyan] (requiere git >= 2.31). "
+                        "Chequear:\n"
+                        "  - [cyan]git --version[/cyan] — si < 2.31, "
+                        "[cyan]brew install git[/cyan] (macOS) o equivalente.\n"
+                        "  - [cyan]git config --get-all credential.helper[/cyan] — si "
+                        "aparece `osxkeychain`/`manager-core`, esta interfiriendo: "
+                        "[cyan]git config --global --unset-all credential.helper[/cyan].\n"
+                        "  - Test manual del PAT: [cyan]git -c "
+                        "http.extraHeader=\"Authorization: Basic $(printf ':%s' "
+                        "\"$CAPAMEDIA_AZDO_PAT\" | base64)\" ls-remote "
+                        "https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/<repo>[/cyan]"
+                    )
+                elif pat_status == "no_pat":
+                    console.print(
+                        "[yellow]Tip:[/yellow] no hay PAT seteado "
+                        "([cyan]CAPAMEDIA_AZDO_PAT[/cyan] / "
+                        "[cyan]AZURE_DEVOPS_EXT_PAT[/cyan]). Exportalo en tu shell y "
+                        "reintenta. Si lo tenes en `.zshrc`/`.bashrc`, abri una "
+                        "terminal nueva para que tome el valor."
+                    )
+                else:
+                    # "unreachable" — "denied" ya aborto arriba (linea ~990)
+                    console.print(
+                        "[yellow]Tip:[/yellow] no se pudo prevalidar el PAT por red, "
+                        "y los clones fallaron por auth. Si el PAT es valido, revisa "
+                        "proxy/VPN/firewall hacia dev.azure.com; si no, regeneralo "
+                        "con scope [bold]Code (Read)[/bold]."
+                    )
             elif failure_kind == "not_found":
                 console.print(
                     "[yellow]Tip:[/yellow] ningun repo existe con esos nombres. "

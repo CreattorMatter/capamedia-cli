@@ -6,6 +6,27 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.26.4] - 2026-05-22
+
+### Fixed - diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica
+
+Reportado por Jean Pierre (macOS): `capamedia clone orqclientes0023`
+fallaba con `terminal prompts disabled` en los 5 repos y el CLI sugeria
+"regenera el PAT con scope Code (Read)". Pero el probe
+(`probe_azure_devops_pat`) ya habia validado el PAT contra la API — el
+verdadero problema era que git no aplicaba el PAT al clone (git < 2.31
+sin soporte de `GIT_CONFIG_COUNT`/`http.extraHeader` via env vars, o
+credential helper de macOS interfiriendo).
+
+- `clone.py`: cuando `failure_kind == "auth"` y `pat_status == "ok"`, el
+  tip ahora explica que el PAT es valido pero git no lo entrega, y sugiere
+  los 3 chequeos concretos: version de git (`git --version`, requiere
+  >= 2.31), credential helper (`git config --get-all credential.helper`),
+  y un test manual del PAT con `http.extraHeader` directo. Para
+  `pat_status == "no_pat"` o `"unreachable"`, mensajes especificos. El
+  "regenera el PAT con scope Code (Read)" queda solo para los casos donde
+  el probe NO valido el PAT.
+
 ## [0.26.3] - 2026-05-22
 
 ### Changed - `log-transaccional-orq.md` reconciliado con el PDF 2026-05-26
