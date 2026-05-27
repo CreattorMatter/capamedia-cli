@@ -36,9 +36,8 @@ allowed_tools:
 > **Cases NOT covered here**: WAS 2+ ops, BUS 2+ ops without BANCS — those trigger **Rule 3** and must use `migrate-soap-full.md` instead.
 > **Scaffold origin:** The Banco Pichincha **Fabrics MCP archetype** generates the initial REST scaffold from a questionnaire. The decisive parameters are governed by `bank-mcp-matrix.md`. This prompt assumes you start from that scaffold and fill in the migration logic; do NOT rebuild the project skeleton from scratch.
 > **Secrets:** NEVER look for or fabricate secrets (DB passwords, API tokens, keystores). Reference them as `${CCC_*}` env vars in `application.yml` and `helm/*.yml`. The bank provides real secret values ~1 week before production deploy.
-> **SonarLint local:** before opening the first PR, the migrated project MUST contain a versioned `.sonarlint/connectedMode.json` binding to SonarCloud organization `bancopichinchaec`. Use the template at `prompts/configuracion-claude-code/sonarlint/connectedMode.template.json` and replace `<PROJECT_KEY_FROM_SONARCLOUD>` with the real key. See full setup guide at `prompts/configuracion-claude-code/sonarlint/README.md`. Validated by checklist BLOQUE 14.
 > **Config is not an output port:** env/YAML/property values are read with `@ConfigurationProperties` or config beans. Never create `*ConfigOutputPort` or an infrastructure adapter just to read config.
-> **Deployment hygiene:** before closing, the migrated project's `.gitignore` MUST exclude local CapaMedia/AI artifacts that must not be pushed to Azure DevOps: `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`. Do not ignore `.sonarlint/connectedMode.json`; that binding is versionable.
+> **Deployment hygiene:** before closing, the migrated project's `.gitignore` MUST exclude local CapaMedia/AI artifacts that must not be pushed to Azure DevOps: `.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`.
 
 ---
 
@@ -309,20 +308,27 @@ public class CustomerAdapterBancs implements BancsCustomerPort {
 
 **Rule 9b — Validate that `<bancs>` block exists in `<headerIn>` BEFORE calling any BANCS TX.**
 
+> **Politica vigente desde 2026-05-26** (ver §4.6 para el detalle completo):
+> esta validacion es la **unica** que se hace sobre el `<headerIn>` — NO se
+> aplican regex ni `maxLength` a ningun campo. Aplica **solo** a servicios que
+> invocan BANCS Core Adapter (BUS/IIB + `invocaBancs=true`). En WAS, ORQ y
+> BUS sin BANCS no se valida nada del header.
+
 When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, the service MUST NOT call the Core Adapter. Instead, return HTTP 200 with the following error structure:
 
 ```xml
 <error>
-  <codigo>005</codigo>
-  <mensaje>El bloque bancs es requerido en la cabecera</mensaje>
-  <tipo>ERROR</tipo>
-  <recurso>WSClientes{NNNN}/OperationName</recurso>
-  <componente>WSClientes{NNNN}</componente>
-  <backend/>
+  <codigo>9927</codigo>
+  <mensaje>Datos de la cabecera de la transaccion no se han asignado</mensaje>
+  <mensajeNegocio></mensajeNegocio>
+  <tipo>FATAL</tipo>
+  <recurso>{servicio-migrado}/{operacion}</recurso>
+  <componente>{servicio-migrado}</componente>
+  <backend>00638</backend>
 </error>
 ```
 
-**Implementation:** In the controller, check if `headerIn.getBancs() == null` BEFORE any business logic. If null, throw a typed exception (e.g., `BusinessValidationException("005", "El bloque bancs es requerido en la cabecera")`) or return the error directly.
+**Implementation:** In the controller, check if `headerIn.getBancs() == null` BEFORE any business logic. If null, build the response inline using `SoapResponseHelper.buildGenericError(ERROR_CODE_HEADER, ...)` and return it directly — **no validator class, no regex, no maxLength**. See §4.6 for the complete inline implementation.
 
 ### Error Structure — Official Layout (Rule 9d)
 
@@ -1529,7 +1535,7 @@ com.pichincha.sp/
     input/adapter/rest/
       impl/                <- @RestController
       dto/                 <- SoapEnvelope DTOs + SoapFault DTOs + package-info.java
-      util/                <- HeaderRequestValidator
+      util/                <- Helpers de orquestacion (NO validator de header — ver §4.6)
     output/adapter/
       bancs/               <- BANCS adapter (implements output port)
         dto/request/       <- BANCS request DTOs
@@ -1554,7 +1560,6 @@ package com.pichincha.sp.infrastructure.input.adapter.rest.impl;
 
 import com.pichincha.common.trace.logger.annotation.BpTraceable;
 import com.pichincha.sp.application.input.port.CustomerServicePort;
-import com.pichincha.sp.infrastructure.input.adapter.rest.util.HeaderRequestValidator;
 import com.pichincha.sp.domain.customer.Customer;
 import com.pichincha.sp.domain.header.SoapRequestContext;
 import com.pichincha.sp.domain.model.HeaderRequestModel;
@@ -1605,11 +1610,16 @@ public class <NombreServicio>Controller {
             @RequestBody @Valid SoapEnvelopeRequestDto soapRequest) {
 
         <Operacion> request = soapRequest.getBody().get<Operacion>();
-        GenericHeaderOut headerOut = SoapResponseHelper.buildHeaderOut(
-            request.getHeaderIn());
-        HeaderRequestValidator.validate(headerOut).ifPresent(errorMsg -> {
-            throw new BusinessValidationException("1", errorMsg);
-        });
+        GenericHeaderIn headerIn = request.getHeaderIn();
+        GenericHeaderOut headerOut = SoapResponseHelper.buildHeaderOut(headerIn);
+
+        // Validacion inline del bloque <bancs> en headerIn.
+        // SOLO para servicios que invocan BANCS Core Adapter (BUS/IIB +
+        // invocaBancs=true). En WAS, ORQ y BUS sin BANCS este bloque NO va.
+        // NO se aplica regex ni maxLength a ningun campo del header — ver §4.6.
+        if (headerIn == null || headerIn.getBancs() == null) {
+            return Mono.just(buildHeaderMissingResponse(headerOut));
+        }
 
         CustomerRequest customerRequest = soapMapper.toDomain(request);
         SoapRequestContext requestContext = toRequestContext(
@@ -1865,102 +1875,152 @@ public class SoapResponseHelper {
 
 ---
 
-#### 4.6 HeaderRequestValidator
+#### 4.6 Validacion de `<headerIn>` — Politica vigente desde 2026-05-26
 
-> **El `maxLength` y el `pattern` de cada `checkField(...)` salen de evidencia
-> formal, no de comentarios.** Usa el facet del XSD (`xsd:length`,
-> `xsd:maxLength`, `xsd:pattern`) o la validacion real del legacy (ESQL
-> `IF LENGTH(...)`, validacion Java). El texto de `<xsd:annotation>` /
-> `<xsd:documentation>` es prosa descriptiva, NO el contrato: si dice
-> `Longitud: 4` pero no hay `xsd:maxLength` ni el legacy validaba longitud,
-> NO agregues esa validacion — rechazaria requests que el legacy aceptaba.
-> Los numeros del ejemplo de abajo son ilustrativos del patron.
+> **Estado**: Vigente desde 2026-05-26. Aplica a TODO servicio migrado (WAS,
+> BUS/IIB, ORQ). Reemplaza a la version anterior de Rule 9b — el
+> `HeaderRequestValidator` con patrones regex + max length por campo **ya no
+> existe**.
+
+**TL;DR**
+
+- **PROHIBIDO** validar campos del `<headerIn>` por regex (patron) o longitud
+  (min/max).
+- **PROHIBIDO** rechazar requests con error `9927`/`9996` por longitud
+  excedida o caracteres "no permitidos" en cualquier campo del header.
+- **PERMITIDO** (y necesario solo cuando aplique): chequear que el bloque
+  `<bancs>` esta presente dentro del `<headerIn>` — y eso **unicamente** en
+  servicios que invocan BANCS Core Adapter (BUS/IIB + `invocaBancs=true`). El
+  resto (WAS, ORQ, BUS sin BANCS) **no valida el header en absoluto** a nivel
+  orquestador / microservicio.
+
+**Por que este cambio**
+
+1. El header lo valida la capa de borde (DataPower / WSO2 / API Gateway), no
+   cada microservicio. Re-validar en cada MSA es duplicacion de trabajo, y
+   peor: con reglas distintas que las de DataPower.
+2. Las reglas regex/length del validator viejo eran inventadas. El dia que
+   producto renombre `canal=03` a `canal=WEB`, los MSAs rechazarian trafico
+   legitimo hasta que cada validator se actualice.
+3. Diagnostico de incidentes OLA 1: el 70%+ de los `codigo=9927` en logs
+   venia de validacion local del MSA fallando contra un header que DataPower
+   habia aceptado y que el legacy IIB procesaba sin problema.
+4. Hexagonal limpia: validar campos del header en el adapter REST es logica
+   de capa de borde, no de negocio.
+5. Mantenimiento cero: 18 patrones x 100 microservicios = 1800 reglas
+   duplicadas. Con DataPower, mantenimiento es cero del lado de los MSAs.
+
+**Que se quita**
+
+- El archivo `HeaderRequestValidator.java` **se elimina del proyecto**.
+- El test `HeaderRequestValidatorTest.java` **se elimina del proyecto**.
+- La invocacion `HeaderRequestValidator.validate(headerOut).ifPresent(...)`
+  en el controller **se elimina**.
+
+**Tabla de reglas eliminadas (las 18 del validator viejo)**
+
+| Campo | Regla vieja (eliminada) |
+|---|---|
+| `dispositivo` | max 50 + regex de caracteres permitidos |
+| `empresa` | max 5 + alfanumerico |
+| `canal` | max 5 + solo digitos |
+| `medio` | max 10 + solo digitos |
+| `aplicacion` | max 8 + solo digitos |
+| `agencia` | max 20 + solo digitos |
+| `tipoTransaccion` | max 12 + solo digitos |
+| `geolocalizacion` | max 100 + alfanumerico extendido |
+| `usuario` | max 10 + alfanumerico |
+| `unicidad` | max 70 + base64 |
+| `guid` | max 36 + alfanumerico con guiones |
+| `fechaHora` | max 40 + alfanumerico extendido |
+| `filler` | max 100 + alfanumerico extendido |
+| `idioma` | max 10 + alfanumerico con guiones |
+| `sesion` | max 100 + alfanumerico extendido |
+| `ip` | max 50 + alfanumerico extendido |
+| `idCliente` | max 15 + solo digitos |
+| `tipoIdCliente` | max 5 + alfanumerico |
+
+Ninguna de las 18 reglas se aplica. **Cero validaciones sintacticas del
+header**.
+
+**Caso 1: servicio invoca BANCS Core Adapter (BUS/IIB + `invocaBancs=true`)**
+
+**MUST**: validar que `<headerIn>` contiene el sub-bloque `<bancs>` antes de
+hacer el call a BANCS. Sin ese bloque el Core Adapter no puede construir las
+headers corporativas (`x-app`, `x-guid`, `x-channel`, `x-medium`,
+`x-session`) y la transaccion nunca llega al core bancario.
+
+Respuesta esperada cuando falta:
+
+```xml
+<error>
+  <codigo>9927</codigo>
+  <mensaje>Datos de la cabecera de la transaccion no se han asignado</mensaje>
+  <mensajeNegocio></mensajeNegocio>
+  <tipo>FATAL</tipo>
+  <recurso>{servicio-migrado}/{operacion}</recurso>
+  <componente>{servicio-migrado}</componente>
+  <backend>00638</backend>
+</error>
+```
+
+- HTTP **200** (compatibilidad IIB)
+- `tipo` = **FATAL** (es falla tecnica — el caller no puede recuperarse
+  retransmitiendo los mismos datos)
+- `codigo` = **9927** (canonico del catalogo
+  `sqb-cfg-errores-errors/errores.xml`)
+- `backend` = **00638** (IIB)
+
+Implementacion recomendada — **inline en el Controller, sin clase validator
+nueva**:
 
 ```java
-package com.pichincha.sp.infrastructure.input.adapter.rest.util;
+@PostMapping(...)
+public Mono<SoapEnvelopeResponseDto> myOperation(@RequestBody SoapEnvelopeRequestDto req) {
+    GenericHeaderIn headerIn = req.getBody().getMyOperation().getHeaderIn();
+    GenericHeaderOut headerOut = SoapResponseHelper.buildHeaderOut(headerIn);
 
-import com.pichincha.sp.generated.GenericHeaderOut;
-import java.util.Optional;
-import java.util.regex.Pattern;
-
-public final class HeaderRequestValidator {
-
-    private static final Pattern DEVICE_PATTERN =
-        Pattern.compile("^[A-Za-z0-9\\s_/();.,:\\-+=]*$");
-    private static final Pattern ALPHANUMERIC =
-        Pattern.compile("^[A-Za-z0-9]*$");
-    private static final Pattern DIGITS_ONLY =
-        Pattern.compile("^\\d*$");
-    private static final Pattern ALPHANUMERIC_EXTENDED =
-        Pattern.compile("^[A-Za-z\u00C0-\u00FF0-9 .,\\-]*$");
-    private static final Pattern BASE64_PATTERN =
-        Pattern.compile("^[A-Za-z0-9+/=]*$");
-    private static final Pattern ALPHANUMERIC_DASH =
-        Pattern.compile("^[A-Za-z0-9\\-]*$");
-
-    private HeaderRequestValidator() {}
-
-    public static Optional<String> validate(GenericHeaderOut header) {
-        if (header == null) {
-            return Optional.empty();
-        }
-        return checkField(header.getDispositivo(), 50,
-                DEVICE_PATTERN, "dispositivo")
-            .or(() -> checkField(header.getEmpresa(), 5,
-                ALPHANUMERIC, "empresa"))
-            .or(() -> checkField(header.getCanal(), 5,
-                DIGITS_ONLY, "canal"))
-            .or(() -> checkField(header.getMedio(), 10,
-                DIGITS_ONLY, "medio"))
-            .or(() -> checkField(header.getAplicacion(), 8,
-                DIGITS_ONLY, "aplicacion"))
-            .or(() -> checkField(header.getAgencia(), 20,
-                DIGITS_ONLY, "agencia"))
-            .or(() -> checkField(header.getTipoTransaccion(), 12,
-                DIGITS_ONLY, "tipoTransaccion"))
-            .or(() -> checkField(header.getGeolocalizacion(), 100,
-                ALPHANUMERIC_EXTENDED, "geolocalizacion"))
-            .or(() -> checkField(header.getUsuario(), 10,
-                ALPHANUMERIC, "usuario"))
-            .or(() -> checkField(header.getUnicidad(), 70,
-                BASE64_PATTERN, "unicidad"))
-            .or(() -> checkField(header.getGuid(), 36,
-                ALPHANUMERIC_DASH, "guid"))
-            .or(() -> checkField(header.getFechaHora(), 40,
-                ALPHANUMERIC_EXTENDED, "fechaHora"))
-            .or(() -> checkField(header.getFiller(), 100,
-                ALPHANUMERIC_EXTENDED, "filler"))
-            .or(() -> checkField(header.getIdioma(), 10,
-                ALPHANUMERIC_DASH, "idioma"))
-            .or(() -> checkField(header.getSesion(), 100,
-                ALPHANUMERIC_EXTENDED, "sesion"))
-            .or(() -> checkField(header.getIp(), 50,
-                ALPHANUMERIC_EXTENDED, "ip"))
-            .or(() -> checkField(header.getIdCliente(), 15,
-                DIGITS_ONLY, "idCliente"))
-            .or(() -> checkField(header.getTipoIdCliente(), 5,
-                ALPHANUMERIC, "tipoIdCliente"));
+    if (headerIn == null || headerIn.getBancs() == null) {
+        return Mono.just(buildHeaderMissingResponse(headerOut));
     }
+    // ... business logic
+}
 
-    private static Optional<String> checkField(
-        String value, int maxLength, Pattern pattern,
-        String fieldName) {
-        if (value == null || value.isEmpty()) {
-            return Optional.empty();
-        }
-        if (value.length() > maxLength) {
-            return Optional.of("Campo " + fieldName
-                + " excede el maximo de " + maxLength
-                + " caracteres");
-        }
-        if (!pattern.matcher(value).matches()) {
-            return Optional.of("Campo " + fieldName
-                + " contiene caracteres no permitidos");
-        }
-        return Optional.empty();
-    }
+private SoapEnvelopeResponseDto buildHeaderMissingResponse(GenericHeaderOut headerOut) {
+    GenericError error = SoapResponseHelper.buildGenericError(
+            CatalogExceptionConstants.ERROR_CODE_HEADER,    // "9927"
+            "Datos de la cabecera de la transaccion no se han asignado",
+            "",
+            CatalogExceptionConstants.ERROR_TYPE_FATAL);    // "FATAL"
+    return SoapResponseHelper.wrapErrorResponse(headerOut, error);
 }
 ```
+
+No hay validador externo, no hay regex, no hay min/max. **Solo null-check
+sobre el bloque `<bancs>`**.
+
+**Caso 2: servicio NO invoca BANCS (WAS, BUS sin BANCS, ORQ)**
+
+- **No se valida nada del header**.
+- ORQ que solo delega a otros microservicios migrados -> cada downstream se
+  encarga de su propia validacion (si la necesita).
+- WAS que solo lee/escribe BD -> no hace falta `<bancs>`.
+- BUS sin `invocaBancs` -> no hay Core Adapter al que servir el bloque.
+
+Si alguien insiste en validar otra cosa "porque siempre se hizo asi", la
+respuesta es **no**. Que el downstream lo rechace si es problema suyo.
+
+**Constantes en `CatalogExceptionConstants`**
+
+```java
+public static final String ERROR_CODE_HEADER = "9927";
+public static final String ERROR_TYPE_FATAL  = "FATAL";
+public static final String BACKEND_IIB       = "00638";
+```
+
+`ERROR_CODE_HEADER` se mantiene para el null-check del `<bancs>`. No se
+fabrican nuevos codigos para validaciones de longitud/patron — porque no
+existen mas validaciones de longitud/patron.
 
 ---
 

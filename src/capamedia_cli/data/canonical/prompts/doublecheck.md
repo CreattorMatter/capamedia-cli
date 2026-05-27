@@ -185,7 +185,6 @@ Fix esperado:
   que no van a Azure DevOps: `.capamedia/`, `.codex/`, `.claude/`,
   `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`,
   `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`.
-  No ignorar `.sonarlint/connectedMode.json`.
 
 ## Paso 3 — Interpretar el resultado
 
@@ -222,7 +221,6 @@ Cosas que NO se pueden arreglar automaticamente y deben documentarse como
 |---|---|---|
 | `sonarcloud.io/project-key` | SonarCloud genera el UUID al primer analisis | Esperar primer pipeline + copiar el key |
 | URL de Confluence | Depende del espacio del equipo | Owner completa manual |
-| `.sonarlint/connectedMode.json` con `projectKey` real | SonarCloud genera el UUID al primer analisis | Owner copia el `projectKey`; el archivo no contiene token y debe quedar versionado |
 | `<ump>.properties` PENDING | Viene del owner del servicio | Pedirlo + pegar en `.capamedia/inputs/` |
 | JNDI desconocido o ambiguo (WAS+BD) | Fuera del catalogo BPTPSRE-Secretos o con secrets conflictivos | Consultar con SRE |
 
@@ -276,8 +274,7 @@ o abrir el PR si no hay residuales HIGH.
    `BLOQUEAR PR: SI`, score bajo, u observaciones de arquitectura/tests,
    corregirlo o marcar `status=blocked`; nunca reportar PR_READY.
 6. **No ensuciar Azure DevOps.** `.capamedia/` y los harnesses/prompts locales
-   de IA deben quedar en `.gitignore`; `.sonarlint/connectedMode.json` es la
-   excepcion versionable.
+   de IA deben quedar en `.gitignore`.
 7. **Informativo, no destructivo.** Todo cambio del autofix queda en
    `.capamedia/autofix/<ts>.log` para trazabilidad.
 8. **Config is not an output port.** Si ves `*ConfigOutputPort` o un adapter

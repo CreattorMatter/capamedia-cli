@@ -217,7 +217,7 @@ def _build_doublecheck_prompt(
         "- Ejecuta `capamedia checklist` y respeta sus autofixes/logs.\n"
         "- No ejecutes `capamedia ai migrate`, `capamedia batch migrate`, `/migrate` ni `capamedia review`.\n"
         "- Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`; rompe CI si apunta a un JDK local.\n"
-        f"- Verifica que el `.gitignore` del proyecto migrado ignore artefactos locales CapaMedia/AI que no van a Azure DevOps: {', '.join(DEPLOYMENT_GITIGNORE_ENTRIES)}. No ignores `.sonarlint/connectedMode.json`.\n"
+        f"- Verifica que el `.gitignore` del proyecto migrado ignore artefactos locales CapaMedia/AI que no van a Azure DevOps: {', '.join(DEPLOYMENT_GITIGNORE_ENTRIES)}.\n"
         "- Verifica que `build.gradle` declare `id 'org.springframework.boot' version '3.5.14'` "
         "o superior aprobado; si hay una version menor, actualiza solo ese literal sin reemplazar el scaffold del MCP.\n"
         "- Verifica Gradle seguridad: no dejes `spring-boot-starter-undertow`, "

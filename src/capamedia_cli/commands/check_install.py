@@ -9,7 +9,6 @@ Agrupa los chequeos por categoria:
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -194,39 +193,6 @@ def _check_codex_auth() -> CheckResult:
     )
 
 
-def _check_sonarcloud_binding() -> CheckResult:
-    """Check if current workspace has a SonarCloud binding."""
-    binding = Path.cwd() / ".sonarlint" / "connectedMode.json"
-    if not binding.exists():
-        return CheckResult(
-            "SonarCloud binding",
-            "warn",
-            "no hay binding en este workspace",
-            "abri VS Code y Share Configuration desde SonarQube",
-        )
-    try:
-        data = json.loads(binding.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return CheckResult("SonarCloud binding", "fail", "archivo corrupto", "")
-    org = data.get("sonarCloudOrganization", "")
-    if org != "bancopichinchaec":
-        return CheckResult(
-            "SonarCloud binding",
-            "fail",
-            f"organizacion incorrecta: {org}",
-            "debe ser 'bancopichinchaec' literal",
-        )
-    project = data.get("projectKey", "")
-    if not project or "<" in project:
-        return CheckResult(
-            "SonarCloud binding",
-            "warn",
-            "projectKey es placeholder",
-            "reemplaza con el UUID real del proyecto en SonarCloud",
-        )
-    return CheckResult("SonarCloud binding", "ok", f"org=bancopichinchaec, project={project[:12]}...")
-
-
 CHECKS = {
     "Toolchain base": [
         _check_git,
@@ -245,7 +211,6 @@ CHECKS = {
         _check_azure_devops_auth,
         _check_mcp_fabrics_config,
         _check_codex_auth,
-        _check_sonarcloud_binding,
     ],
 }
 

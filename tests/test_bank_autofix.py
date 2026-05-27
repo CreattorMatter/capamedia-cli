@@ -342,26 +342,9 @@ def test_catalog_info_preserves_real_values(tmp_path: Path) -> None:
     assert "real@pichincha.com" in ci.read_text(encoding="utf-8")
 
 
-def test_catalog_info_reads_sonar_uuid_from_sonarlint(tmp_path: Path) -> None:
-    repo_dir = tmp_path / "tnd-msa-sp-svc"
-    repo_dir.mkdir()
-    sonar = repo_dir / ".sonarlint"
-    sonar.mkdir()
-    (sonar / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", '
-        '"projectKey": "46ce6caa-d7d5-49b5-9c8a-0958a64589c5"}',
-        encoding="utf-8",
-    )
-    result = fix_catalog_info_scaffold(repo_dir, owner="x@pichincha.com")
-    content = (repo_dir / "catalog-info.yaml").read_text(encoding="utf-8")
-    assert "46ce6caa-d7d5-49b5-9c8a-0958a64589c5" in content
-    assert "<SET-sonarcloud-UUID>" not in content
-    _ = result.applied
-
-
-def test_catalog_info_uses_placeholder_uuid_when_no_sonar(tmp_path: Path) -> None:
-    """Sin .sonarlint/connectedMode.json, generamos un UUID sintetico que pasa
-    el regex del validador oficial del banco (evita FAIL check 9)."""
+def test_catalog_info_uses_placeholder_uuid_when_scaffolding(tmp_path: Path) -> None:
+    """Generamos un UUID sintetico que pasa el regex del validador oficial del
+    banco (evita FAIL check 9). Sigue requiriendo handoff manual para el real."""
     repo_dir = tmp_path / "tnd-msa-sp-wsclientes0007"
     repo_dir.mkdir()
     result = fix_catalog_info_scaffold(repo_dir, owner="x@pichincha.com")
@@ -371,6 +354,8 @@ def test_catalog_info_uses_placeholder_uuid_when_no_sonar(tmp_path: Path) -> Non
     assert "sonarcloud.io/project-key: 00000000-0000-0000-0000-000000000007" in content
     # Ya no hay placeholder <SET-> literal que haria fallar el regex oficial
     assert "<SET-sonarcloud-UUID>" not in content
+    # La nota manual recuerda reemplazar por el UUID real
+    assert "reemplazar UUID sintetico" in result.notes
 
 
 def test_catalog_info_does_not_invent_libbnc_dependency(tmp_path: Path) -> None:

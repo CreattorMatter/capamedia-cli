@@ -89,7 +89,6 @@ Downstream / Integraciones
 
 Handoffs pendientes (NO son bugs del codigo)
   ~ catalog-info.yaml: completar spec.owner con email real + URL Confluence
-  ~ .sonarlint/connectedMode.json: reemplazar placeholder con project_key real
 
 Siguiente paso
   1) Pedir los .properties pendientes al owner del servicio

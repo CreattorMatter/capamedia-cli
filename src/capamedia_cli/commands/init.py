@@ -9,7 +9,6 @@ Genera en la carpeta destino:
   - .opencode/prompts/*.md      (si se eligio opencode)
   - CLAUDE.md / AGENTS.md       (contexto general)
   - .mcp.json                   (config del MCP Fabrics con placeholder)
-  - .sonarlint/connectedMode.json (template para SonarLint)
   - .gitignore                  (con exclusiones de CapaMedia y secrets)
 
 Por defecto corre INTERACTIVO: te pregunta uno por uno cuales harnesses activar.
@@ -95,12 +94,6 @@ def _update_gitignore(target_dir: Path) -> None:
         "",
         "# CapaMedia/AI local artifacts - do not deploy to Azure DevOps",
         *DEPLOYMENT_GITIGNORE_ENTRIES,
-        "",
-        "# SonarLint: versionar binding compartido, ignorar cache local",
-        ".sonarlint/*",
-        "!.sonarlint/connectedMode.json",
-        "!.sonarlint/connectedMode.example.json",
-        "!.sonarlint/README.md",
     ]
     if gi.exists():
         current = gi.read_text(encoding="utf-8")
@@ -121,7 +114,7 @@ def _create_layout(target_dir: Path, service_name: str) -> None:
 
 
 def _copy_templates(target_dir: Path, service_name: str, artifact_token_placeholder: str) -> None:
-    """Render templates (CLAUDE.md, .mcp.json, .sonarlint/, etc.) into target."""
+    """Render templates (CLAUDE.md, .mcp.json, etc.) into target."""
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
     tpl_dir = DATA_ROOT / "templates"
@@ -141,13 +134,8 @@ def _copy_templates(target_dir: Path, service_name: str, artifact_token_placehol
 
     # Nota: CLAUDE.md / AGENTS.md lo generan los adapters. Aca renderizamos
     # solo los templates que NO son cubiertos por adapters.
-    # v0.22.0: agregamos example + README de SonarLint para que el user
-    # tenga la guia completa de setup local sincronizado con SonarCloud.
     rendered_map = {
         "mcp.json.j2": ".mcp.json",
-        "sonarlint-connectedMode.json.j2": ".sonarlint/connectedMode.json",
-        "sonarlint-connectedMode.example.json.j2": ".sonarlint/connectedMode.example.json",
-        "sonarlint-README.md.j2": ".sonarlint/README.md",
     }
     for src_name, dest_rel in rendered_map.items():
         src = tpl_dir / src_name

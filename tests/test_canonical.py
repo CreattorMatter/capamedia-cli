@@ -140,7 +140,6 @@ def test_context_are_loaded() -> None:
     assert "bancs" in names
     assert "security" in names
     assert "code-style" in names
-    assert "sonarlint" in names
     assert "peer-review" in names
 
 

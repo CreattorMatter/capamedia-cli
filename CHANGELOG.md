@@ -6,13 +6,93 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
-### Added
-- **Persistencia Automática de Credenciales**: El comando `capamedia auth bootstrap` ahora persiste automáticamente las credenciales en `~/.capamedia/user.env` (Unix) o en el registro de usuario (Windows), sin obligar a pasar el flag `--env-file` ni requerir exportaciones manuales.
-- **Autocarga de Credenciales**: El módulo `core/auth.py` ahora lee y carga de forma nativa el archivo `~/.capamedia/user.env` al importarse. Esto permite que comandos como `capamedia clone` tengan acceso inmediato al PAT configurado, sin necesidad de configurar `.zshrc`/`.bashrc` de manera manual.
-- **Comando pat Tolerante y No-Bloqueante**: Se optimizó el comando `capamedia pat <token>` para que diferencie entre fallos críticos de autenticación (como 401 en Azure DevOps) y fallos menores de accesos en feeds específicos (como 404 en Azure Artifacts). Ahora, si la conexión principal a Azure DevOps es válida, los fallos de Artifacts se marcan como `WARN` y el comando procede a guardar y configurar las credenciales con total éxito.
+## [0.27.0] - 2026-05-27
 
-### Fixed
-- Se corrigió la invocación de `pip` en el comando `capamedia update` utilizando `sys.executable -m pip` en lugar del comando de terminal directo `pip`. Esto soluciona errores de tipo `No such file or directory: 'pip'` en entornos macOS/Unix y sistemas donde `pip` no está configurado en el PATH global.
+### Changed — Política nueva de validación `<headerIn>` (vigente 2026-05-26)
+
+Aplica a TODO servicio migrado (WAS, BUS/IIB, ORQ). Reemplaza al
+`HeaderRequestValidator` con patrones regex + max length por campo.
+
+- **Prohibido** validar campos del `<headerIn>` por regex (patrón) o longitud
+  (min/max). Las 18 reglas del validator viejo (`dispositivo` max 50 +
+  `DEVICE_PATTERN`, `canal` max 5 + `DIGITS_ONLY`, etc.) se eliminan.
+- **Prohibido** rechazar requests con `codigo=9927`/`9996` por longitud
+  excedida o caracteres "no permitidos" en cualquier campo del header.
+- **Permitido** (solo cuando aplica): null-check inline del bloque `<bancs>`
+  en el controller, únicamente en servicios con `invocaBancs=true` (BUS/IIB
+  que invocan BANCS Core Adapter). En WAS, ORQ y BUS sin BANCS, cero
+  validación del header.
+- Respuesta cuando falta el bloque `<bancs>` en un servicio BANCS:
+  `codigo=9927`, `tipo=FATAL`, `backend=00638`, HTTP 200 (compatibilidad IIB).
+- **Justificación**: el header lo valida DataPower / WSO2 / API Gateway. Las
+  reglas regex/length del validator viejo causaban el 70%+ de los
+  `codigo=9927` falsos positivos en logs OLA 1 — el microservicio rechazaba
+  tráfico que el legacy IIB procesaba sin problema.
+
+**Archivos canónicos actualizados:**
+- `data/canonical/prompts/migrate-rest-full.md`: §4.6 reescrita entera (sin
+  `HeaderRequestValidator.java`, sin regex/maxLength); Rule 9b alineada con
+  los códigos nuevos (9927/FATAL/00638); import + invocación en el controller
+  reemplazada por null-check inline del `<bancs>`.
+- `data/canonical/prompts/checklist-rules.md` Block 4: reescrito entero. Los
+  5 checks nuevos detectan el ANTI-patrón (validator residual, regex/length
+  sobre header, null-check del `<bancs>` en servicios que NO invocan BANCS,
+  `HeaderValidationProperties` con patterns, códigos 9927/9996 fuera de la
+  ruta válida).
+- `data/canonical/prompts/qa.md` T24: reescrita para detectar el residuo del
+  validator viejo en lugar del falso positivo "bancs opcional en XSD".
+
+### Changed — Netty pin `4.1.133.Final` permitido en WebFlux (CVE-fix 2026-05)
+
+- **Check 8.7** (`core/checklist_rules.py:run_block_8`): detecta WebFlux por
+  presencia de `spring-boot-starter-webflux` en `build.gradle`. Si es
+  WebFlux, permite el pin `io.netty:*:4.1.133.Final` en `dependencyManagement`
+  como excepción CVE-fix oficial. Cualquier otra versión sigue siendo
+  **FAIL HIGH**. En MVC/SOAP, el pin sigue prohibido para cualquier versión.
+- **Autofix `fix_remove_netty_pin`** (`core/bank_autofix.py`): preserva el
+  pin `4.1.133.Final` en proyectos WebFlux; sigue removiendo otras versiones.
+- Constante exportada `NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"` en
+  ambos módulos.
+
+### Tests
+
+- `tests/test_block_8_security.py`: +6 tests cubriendo la excepción WebFlux
+  (`test_8_7_allows_4_1_133_pin_in_webflux`,
+  `test_8_7_rejects_non_133_pin_in_webflux`,
+  `test_8_7_rejects_4_1_133_pin_when_not_webflux`,
+  `test_autofix_preserves_4_1_133_pin_in_webflux`,
+  `test_autofix_removes_non_133_pin_in_webflux`,
+  `test_autofix_mixed_pins_in_webflux_only_removes_non_133`).
+- **Suite total: 878 passed, 0 failures** (era 872).
+
+### Migration notes
+
+- Servicios OLA 1 ya migrados con `HeaderRequestValidator` no necesitan
+  revertir inmediatamente — la política es **progresiva** junto con bug
+  fixes. Nuevos servicios y servicios re-migrados aplican la política nueva.
+- Servicios WebFlux que ya tienen pin `4.1.133.Final` dejan de marcar FAIL
+  HIGH en Check 8.7. Servicios con `4.1.132.Final` u otra versión siguen
+  fallando — actualizar a `4.1.133.Final` o quitar el pin.
+
+### Unreleased — features que venían acumulándose, ahora released en 0.27.0
+
+- **Persistencia Automática de Credenciales**: `capamedia auth bootstrap`
+  persiste automáticamente en `~/.capamedia/user.env` (Unix) o en el registro
+  de usuario (Windows), sin obligar a `--env-file` ni exports manuales.
+- **Autocarga de Credenciales**: `core/auth.py` lee y carga `user.env` al
+  importarse — comandos como `capamedia clone` ven el PAT al instante.
+- **Comando `pat` tolerante**: diferencia 401 (Azure DevOps crítico) de 404
+  (Artifacts feed → WARN); procede a guardar si el principal es válido.
+- **Fix `capamedia update`**: usa `sys.executable -m pip` en vez de `pip`
+  directo (resuelve `No such file or directory: 'pip'` en macOS/Unix).
+- **Block 14 (SonarLint binding) eliminado**: el CLI ya no valida
+  `.sonarlint/connectedMode.json`. Se removió `run_block_14`,
+  `_check_sonarcloud_binding`, scaffold de `.sonarlint/` en `init`, dashboard
+  de `info`, autofix lectura del UUID, canonical `sonarlint.md` y todas sus
+  menciones en prompts (CLAUDE.md, bank-checklist-desarrollo, check.md,
+  doublecheck.md, fabric.md, info.md, migrate-rest-full.md). La extensión
+  SonarLint para VS Code (`_install_sonarlint_extension`,
+  `_check_sonarlint_extension`) se preserva.
 
 ## [0.26.4] - 2026-05-22
 

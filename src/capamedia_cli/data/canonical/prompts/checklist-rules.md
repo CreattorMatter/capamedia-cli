@@ -80,13 +80,41 @@ Este prompt consolida de forma compacta y declarativa el checklist ejecutable **
 
 ---
 
-## BLOQUE 4: Validaciones de Header (HeaderRequestValidator)
-* **Check 4.1: HeaderRequestValidator existe.** Debe existir en `infrastructure/` una clase responsable de validar la metadata y headers del banco. Sin validator -> **FAIL HIGH**.
-* **Check 4.2: Validator no se fuga a dominio.** `HeaderRequestValidator` no debe importarse ni residir en las capas de `domain` ni `application`. Matches -> **FAIL HIGH**.
-* **Check 4.3: Controller invoca al validator.** Todo método de entrada en controladores REST o SOAP debe invocar el validator de header al inicio de su ejecución. Sin llamada -> **FAIL HIGH**.
-* **Check 4.4: Business validation.** Las validaciones del cuerpo del payload y reglas de negocio deben residir estrictamente en `domain`/`application`, nunca en el `HeaderRequestValidator`.
-* **Check 4.5: Rechazo de nulos en Header.** El validador debe validar estrictamente que el header de entrada (especialmente el nodo `bancs`) no sea nulo ni contenga campos vacíos. Desviaciones -> **FAIL HIGH**.
-* **Check 4.6: Patterns de header externalizados.** Los patrones Regex para validar campos del header (identificación, canal) deben leerse de `application.yml` o inyectarse con `@Value` en lugar de estar hardcodeados en Java. Hardcodeados -> **FAIL HIGH**.
+## BLOQUE 4: Validación de `<headerIn>` — Política vigente desde 2026-05-26
+
+> **Cambio de política**: la clase `HeaderRequestValidator` con patrones regex
+> + max length por campo **se elimina del proyecto**. La validación de tamaños
+> y patrones del header queda delegada a DataPower (capa de borde). En el
+> microservicio, la única validación permitida sobre `<headerIn>` es el
+> null-check del bloque `<bancs>`, y solo para servicios que invocan BANCS
+> Core Adapter. Reemplaza a los checks 4.1–4.6 anteriores. Ver §4.6 del
+> prompt REST canónico para el detalle completo.
+
+* **Check 4.1: NO existe `HeaderRequestValidator`.** No debe existir en el
+  proyecto migrado el archivo
+  `infrastructure/input/adapter/**/util/HeaderRequestValidator.java` ni su
+  test asociado. Presencia -> **FAIL HIGH**.
+* **Check 4.2: NO regex/maxLength sobre `<headerIn>`.** En el controller no
+  debe haber `Pattern.compile(...)` ni comparaciones `.length() > N` aplicadas
+  a campos de `GenericHeaderIn`/`GenericHeaderOut` (dispositivo, empresa,
+  canal, medio, aplicación, agencia, tipoTransacción, geolocalización,
+  usuario, unicidad, guid, fechaHora, filler, idioma, sesión, ip, idCliente,
+  tipoIdCliente). Matches -> **FAIL HIGH**.
+* **Check 4.3: Null-check del `<bancs>` solo cuando aplica.** En servicios
+  con `invocaBancs=true` (BUS/IIB), el controller debe chequear
+  `headerIn == null || headerIn.getBancs() == null` ANTES de invocar BANCS y
+  devolver HTTP 200 con `codigo=9927`, `tipo=FATAL`, `backend=00638`,
+  `mensaje="Datos de la cabecera de la transaccion no se han asignado"`.
+  Sin null-check -> **FAIL HIGH**. En WAS, ORQ y BUS sin BANCS, el null-check
+  del `<bancs>` **NO** debe existir — su presencia es residuo del template
+  viejo.
+* **Check 4.4: NO `HeaderValidationProperties` ni patterns externalizados.**
+  No debe existir `@ConfigurationProperties` o bean que exponga regex/length
+  de campos del header desde `application.yml`. Presencia -> **FAIL HIGH**.
+* **Check 4.5: Códigos 9927/9996 solo para falta de `<bancs>`.** Si el
+  proyecto devuelve `codigo=9927` o `codigo=9996` en cualquier otra ruta
+  (longitud excedida, pattern mismatch, campo vacío que no sea `<bancs>`), es
+  residuo del validator viejo. Matches -> **FAIL HIGH**.
 
 ---
 

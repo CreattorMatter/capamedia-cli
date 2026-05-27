@@ -205,7 +205,6 @@ def test_build_batch_migrate_prompt_contains_workspace_context(tmp_path: Path) -
     assert "application/input/port" in prompt
     assert "@SpringBootTest" in prompt
     assert ".capamedia/" in prompt
-    assert ".sonarlint/connectedMode.json" in prompt
 
 
 def test_migrate_output_schema_is_codex_strict_compatible() -> None:

@@ -179,7 +179,7 @@ Trampas descubiertas en analisis reales. Revisalas ACTIVAMENTE.
 - T23. Recurso/componente copy-paste del legacy (ops 36/37 con recurso_35)
 
 **STACK NUEVO:**
-- T24. bancs block obligatorio en validator pero opcional en XSD (canales digitales fallan)
+- T24. Validacion de longitud/patron sobre campos del `<headerIn>` (dispositivo, canal, medio, etc.) en el controller o en un `HeaderRequestValidator` residual: politica vigente 2026-05-26 prohibe estas validaciones (las hace DataPower). Sintoma tipico: requests legitimos de canales digitales rechazados con `codigo=9927`/`9996` que el legacy aceptaba.
 - T25. @Table sin schema + default_schema insuficiente para multi-schema
 - T26. Mapper del nuevo prefiere valor downstream sobre request original
 - T27. headerOut.documento vacio pero XSD tiene hijos con minOccurs=1

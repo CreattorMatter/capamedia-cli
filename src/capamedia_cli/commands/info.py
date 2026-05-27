@@ -382,16 +382,6 @@ def _render_handoffs_section(workspace: Path) -> None:
                         "copiar sonarcloud.io/project-key tras primer pipeline",
                     ))
 
-    # .sonarlint/connectedMode.json
-    sonarlint = workspace / ".sonarlint" / "connectedMode.json"
-    if sonarlint.is_file():
-        content = sonarlint.read_text(encoding="utf-8", errors="replace")
-        if "<PROJECT_KEY_FROM_SONARCLOUD>" in content:
-            items.append((
-                ".sonarlint/connectedMode.json",
-                "reemplazar placeholder con project_key real de SonarCloud",
-            ))
-
     if not items:
         console.print("  [green]Sin handoffs pendientes detectables[/green]")
         return

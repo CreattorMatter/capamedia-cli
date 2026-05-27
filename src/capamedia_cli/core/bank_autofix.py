@@ -612,12 +612,6 @@ spec:
 """
 
 
-_SONAR_UUID_PATTERN = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-
-
 def _detect_bnc_libs_in_gradle(project_root: Path) -> list[str]:
     """Devuelve lib-names (sin version) de `com.pichincha.*:lib-*` en build.gradle."""
     libs: set[str] = set()
@@ -647,21 +641,6 @@ def _placeholder_uuid_from_name(repo_name: str) -> str:
     nums = re.findall(r"\d+", repo_name)
     suffix = (nums[-1] if nums else "0").zfill(12)
     return f"00000000-0000-0000-0000-{suffix[-12:]}"
-
-
-def _load_sonar_project_key(project_root: Path) -> str | None:
-    """Lee `.sonarlint/connectedMode.json` si existe — ya tiene el UUID real."""
-    cm = project_root / ".sonarlint" / "connectedMode.json"
-    if not cm.exists():
-        return None
-    try:
-        import json as _json
-
-        data = _json.loads(cm.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    key = str(data.get("projectKey", "")).strip()
-    return key if _SONAR_UUID_PATTERN.match(key) else None
 
 
 def _infer_repo_name(project_root: Path) -> str:
@@ -752,7 +731,7 @@ def fix_catalog_info_scaffold(
 
     repo_name = _infer_repo_name(project_root)
     catalog_namespace = _catalog_namespace_from_repo(repo_name)
-    sonar_key = _load_sonar_project_key(project_root) or _placeholder_uuid_from_name(repo_name)
+    sonar_key = _placeholder_uuid_from_name(repo_name)
     owner_resolved = owner or _git_user_email(project_root) or "<SET-email-pichincha>"
     desc_resolved = description or f"Servicio {repo_name}"
 
@@ -776,13 +755,12 @@ def fix_catalog_info_scaffold(
     result.files_modified.append(target)
     result.applied = True
 
-    manual_notes: list[str] = []
-    if sonar_key.startswith("<"):
-        manual_notes.append("sonarcloud.io/project-key (correr SonarCloud binding)")
+    manual_notes: list[str] = [
+        "sonarcloud.io/project-key (reemplazar UUID sintetico por el real de SonarCloud)",
+    ]
     if owner_resolved.startswith("<"):
         manual_notes.append("spec.owner (setear email @pichincha.com)")
-    if manual_notes:
-        result.notes = "Revisar manualmente: " + ", ".join(manual_notes)
+    result.notes = "Revisar manualmente: " + ", ".join(manual_notes)
     result.changes.append(
         f"{target.relative_to(project_root)}: generado con "
         f"namespace={catalog_namespace}, name=tpl-middleware, lifecycle=test, "
@@ -1440,15 +1418,24 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
 # ---------------------------------------------------------------------------
 # Regla 8.7 / Snyk 2026-05 — Eliminar pins manuales de io.netty:* del bloque
 # `dependencyManagement { dependencies { ... } }`. Los pins manuales se quedan
-# atras al proximo CVE (era
-# exactamente el bug del template viejo con netty-codec-http:4.1.132.Final).
+# atras al proximo CVE (era exactamente el bug del template viejo con
+# netty-codec-http:4.1.132.Final).
+#
+# Excepcion oficial (v0.27.0): proyectos WebFlux pueden mantener el pin
+# `io.netty:*:4.1.133.Final` porque cierra los CVEs 2026-05 del netty-codec-http
+# sin esperar al proximo BOM. Solo aplica a WebFlux
+# (`spring-boot-starter-webflux`); MVC/SOAP siguen sin pin manual.
 # ---------------------------------------------------------------------------
 
 
+NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
 _NETTY_PIN_LINE_RE = re.compile(
     r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s+"
     r"['\"]io\.netty:[^:]+:[^'\"]+['\"][^\n]*\n?",
     re.MULTILINE,
+)
+_NETTY_ALLOWED_PIN_RE = re.compile(
+    r"['\"]io\.netty:[^:]+:" + re.escape(NETTY_WEBFLUX_ALLOWED_VERSION) + r"['\"]",
 )
 
 
@@ -1457,7 +1444,8 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
 
     Solo opera sobre lineas dentro de bloques `dependencyManagement`, igual que
     el checker 8.7. Mantiene el resto del archivo intacto. Idempotente. Skip si
-    no hay build.gradle.
+    no hay build.gradle. En proyectos WebFlux preserva el pin oficial
+    `io.netty:*:4.1.133.Final`.
     """
     result = BankAutofixResult(rule="8.7", applied=False)
     gradle_files = [
@@ -1472,6 +1460,11 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         result.notes = "no se encontro build.gradle"
         return result
 
+    is_webflux = any(
+        "spring-boot-starter-webflux" in f.read_text(encoding="utf-8", errors="replace")
+        for f in gradle_files
+    )
+
     modified_files: list[Path] = []
     for f in gradle_files:
         try:
@@ -1481,7 +1474,9 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         if "io.netty:" not in text:
             continue
 
-        new_text, n = _remove_netty_pins_from_dependency_management(text)
+        new_text, n = _remove_netty_pins_from_dependency_management(
+            text, allow_webflux_pin=is_webflux
+        )
         if n > 0 and new_text != text:
             # Limpiar lineas blancas dobles que pueden haber quedado
             new_text = re.sub(r"\n{3,}", "\n\n", new_text)
@@ -1495,12 +1490,24 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         result.applied = True
         result.files_modified = modified_files
     else:
-        result.notes = "no se encontraron pins de io.netty:* en build.gradle"
+        if is_webflux:
+            result.notes = (
+                "no se encontraron pins de io.netty:* a remover (WebFlux: "
+                f"pin {NETTY_WEBFLUX_ALLOWED_VERSION} permitido)"
+            )
+        else:
+            result.notes = "no se encontraron pins de io.netty:* en build.gradle"
     return result
 
 
-def _remove_netty_pins_from_dependency_management(text: str) -> tuple[str, int]:
-    """Remove active io.netty pins only while inside dependencyManagement."""
+def _remove_netty_pins_from_dependency_management(
+    text: str, *, allow_webflux_pin: bool = False
+) -> tuple[str, int]:
+    """Remove active io.netty pins only while inside dependencyManagement.
+
+    Si `allow_webflux_pin=True`, preserva los pins con version
+    `4.1.133.Final` (CVE-fix oficial 2026-05).
+    """
     lines = text.splitlines(keepends=True)
     output: list[str] = []
     removed = 0
@@ -1527,6 +1534,13 @@ def _remove_netty_pins_from_dependency_management(text: str) -> tuple[str, int]:
             continue
 
         if in_dep_mgmt and not is_comment and _NETTY_PIN_LINE_RE.match(raw_line):
+            if allow_webflux_pin and _NETTY_ALLOWED_PIN_RE.search(raw_line):
+                output.append(raw_line)
+                brace_depth += opens - closes
+                if brace_depth < dep_mgmt_brace:
+                    in_dep_mgmt = False
+                    dep_mgmt_brace = -1
+                continue
             removed += 1
             brace_depth += opens - closes
             if brace_depth < dep_mgmt_brace:

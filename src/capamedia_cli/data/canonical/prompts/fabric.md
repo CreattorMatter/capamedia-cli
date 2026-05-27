@@ -131,7 +131,6 @@ Después del scaffold del MCP, copiar al destino:
 # Copiar .claude/ generado por capamedia init al destino
 cp -r .claude destino/<namespace>-msa-sp-<servicio>/
 cp CLAUDE.md destino/<namespace>-msa-sp-<servicio>/
-cp .sonarlint/connectedMode.json destino/<namespace>-msa-sp-<servicio>/.sonarlint/ 2>/dev/null || true
 cp .mcp.json destino/<namespace>-msa-sp-<servicio>/  # (el .gitignore lo ignora)
 ```
 

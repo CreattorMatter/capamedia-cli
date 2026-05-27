@@ -613,7 +613,6 @@ def _build_batch_migrate_prompt(
           usa `JAVA_HOME` del entorno del proceso.
         - Verifica que el `.gitignore` del proyecto migrado ignore artefactos
           locales CapaMedia/AI que no van a Azure DevOps: {", ".join(DEPLOYMENT_GITIGNORE_ENTRIES)}.
-          No ignores `.sonarlint/connectedMode.json`; ese binding si debe versionarse.
         - Verifica que `build.gradle` declare `id 'org.springframework.boot'
           version '3.5.14'` o superior aprobado. Si hay una version menor,
           actualiza solo ese literal sin reemplazar el build.gradle del MCP.

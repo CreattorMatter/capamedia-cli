@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import Mock
 
 from openpyxl import Workbook
 
@@ -15,13 +14,11 @@ from capamedia_cli.core.checklist_rules import (
     run_block_7,
     run_block_8,
     run_block_13,
-    run_block_14,
     run_block_15,
     run_block_21,
     run_block_22,
 )
 from capamedia_cli.core.discovery import DISCOVERY_WORKBOOK_NAME
-from capamedia_cli.core.gitignore_policy import format_deployment_gitignore_block
 
 
 def _make_migrated(tmp_path: Path) -> Path:
@@ -592,94 +589,6 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
 
     assert report.total_applied == 1
     assert "version '3.5.14'" in build_gradle.read_text(encoding="utf-8")
-
-
-def test_block_14_detects_placeholder_projectkey(tmp_path: Path) -> None:
-    root = _make_migrated(tmp_path)
-    sonarlint_dir = root / ".sonarlint"
-    sonarlint_dir.mkdir()
-    (sonarlint_dir / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", "projectKey": "<PROJECT_KEY_FROM_SONARCLOUD>"}',
-        encoding="utf-8",
-    )
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_14(ctx)
-    key_check = _by_id(results, "14.3")
-    assert key_check.status == "fail"
-
-
-def test_block_14_passes_with_real_projectkey(tmp_path: Path) -> None:
-    root = _make_migrated(tmp_path)
-    sonarlint_dir = root / ".sonarlint"
-    sonarlint_dir.mkdir()
-    (sonarlint_dir / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", "projectKey": "69ac437e-c29a-4734-9b62-dbdeb572e01b"}',
-        encoding="utf-8",
-    )
-    (root / ".gitignore").write_text(format_deployment_gitignore_block() + "\n", encoding="utf-8")
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_14(ctx)
-    key_check = _by_id(results, "14.3")
-    assert key_check.status == "pass"
-    ignore_check = _by_id(results, "14.4")
-    assert ignore_check.status == "pass"
-    hygiene_check = _by_id(results, "14.6")
-    assert hygiene_check.status == "pass"
-
-
-def test_block_14_fails_when_deployment_gitignore_entries_missing(tmp_path: Path) -> None:
-    root = _make_migrated(tmp_path)
-    sonarlint_dir = root / ".sonarlint"
-    sonarlint_dir.mkdir()
-    (sonarlint_dir / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", "projectKey": "69ac437e-c29a-4734-9b62-dbdeb572e01b"}',
-        encoding="utf-8",
-    )
-    (root / ".gitignore").write_text(".gradle/\nbuild/\n", encoding="utf-8")
-
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_14(ctx)
-
-    hygiene_check = _by_id(results, "14.6")
-    assert hygiene_check.status == "fail"
-    assert hygiene_check.severity == "high"
-    assert ".capamedia/" in hygiene_check.detail
-    assert ".sonarlint/connectedMode.json" in hygiene_check.suggested_fix
-
-
-def test_block_14_fails_when_sonarlint_binding_is_gitignored(tmp_path: Path, monkeypatch) -> None:
-    root = _make_migrated(tmp_path)
-    sonarlint_dir = root / ".sonarlint"
-    sonarlint_dir.mkdir()
-    (sonarlint_dir / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", "projectKey": "69ac437e-c29a-4734-9b62-dbdeb572e01b"}',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "capamedia_cli.core.checklist_rules.subprocess.run",
-        Mock(return_value=Mock(returncode=0)),
-    )
-
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_14(ctx)
-
-    ignore_check = _by_id(results, "14.4")
-    assert ignore_check.status == "fail"
-    assert ignore_check.severity == "medium"
-
-
-def test_block_14_fails_with_wrong_organization(tmp_path: Path) -> None:
-    root = _make_migrated(tmp_path)
-    sonarlint_dir = root / ".sonarlint"
-    sonarlint_dir.mkdir()
-    (sonarlint_dir / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "wrong-org", "projectKey": "abc123"}',
-        encoding="utf-8",
-    )
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_14(ctx)
-    org_check = _by_id(results, "14.2")
-    assert org_check.status == "fail"
 
 
 def test_block_0_rejects_bancs_artifacts_for_was(tmp_path: Path) -> None:

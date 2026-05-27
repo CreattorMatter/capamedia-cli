@@ -11,17 +11,11 @@ from __future__ import annotations
 from collections import Counter
 import json
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-from capamedia_cli.core.gitignore_policy import (
-    DEPLOYMENT_GITIGNORE_ENTRIES,
-    format_deployment_gitignore_block,
-    missing_deployment_gitignore_entries,
-)
 from capamedia_cli.core.version_policy import (
     SPRING_BOOT_BASELINE_VERSION,
     is_version_lower,
@@ -79,19 +73,6 @@ def _grep_files(root: Path, pattern: str, file_glob: str = "**/*.java") -> list[
 
 def _file_exists(path: Path) -> bool:
     return path.exists() and path.is_file()
-
-
-def _git_ignores(root: Path, relative_path: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "check-ignore", relative_path],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
 
 
 def _read_or_empty(path: Path) -> str:
@@ -655,17 +636,38 @@ def _undertow_gradle_artifacts(gradle_file: Path, root: Path) -> list[str]:
 # template tenia `dependency 'io.netty:netty-codec-http:4.1.132.Final'` (un
 # pin que ahora es el problema). Cualquier pin manual es scaffold viejo o
 # intento de parche que se va a quedar atras en el proximo CVE.
+#
+# Excepcion oficial (v0.27.0): servicios WebFlux pueden mantener el pin
+# `io.netty:*:4.1.133.Final` porque es la version aprobada que cierra los CVEs
+# 2026-05 del netty-codec-http sin esperar al proximo BOM. Solo aplica a
+# WebFlux (`spring-boot-starter-webflux`); MVC/SOAP siguen sin pin manual.
 _NETTY_PIN_RE = re.compile(
     r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s*"
     r"['\"]io\.netty:[^:]+:[^'\"]+['\"]",
 )
+NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
+_NETTY_ALLOWED_PIN_RE = re.compile(
+    r"['\"]io\.netty:[^:]+:" + re.escape(NETTY_WEBFLUX_ALLOWED_VERSION) + r"['\"]",
+)
 
 
-def _netty_dependency_management_pins(gradle_file: Path, root: Path) -> list[str]:
+def _project_uses_webflux(gradle_files: list[Path]) -> bool:
+    """True si algun build.gradle declara `spring-boot-starter-webflux`."""
+    for gf in gradle_files:
+        if "spring-boot-starter-webflux" in _read_or_empty(gf):
+            return True
+    return False
+
+
+def _netty_dependency_management_pins(
+    gradle_file: Path, root: Path, *, allow_webflux_pin: bool = False
+) -> list[str]:
     """Return list of 'io.netty:*:VERSION' pins inside dependencyManagement.
 
     Solo matchea pins activos (no comentarios). Aplica tambien a pins en
-    `dependencies {}` top-level con version literal (no `:+` ni var).
+    `dependencies {}` top-level con version literal (no `:+` ni var). Si
+    `allow_webflux_pin=True` (proyecto WebFlux), ignora los pins en la version
+    oficial `4.1.133.Final` — siguen permitidos.
     """
     pins: list[str] = []
     text = _read_or_empty(gradle_file)
@@ -691,6 +693,8 @@ def _netty_dependency_management_pins(gradle_file: Path, root: Path) -> list[str
             in_dep_mgmt = False
             dep_mgmt_brace = -1
         if in_dep_mgmt and _NETTY_PIN_RE.match(raw_line):
+            if allow_webflux_pin and _NETTY_ALLOWED_PIN_RE.search(raw_line):
+                continue
             pins.append(f"{rel}:{line_no} -> {stripped[:120]}")
     return pins
 
@@ -815,39 +819,6 @@ def _discovery_edge_case_status(text: str, code: str) -> str:
         if any(marker in window for marker in _DISCOVERY_COVERAGE_MARKERS):
             return "covered"
     return "pending" if has_pending else "missing"
-
-
-def _deployment_gitignore_check(ctx: CheckContext) -> CheckResult:
-    gitignore = ctx.migrated_path / ".gitignore"
-    if not gitignore.exists():
-        missing = list(DEPLOYMENT_GITIGNORE_ENTRIES)
-        detail = ".gitignore faltante en el proyecto migrado"
-    else:
-        missing = missing_deployment_gitignore_entries(_read_or_empty(gitignore))
-        detail = f"faltan entradas: {', '.join(missing)}" if missing else ""
-
-    if missing:
-        return CheckResult(
-            "14.6",
-            "Block 14",
-            ".gitignore excluye artefactos CapaMedia/AI",
-            "fail",
-            severity="high",
-            detail=detail,
-            suggested_fix=(
-                "Agregar al .gitignore del proyecto migrado este bloque:\n"
-                f"{format_deployment_gitignore_block()}\n"
-                "No ignorar .sonarlint/connectedMode.json: ese binding si se versiona."
-            ),
-        )
-
-    return CheckResult(
-        "14.6",
-        "Block 14",
-        ".gitignore excluye artefactos CapaMedia/AI",
-        "pass",
-        detail="artefactos locales CapaMedia/AI ignorados para Azure DevOps",
-    )
 
 
 def _expected_framework(
@@ -2547,12 +2518,28 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     # netty-codec-dns) en `4.1.132.Final` — la version que el scaffold viejo
     # habia pinneado manualmente para parchar un CVE anterior. La unica forma
     # sostenible es no pinnear transitivas manualmente.
+    allow_webflux_pin = _project_uses_webflux(gradle_files)
     netty_pins: list[str] = []
     for gradle_file in gradle_files:
         netty_pins.extend(
-            _netty_dependency_management_pins(gradle_file, ctx.migrated_path)
+            _netty_dependency_management_pins(
+                gradle_file, ctx.migrated_path, allow_webflux_pin=allow_webflux_pin
+            )
         )
     if netty_pins:
+        suggested_fix = (
+            "Eliminar todos los `dependency 'io.netty:*:VERSION'` del "
+            "bloque dependencyManagement. Pins manuales se quedan atras al "
+            "proximo CVE (Snyk 2026-05: 4 CVEs HIGH en 4.1.132.Final "
+            "que el pin viejo introdujo)."
+        )
+        if allow_webflux_pin:
+            suggested_fix = (
+                f"En proyectos WebFlux solo esta permitido el pin "
+                f"`io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}` (cierra los "
+                f"CVEs 2026-05). Cualquier otra version manual debe eliminarse "
+                f"del bloque dependencyManagement."
+            )
         results.append(
             CheckResult(
                 "8.7",
@@ -2564,21 +2551,23 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     f"{len(netty_pins)} pin(s) manual(es) de io.netty:* "
                     f"detectado(s): " + "; ".join(netty_pins[:6])
                 ),
-                suggested_fix=(
-                    "Eliminar todos los `dependency 'io.netty:*:VERSION'` del "
-                    "bloque dependencyManagement. Pins manuales se quedan atras al "
-                    "proximo CVE (Snyk 2026-05: 4 CVEs HIGH en 4.1.132.Final "
-                    "que el pin viejo introdujo)."
-                ),
+                suggested_fix=suggested_fix,
             )
         )
     else:
+        detail = ""
+        if allow_webflux_pin:
+            detail = (
+                f"WebFlux: pin `io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}` "
+                "permitido (CVE-fix oficial 2026-05)"
+            )
         results.append(
             CheckResult(
                 "8.7",
                 "Block 8",
                 "Sin pins manuales de io.netty:* (CVE-driven)",
                 "pass",
+                detail=detail,
             )
         )
     return results
@@ -2923,64 +2912,6 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
             )
     # Si no hay setBackend, no penalizamos (puede venir de constants)
 
-    return results
-
-
-# -- Block 14: SonarLint ----------------------------------------------------
-
-
-def run_block_14(ctx: CheckContext) -> list[CheckResult]:
-    results: list[CheckResult] = []
-    binding = ctx.migrated_path / ".sonarlint" / "connectedMode.json"
-
-    # 14.1 - Existe
-    if not _file_exists(binding):
-        results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "fail", severity="high", detail="archivo faltante", suggested_fix="Bindar en VS Code y Share Configuration"))
-        results.append(_deployment_gitignore_check(ctx))
-        return results
-    results.append(CheckResult("14.1", "Block 14", ".sonarlint/connectedMode.json presente", "pass"))
-
-    # 14.2 - org correcto
-    try:
-        data = json.loads(_read_or_empty(binding))
-    except json.JSONDecodeError:
-        results.append(CheckResult("14.2", "Block 14", "connectedMode.json valido", "fail", severity="high", detail="JSON invalido"))
-        results.append(_deployment_gitignore_check(ctx))
-        return results
-    if data.get("sonarCloudOrganization") == "bancopichinchaec":
-        results.append(CheckResult("14.2", "Block 14", "org = bancopichinchaec", "pass"))
-    else:
-        results.append(CheckResult("14.2", "Block 14", "org = bancopichinchaec", "fail", severity="high", detail=f"actual: {data.get('sonarCloudOrganization', '')}"))
-
-    # 14.3 - projectKey no es placeholder
-    key = data.get("projectKey", "")
-    if not key or "<" in key:
-        results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "fail", severity="high", detail=f"actual: {key}"))
-    else:
-        results.append(CheckResult("14.3", "Block 14", "projectKey no es placeholder", "pass"))
-
-    # 14.4 - El binding compartido no puede quedar ignorado por .gitignore.
-    if _git_ignores(ctx.migrated_path, ".sonarlint/connectedMode.json"):
-        results.append(
-            CheckResult(
-                "14.4",
-                "Block 14",
-                ".sonarlint/connectedMode.json no gitignored",
-                "fail",
-                severity="medium",
-                detail="git check-ignore marca el binding como ignorado",
-                suggested_fix=(
-                    "Ajustar .gitignore: ignorar cache local de .sonarlint/* pero "
-                    "mantener !.sonarlint/connectedMode.json"
-                ),
-            )
-        )
-    else:
-        results.append(
-            CheckResult("14.4", "Block 14", ".sonarlint/connectedMode.json no gitignored", "pass")
-        )
-
-    results.append(_deployment_gitignore_check(ctx))
     return results
 
 
@@ -3951,7 +3882,6 @@ ALL_BLOCKS = [
     ("Block 7", run_block_7),
     ("Block 8", run_block_8),  # v0.23.33: Spring Boot baseline
     ("Block 13", run_block_13),
-    ("Block 14", run_block_14),
     ("Block 15", run_block_15),
     ("Block 16", run_block_16),
     ("Block 17", run_block_17),

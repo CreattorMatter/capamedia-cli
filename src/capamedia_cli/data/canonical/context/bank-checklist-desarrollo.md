@@ -2,7 +2,7 @@
 name: bank-checklist-desarrollo
 kind: context
 priority: 1
-summary: Checklist oficial de desarrollo del banco - cobertura 75%, Snyk, SonarLint, azure-pipeline por namespace
+summary: Checklist oficial de desarrollo del banco - cobertura 75%, Snyk, SonarCloud, azure-pipeline por namespace
 ---
 
 # Checklist oficial de desarrollo — Banco Pichincha
@@ -44,20 +44,7 @@ este canonical):
 **NEVER**: subir o bajar el umbral unilateralmente. Si el proyecto necesita
 un threshold distinto, documentarlo y escalarlo al equipo BPTPSRE.
 
-### 2. Análisis estático — SonarLint local
-
-**MUST**: todo proyecto migrado incluye `.sonarlint/connectedMode.json`
-conectado al SonarCloud `bancopichinchaec`.
-
-**Template**: `prompts/configuracion-claude-code/sonarlint/connectedMode.template.json`.
-
-**Guía completa**: `BPTPSRE-Guía de configuración SonarQube for ide
-(SonarLint)-140426-180128.pdf` (PDF CDSRL).
-
-Detalles técnicos en `context/sonarlint.md` — este canonical solo marca el
-**gate** (SonarLint conectado = obligatorio).
-
-### 3. SonarCloud — reglas custom del banco
+### 2. SonarCloud — reglas custom del banco
 
 **MUST**: configuración en `catalog-info.yaml`:
 
@@ -69,7 +56,7 @@ metadata:
 
 **Reglas específicas**: ver `context/sonar-custom-rules.md`.
 
-### 4. Vulnerabilidades — Snyk
+### 3. Vulnerabilidades — Snyk
 
 **MUST**: 0 vulnerabilidades **critical** o **high** en el build final.
 
@@ -80,7 +67,7 @@ metadata:
 **NEVER**: mergear un PR con vulnerabilidad critical/high sin plan de
 mitigación documentado + approval del security lead.
 
-### 5. Pipeline — `azure-pipeline.yml` por namespace
+### 4. Pipeline — `azure-pipeline.yml` por namespace
 
 **MUST**: el pipeline Azure DevOps está **namespaced** por servicio
 (`tpl-middleware/<namespace>-msa-sp-<svc>`).
@@ -95,14 +82,13 @@ El `azure-pipeline.yml` del repo debe:
 existe y que el project-key del SonarCloud matchea el `catalog-info.yaml`
 (Regla 9 de `bank-official-rules.md`).
 
-### 6. Gates obligatorios antes del PR
+### 5. Gates obligatorios antes del PR
 
 Resumen del PDF para revisión rápida:
 
 - ✅ Build verde (`./gradlew build` sin warnings críticos).
 - ✅ Coverage JaCoCo ≥ 75%.
 - ✅ 0 vulns critical/high (Snyk).
-- ✅ `.sonarlint/connectedMode.json` versionado.
 - ✅ `catalog-info.yaml` completo (Regla 9).
 - ✅ `azure-pipeline.yml` presente y ejecutable.
 - ✅ Tests siguen `unit-test-guidelines.md` (given/when/then, English).
@@ -114,14 +100,13 @@ Resumen del PDF para revisión rápida:
   Este canonical cubre gates adicionales (cobertura, Snyk, pipeline).
 - **`unit-test-guidelines.md`** → cómo escribir los tests. Este canonical
   define **cuánto** cobertura exigir (75%).
-- **`sonarlint.md` + `sonar-custom-rules.md`** → setup técnico. Este
-  canonical marca el **gate** (SonarLint conectado = obligatorio).
+- **`sonar-custom-rules.md`** → reglas Sonar específicas del banco.
 - **`checklist-rules.md` Block 9** → checks ejecutables que validan este
   canonical en tiempo de CLI.
 
 ## Regla para el agente migrador
 
-1. **Antes de entregar un PR**, correr los 8 gates de la sección §6.
+1. **Antes de entregar un PR**, correr los 7 gates de la sección §5.
 2. **Si coverage < 75%**: agregar tests faltantes (`unit-test-guidelines.md`).
 3. **Si Snyk reporta critical/high**: priorizar mitigación antes del merge.
 4. **No cambiar los thresholds** sin consultar este canonical — son

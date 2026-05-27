@@ -113,26 +113,6 @@ def test_info_skips_secrets_for_non_was(tmp_path: Path) -> None:
     assert "no aplica" in result.output.lower() or "solo WAS" in result.output
 
 
-def test_info_detects_sonarlint_placeholder(tmp_path: Path) -> None:
-    """Si connectedMode.json tiene <PROJECT_KEY_FROM_SONARCLOUD>, lo marca como handoff."""
-    (tmp_path / ".capamedia").mkdir()
-    (tmp_path / ".capamedia" / "config.yaml").write_text(
-        "service_name: wsx0001\n", encoding="utf-8",
-    )
-    sonar = tmp_path / ".sonarlint"
-    sonar.mkdir()
-    (sonar / "connectedMode.json").write_text(
-        '{"sonarCloudOrganization": "bancopichinchaec", '
-        '"projectKey": "<PROJECT_KEY_FROM_SONARCLOUD>"}',
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(app, ["info", "--workspace", str(tmp_path)])
-    assert result.exit_code == 0
-    assert ".sonarlint/connectedMode.json" in result.output
-    assert "project_key" in result.output.lower() or "placeholder" in result.output.lower()
-
-
 def test_info_next_step_when_properties_pending(tmp_path: Path) -> None:
     """Si hay PENDING, el siguiente paso sugiere pedir al owner + checklist."""
     (tmp_path / ".capamedia").mkdir()

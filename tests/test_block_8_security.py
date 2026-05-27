@@ -350,3 +350,176 @@ dependencyManagement {
     text = f.read_text(encoding="utf-8")
     assert result.applied is False
     assert "io.netty:netty-handler:4.1.132.Final" in text
+
+
+# ---------------------------------------------------------------------------
+# v0.27.0 — WebFlux: pin 4.1.133.Final permitido (CVE-fix oficial 2026-05)
+# ---------------------------------------------------------------------------
+
+
+def test_8_7_allows_4_1_133_pin_in_webflux(tmp_path: Path) -> None:
+    """WebFlux + pin oficial `io.netty:*:4.1.133.Final` -> pass."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+dependencyManagement {
+    dependencies {
+        // CVE-fix oficial 2026-05
+        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http2:4.1.133.Final'
+    }
+}
+""",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _find(results, "8.7")
+
+    assert check.status == "pass"
+    assert "4.1.133.Final" in check.detail
+
+
+def test_8_7_rejects_non_133_pin_in_webflux(tmp_path: Path) -> None:
+    """WebFlux + pin distinto de 4.1.133.Final -> FAIL HIGH."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+dependencyManagement {
+    dependencies {
+        dependency 'io.netty:netty-codec-http:4.1.132.Final'
+    }
+}
+""",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _find(results, "8.7")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_8_7_rejects_4_1_133_pin_when_not_webflux(tmp_path: Path) -> None:
+    """MVC/SOAP + pin 4.1.133.Final -> FAIL HIGH. La excepcion es solo WebFlux."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}
+
+dependencyManagement {
+    dependencies {
+        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+    }
+}
+""",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_8(ctx)
+    check = _find(results, "8.7")
+
+    assert check.status == "fail"
+
+
+def test_autofix_preserves_4_1_133_pin_in_webflux(tmp_path: Path) -> None:
+    """En WebFlux el autofix preserva el pin oficial 4.1.133.Final."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+dependencyManagement {
+    dependencies {
+        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+    }
+}
+""",
+    )
+
+    result = fix_remove_netty_pin(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is False
+    assert "io.netty:netty-codec-http:4.1.133.Final" in text
+
+
+def test_autofix_removes_non_133_pin_in_webflux(tmp_path: Path) -> None:
+    """En WebFlux el autofix sigue removiendo pins de otras versiones."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+dependencyManagement {
+    dependencies {
+        dependency 'io.netty:netty-codec-http:4.1.132.Final'
+    }
+}
+""",
+    )
+
+    result = fix_remove_netty_pin(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    assert "4.1.132.Final" not in text
+
+
+def test_autofix_mixed_pins_in_webflux_only_removes_non_133(tmp_path: Path) -> None:
+    """En WebFlux con varios pins, solo se removeria los NO 4.1.133.Final."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(
+        root,
+        """\
+plugins { id 'org.springframework.boot' version '3.5.14' }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+
+dependencyManagement {
+    dependencies {
+        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-resolver-dns:4.1.132.Final'
+    }
+}
+""",
+    )
+
+    result = fix_remove_netty_pin(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    assert "io.netty:netty-codec-http:4.1.133.Final" in text
+    assert "netty-resolver-dns" not in text
