@@ -490,7 +490,8 @@ fuente unica.
   template no se actualizo. **Dejar que el BOM mande.**
 
 - **NUNCA agregar `dependency 'io.netty:*:VERSION'` en `dependencyManagement`**
-  "para parchar un CVE":
+  "para parchar un CVE", **salvo la excepcion WebFlux 4.1.133.Final** (ver
+  abajo):
   ```gradle
   // ✘ NO — esto era el "fix" del CVE viejo, ahora es el bug nuevo
   dependencyManagement {
@@ -506,11 +507,41 @@ fuente unica.
 
 - **NUNCA `replicaCount: 2` en helm** (regla derogada — ver Regla 9h.1).
 
+### Excepcion oficial — Netty `4.1.133.Final` en WebFlux (v0.27.0)
+
+Proyectos con `spring-boot-starter-webflux` pueden mantener el pin
+`io.netty:*:4.1.133.Final` en `dependencyManagement` porque es la version
+aprobada que cierra los CVEs 2026-05 del `netty-codec-http` sin esperar al
+proximo BOM. Es la **unica** version permitida; cualquier otra (`4.1.132.Final`,
+`4.1.999.Final`, etc.) sigue bloqueada por Check 8.7.
+
+```gradle
+// ✔ SI — permitido en proyectos WebFlux
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+}
+dependencyManagement {
+    dependencies {
+        // CVE-fix oficial 2026-05
+        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http2:4.1.133.Final'
+    }
+}
+```
+
+- Detectado por `_project_uses_webflux(gradle_files)` (presencia de
+  `spring-boot-starter-webflux` en algun `build.gradle` del proyecto).
+- Constante `NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"` exportada en
+  `capamedia_cli.core.checklist_rules` y `capamedia_cli.core.bank_autofix`.
+- MVC/SOAP siguen sin pins manuales permitidos (cualquier version).
+
 ### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
 
 - 8.1: plugin `org.springframework.boot` con version < `3.5.14` → HIGH.
 - 8.2: cualquier dependencia `undertow` activa → HIGH.
-- 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH.
+- 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH,
+  **excepto** `io.netty:*:4.1.133.Final` en proyectos WebFlux (excepcion
+  oficial 2026-05, ver bloque arriba).
 
 ### Autofix
 
@@ -520,7 +551,9 @@ fuente unica.
 2. Actualiza `spring_boot_version` en `migration-context.json` si difiere.
 
 `fix_remove_netty_pin` (clave `"8.7"`): elimina `dependency 'io.netty:*:VERSION'`
-de bloques `dependencyManagement { dependencies { ... } }`. Idempotente.
+de bloques `dependencyManagement { dependencies { ... } }`. Idempotente. En
+proyectos WebFlux **preserva** el pin `io.netty:*:4.1.133.Final` (excepcion
+oficial); cualquier otra version la sigue removiendo.
 
 ---
 

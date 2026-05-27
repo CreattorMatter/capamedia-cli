@@ -169,7 +169,7 @@ Este prompt consolida de forma compacta y declarativa el checklist ejecutable **
 * **Check 8.4: Lombok minimal.** Solo permitido `@Getter`, `@Setter` (en config) y `@RequiredArgsConstructor`. `@Slf4j` prohibido (ver 2.5). Uso de `@Data`/`@Builder`/`@AllArgsConstructor` -> **FAIL MEDIUM**.
 * **Check 8.5: WebFlux starter presente en BUS.** Servicios clasificados con tecnología `bus` deben contar obligatoriamente con `spring-boot-starter-webflux` en `build.gradle`. Faltante -> **FAIL HIGH**.
 * **Check 8.6: MVC starter ausente en WebFlux.** Si se usa WebFlux, no debe estar presente `spring-boot-starter-web`. Presencia de ambos -> **FAIL MEDIUM**.
-* **Check 8.7: Sin pins de io.netty.** Evitar declarar pins manuales de dependencias transitivas de Netty (`io.netty:*`) en el `dependencyManagement` de `build.gradle`. Pins manuales -> **FAIL HIGH**.
+* **Check 8.7: Sin pins de io.netty (con excepción WebFlux).** Evitar declarar pins manuales de dependencias transitivas de Netty (`io.netty:*`) en el `dependencyManagement` de `build.gradle`. Pins manuales -> **FAIL HIGH**. **Excepción oficial v0.27.0**: en proyectos WebFlux (`spring-boot-starter-webflux` presente) el pin `io.netty:*:4.1.133.Final` está permitido (CVE-fix Snyk 2026-05 aprobado). Cualquier otra versión sigue bloqueada. MVC/SOAP: no se permite pin manual de ninguna versión.
 
 ---
 

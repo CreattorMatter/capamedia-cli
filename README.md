@@ -1,4 +1,4 @@
-# capamedia-cli - v0.27.1
+# capamedia-cli - v0.27.2
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal **OLA 1 / OLA 2**.
 
@@ -482,6 +482,10 @@ capamedia-cli/
 - [x] v0.26.2 - Compactacion del prompt `checklist-rules.md` (<25 KB) para evitar fatiga de contexto; severidades de logs (2.8/2.9) y "Quitar Etiquetas" (18.3) degradadas a `info`
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
+
+### Release 0.27.2 — Canonicals sincronizados con excepcion Netty WebFlux
+
+- [x] v0.27.2 - **Doc fix**: canonicals (`bank-official-rules.md` Regla 8.5, `migrate-rest-full.md`, `checklist-rules.md` Check 8.7) ahora mencionan explicitamente la excepcion `io.netty:*:4.1.133.Final` en WebFlux. En v0.27.0 se agrego al codigo Python pero los canonicales decian "NUNCA pinear" — el gap confundia al agente AI que leia la regla vieja
 
 ### Release 0.27.1 — Errores BANCS son ERROR (aclaracion Kevin Armas)
 

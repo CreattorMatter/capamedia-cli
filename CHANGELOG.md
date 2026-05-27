@@ -6,6 +6,35 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-05-27
+
+### Fixed — Canonicals sincronizados con la excepción Netty `4.1.133.Final` en WebFlux
+
+En v0.27.0 se agregó la excepción WebFlux al **código Python** (Check 8.7,
+`fix_remove_netty_pin`, constante `NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"`),
+pero los **canonicales** que el agente AI consume como fuente de verdad
+quedaron diciendo *"NUNCA pinear `io.netty:*`"*. El gap hizo que Claude Code
+trabajando en servicios concretos leyera la regla vieja y se confundiera
+sobre si el pin era válido o no.
+
+**Canonicales sincronizados:**
+
+- `data/canonical/context/bank-official-rules.md` Regla 8.5: nuevo bloque
+  *"Excepción oficial — Netty `4.1.133.Final` en WebFlux (v0.27.0)"* con
+  ejemplo permitido. Validación de Block 8 documenta la excepción.
+- `data/canonical/prompts/migrate-rest-full.md` (instrucciones MCP): el
+  punto 4 sobre Netty ahora describe la excepción WebFlux explícitamente
+  (qué versión, dónde aplica, qué proyectos sí/no). El bloque inline del
+  template `build.gradle` también lo refleja.
+- `data/canonical/prompts/checklist-rules.md` Check 8.7: descripción
+  actualizada con la excepción.
+
+### Sin cambios en código
+
+Esta release es **solo documentación**. El comportamiento del CLI ya era
+correcto desde v0.27.0 — solo había que sincronizar lo que el agente AI lee.
+Los 884 tests siguen pasando.
+
 ## [0.27.1] - 2026-05-27
 
 ### Changed — Errores de BANCS son `tipo=ERROR`, no `FATAL` (aclaración Kevin Armas / BPTPSRE)

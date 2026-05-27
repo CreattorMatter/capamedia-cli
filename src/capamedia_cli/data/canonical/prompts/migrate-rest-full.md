@@ -862,7 +862,7 @@ Parameters:
 1. **Spring Boot version:** Use `3.5.14` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
 2. **Peer Review plugin:** Update to `1.1.0`
 3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE". Old scaffolds that pinned `io.netty:netty-codec-http:4.1.132.Final` for a previous CVE are now the source of 4 new CVEs — remove them. Blocked by Check 8.7.
+4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE" — with **one official exception**: in **WebFlux** projects (`spring-boot-starter-webflux` present) the pin `io.netty:*:4.1.133.Final` IS allowed and IS the approved fix for the Snyk 2026-05 CVEs. Any other version (`4.1.132.Final`, `4.1.999.Final`, etc.) is still blocked by Check 8.7. MVC/SOAP projects: no manual pin permitted, any version.
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -1008,10 +1008,11 @@ dependencyManagement {
     imports {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
     }
-    // NOTE: NEVER add `dependency 'io.netty:*:VERSION'` blocks here to "patch
-    // a CVE". Old scaffolds that pinned `netty-codec-http:4.1.132.Final` became the
-    // source of 4 new CVEs in Snyk 2026-05. The next bump in the BOM closes
-    // them — manual pins do not. Blocked by checklist Check 8.4.
+    // NOTE: do NOT add `dependency 'io.netty:*:VERSION'` blocks here to "patch
+    // a CVE", EXCEPT for the official WebFlux exception `io.netty:*:4.1.133.Final`
+    // (Snyk 2026-05 CVE-fix approved for WebFlux services). Any other version is
+    // blocked by Check 8.7. Old scaffolds that pinned `netty-codec-http:4.1.132.Final`
+    // became the source of 4 new CVEs — remove them. MVC/SOAP: no manual pin allowed.
 }
 
 compileJava {
