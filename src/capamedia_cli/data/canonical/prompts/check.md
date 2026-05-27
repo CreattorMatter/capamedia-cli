@@ -96,7 +96,7 @@ textual y debe ser espejo de `ALL_BLOCKS` — si discrepa, gana el codigo.
 | 1  | Arquitectura hexagonal (capas, ports como interfaces, output port Bancs unico, service purity) |
 | 2  | Logging y tracing (`@BpTraceable`, `@BpLogger`, sin `org.slf4j`/`@Slf4j`) |
 | 3  | Naming profesional (sin nombres genericos, camelCase methods, PascalCase `@PayloadRoot.localPart`) |
-| 5  | Error handling y propagacion Bancs (HTTP 200 para errores, backend codes del catalogo, FATAL/ERROR/INFO) |
+| 5  | Error handling y propagacion Bancs (HTTP 200 para errores, backend codes del catalogo, BANCS=ERROR / header=FATAL / catch-all=FATAL / INFO=success) |
 | 7  | Config externa (`application.yml` sin defaults inline, `${CCC_*}` en 3 Helms, HPA `100m`, catalog/pipeline namespace) |
 | 8  | Versiones y dependencias (Spring Boot baseline, Undertow prohibido, webflux/web-services segun stack, Peer Review score >= 7) |
 | 13 | Persistence (HikariCP+JPA solo cuando hay DB; `connection-test-query` SQL Server=`SELECT 1` / Oracle=`SELECT 1 from dual`; ddl-auto validate; open-in-view false) |

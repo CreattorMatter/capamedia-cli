@@ -330,6 +330,153 @@ def test_5_6_5_no_bve_in_project_passes(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check 5.7b — BANCS / GlobalErrorException NO se mapean a FATAL
+# Origen: aclaracion oficial Kevin Armas / BPTPSRE 2026-05-27
+# ---------------------------------------------------------------------------
+
+
+def test_5_7b_bancs_routed_to_buildFatalResponse_is_high(tmp_path: Path) -> None:
+    """Catch BancsOperationException seguido de buildFatalResponse -> HIGH."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/CustomerController.java",
+        """
+        public class CustomerController {
+            void handle() {
+                try {
+                    bancsAdapter.invoke();
+                } catch (BancsOperationException ex) {
+                    return helper.buildFatalResponse(ex, headerOut);
+                }
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    assert check is not None
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_5_7b_global_error_with_setTipo_FATAL_is_high(tmp_path: Path) -> None:
+    """Catch GlobalErrorException + setTipo("FATAL") -> HIGH."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/CustomerController.java",
+        """
+        public class CustomerController {
+            void handle(Throwable t) {
+                if (t instanceof GlobalErrorException ge) {
+                    error.setTipo("FATAL");
+                    error.setCodigo(ge.getErrorCode());
+                }
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    assert check.status == "fail"
+
+
+def test_5_7b_bancs_with_ERROR_TYPE_FATAL_constant_is_high(tmp_path: Path) -> None:
+    """Catch BancsClientException + ERROR_TYPE_FATAL constant -> HIGH."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/CustomerController.java",
+        """
+        public class CustomerController {
+            void handle() {
+                try { bancsAdapter.invoke(); }
+                catch (BancsClientException ex) {
+                    return buildResponse(CatalogExceptionConstants.ERROR_TYPE_FATAL, ex);
+                }
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    assert check.status == "fail"
+
+
+def test_5_7b_bancs_routed_to_buildErrorResponse_passes(tmp_path: Path) -> None:
+    """Catch BancsOperationException + buildErrorResponse (ERROR) -> PASS."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/CustomerController.java",
+        """
+        public class CustomerController {
+            void handle() {
+                try {
+                    bancsAdapter.invoke();
+                } catch (BancsOperationException ex) {
+                    return helper.buildErrorResponse(ex, headerOut);
+                }
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    assert check.status == "pass"
+
+
+def test_5_7b_no_bancs_or_global_in_project_passes(tmp_path: Path) -> None:
+    """Sin BancsXxxException / GlobalErrorException en el proyecto -> PASS."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/Controller.java",
+        "public class Controller { void noop() {} }",
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    assert check.status == "pass"
+
+
+def test_5_7b_catch_exception_with_FATAL_does_not_trigger(tmp_path: Path) -> None:
+    """Catch genérico de Exception (catch-all 9999) sí puede ser FATAL.
+    El check solo aplica a BancsXxxException / GlobalErrorException."""
+    root = _make_migrated(tmp_path)
+    _write_java(
+        root,
+        "infrastructure/input/adapter/soap/impl/CustomerController.java",
+        """
+        public class CustomerController {
+            void handle() {
+                try { service.execute(); }
+                catch (Exception ex) {
+                    return helper.buildFatalResponse(ex, headerOut);
+                }
+            }
+        }
+        """,
+    )
+
+    ctx = CheckContext(migrated_path=root, legacy_path=None)
+    results = run_block_5(ctx)
+    check = _find(results, "5.7b")
+    # No hay BancsXxxException ni GlobalErrorException en el archivo: pass.
+    assert check.status == "pass"
+
+
+# ---------------------------------------------------------------------------
 # Check 5.8 — Fechas alto valor BANCS
 # ---------------------------------------------------------------------------
 

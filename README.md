@@ -1,4 +1,4 @@
-# capamedia-cli - v0.27.0
+# capamedia-cli - v0.27.1
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal **OLA 1 / OLA 2**.
 
@@ -482,6 +482,10 @@ capamedia-cli/
 - [x] v0.26.2 - Compactacion del prompt `checklist-rules.md` (<25 KB) para evitar fatiga de contexto; severidades de logs (2.8/2.9) y "Quitar Etiquetas" (18.3) degradadas a `info`
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
+
+### Release 0.27.1 — Errores BANCS son ERROR (aclaracion Kevin Armas)
+
+- [x] v0.27.1 - **Errores de BANCS son `tipo=ERROR`, no `FATAL`** (aclaracion oficial Kevin Armas / BPTPSRE 2026-05-27). Invierte la regla anterior de `bank-error-structure.md`: BancsOperationException (9929), BancsClientException (9922) y TimeoutException de BANCS (9991) pasan a ERROR. Header missing (9927) y catch-all (9999) siguen FATAL. Canonicales actualizados (bank-error-structure, bank-error-codes, migrate-rest-full, check.md, checklist-rules). **Check 5.7b nuevo**: detecta BANCS/GlobalErrorException mapeados a FATAL como FAIL HIGH (anti-patron inverso al 5.6.5). +6 tests, suite 884 passing
 
 ### Release 0.27.0 — Politica nueva headerIn + Netty WebFlux
 

@@ -75,20 +75,34 @@ Referencia cruzada con `reference_error_types.md` (memoria del equipo):
 |---|---|---|
 | Success (code `"0"`) | **`INFO`** | Transacción OK |
 | Validación de negocio fallida (campo requerido nulo, formato inválido) | **`ERROR`** | `BusinessValidationException` |
+| Fallo al invocar BANCS (red, timeout, 5xx) | **`ERROR`** | `BancsClientException` |
+| Parse error de respuesta BANCS | **`ERROR`** | `"No se ha podido interpretar la respuesta de Bancs"` |
+| Timeout de invocación BANCS | **`ERROR`** | `TimeoutException` envuelto en `GlobalErrorException` |
 | Header inválido o faltante | **`FATAL`** | `"Datos de la cabecera de la transaccion no se han asignado"` |
-| Fallo al invocar BANCS (red, timeout, 5xx) | **`FATAL`** | `BancsClientException` |
-| Parse error de respuesta BANCS | **`FATAL`** | `"No se ha podido interpretar la respuesta de Bancs"` |
 | Exception genérica no catch-eada | **`FATAL`** | Catch-all de `Exception` |
 
-**NEVER**: marcar una falla de BANCS como `ERROR` — es **`FATAL`**. Regla
-reforzada en commits post-2026-04-16 tras feedback del equipo.
+**Aclaración oficial 2026-05-27 (Kevin Armas / BPTPSRE)**: los errores de
+BANCS (fallo de red, timeout, parse error, 5xx) son **`ERROR`**, NO `FATAL`.
+Esto invierte la regla anterior que reservaba `FATAL` para "infra incluyendo
+BANCS". `FATAL` queda **únicamente** para:
+
+1. **Header faltante** (`9927`) — la transacción no puede ni siquiera llegar
+   a BANCS porque falta `<headerIn>.<bancs>` (precondición no satisfecha).
+2. **Exception genérica catch-all** (`9999`) — situación desconocida que el
+   código no contempló; requiere intervención técnica.
+
+Para BANCS y timeouts de BANCS, el caller puede reintentar — es recuperable.
+Por eso son `ERROR`, no `FATAL`.
+
+**NEVER**: marcar una falla de BANCS como `FATAL` — es **`ERROR`**.
+Anti-patrón inverso al que detectaba el check viejo. Validado por checklist
+Block 5.7b (nuevo en v0.27.1).
 
 **NEVER**: marcar `BusinessValidationException` como **`FATAL`** — es **`ERROR`**
 (validación recuperable por el caller). Reforzado tras informe QA WSClientes0011
 (2026-05): el migrado usaba `FATAL` para validaciones de negocio, perdiendo la
-diferenciación que hace el legacy con `ERROR` / `INFO`. Reservar `FATAL`
-exclusivamente para infra (header faltante, BANCS, exception genérica). Validado
-por checklist Block 5.7.
+diferenciación que hace el legacy con `ERROR` / `INFO`. Validado por checklist
+Block 5.6.5.
 
 ## Formato segun contrato expuesto
 
@@ -121,7 +135,7 @@ externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
 ```xml
 <error>
   <codigo>9929</codigo>
-  <tipo>FATAL</tipo>
+  <tipo>ERROR</tipo>
   <mensajeCliente>Error al invocar transaccion Bancs</mensajeCliente>
   <mensajeNegocio/>
   <mensajeAplicacion>Timeout after 30000ms calling ws-tx067010</mensajeAplicacion>
@@ -129,6 +143,9 @@ externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
   <momentoError>2026-04-23T21:10:16.123Z</momentoError>
 </error>
 ```
+
+> `tipo=ERROR` (no FATAL) confirmado por Kevin Armas / BPTPSRE el 2026-05-27.
+> El caller puede reintentar el llamado a BANCS — es recuperable.
 
 ## Gap conocido — `<bancs>` no se replica en HeaderOut
 

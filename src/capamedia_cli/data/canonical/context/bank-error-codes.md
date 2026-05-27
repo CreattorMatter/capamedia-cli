@@ -105,14 +105,19 @@ if (Objects.isNull(bancsResponse.body())) {
 
 ## Mapping exception -> code
 
+> **Aclaración oficial 2026-05-27 (Kevin Armas / BPTPSRE)**: los errores de
+> BANCS son **`ERROR`**, NO `FATAL`. `FATAL` queda **únicamente** para header
+> faltante (`9927`) y catch-all genérico (`9999`). Ver
+> `bank-error-structure.md` §"Tipos canónicos" para la justificación.
+
 | Exception type | Code |
 |---|---|
-| `HeaderValidator.validate(...).isPresent()` | `ERROR_CODE_HEADER` (`9927`) → tipo FATAL |
-| `BusinessValidationException` | `9996` → tipo ERROR |
-| `BancsOperationException` | `ERROR_CODE_BANCS_INVOKE` (`9929`) → tipo FATAL |
-| `BancsClientException` (null body, parse) | `ERROR_CODE_BANCS_PARSE` (`9922`) → tipo FATAL |
-| `TimeoutException` | `ERROR_CODE_TIMEOUT` (`9991`) → tipo FATAL |
-| `Exception` (catch-all) | `ERROR_CODE_SERVICE` (`9999`) → tipo FATAL |
+| Falta `headerIn.bancs` (servicios `invocaBancs=true`) | `ERROR_CODE_HEADER` (`9927`) → tipo **FATAL** |
+| `BusinessValidationException` | `9996` → tipo **ERROR** |
+| `BancsOperationException` | `ERROR_CODE_BANCS_INVOKE` (`9929`) → tipo **ERROR** |
+| `BancsClientException` (null body, parse) | `ERROR_CODE_BANCS_PARSE` (`9922`) → tipo **ERROR** |
+| `TimeoutException` (de BANCS) | `ERROR_CODE_TIMEOUT` (`9991`) → tipo **ERROR** |
+| `Exception` (catch-all) | `ERROR_CODE_SERVICE` (`9999`) → tipo **FATAL** |
 
 ## Reglas para el agente migrador
 

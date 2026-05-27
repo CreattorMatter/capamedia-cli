@@ -6,6 +6,70 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-05-27
+
+### Changed — Errores de BANCS son `tipo=ERROR`, no `FATAL` (aclaración Kevin Armas / BPTPSRE)
+
+Aclaración oficial recibida por Teams el 2026-05-27: *"los errores de BANCS no
+son de tipo FATAL, son ERROR"*. Esto invierte la regla anterior de
+`bank-error-structure.md` que reservaba `FATAL` para "infra incluyendo BANCS".
+
+**Reasignación:**
+
+| Exception type | Code | Antes | Ahora |
+|---|---|---|---|
+| `BancsOperationException` | `9929` | FATAL | **ERROR** |
+| `BancsClientException` (parse, null body) | `9922` | FATAL | **ERROR** |
+| `TimeoutException` (de BANCS) | `9991` | FATAL | **ERROR** |
+| `GlobalErrorException` (wrapping BANCS) | varios | FATAL | **ERROR** |
+| Header missing `<bancs>` | `9927` | FATAL | **FATAL** (sin cambio) |
+| `Exception` catch-all | `9999` | FATAL | **FATAL** (sin cambio) |
+
+`FATAL` queda únicamente para header faltante (precondición no satisfecha,
+la transacción no puede ni siquiera llegar a BANCS) y catch-all genérico
+(situación desconocida). Los errores BANCS son **recuperables** — el caller
+puede reintentar — por eso son `ERROR`.
+
+**Archivos canonicales actualizados:**
+- `data/canonical/context/bank-error-structure.md`: tabla "Tipos canónicos" invertida; ejemplo `BancsClientException` con `tipo=ERROR`; cita de Kevin Armas como fuente.
+- `data/canonical/context/bank-error-codes.md`: tabla "Mapping exception → code" actualizada con los nuevos tipos.
+- `data/canonical/prompts/migrate-rest-full.md`: sección "3-tier error handling" ajustada para que `GlobalErrorException` de BANCS sea `ERROR`; header missing sigue siendo el único FATAL pre-BANCS.
+- `data/canonical/prompts/check.md`: descripción del Block 5 actualizada.
+- `data/canonical/prompts/checklist-rules.md`: Check 5.6 actualizado, Check 5.6.5 explicitado, **Check 5.7b nuevo** documentado.
+
+### Added — Check 5.7b ejecutable (BANCS → FATAL es bug)
+
+Nuevo check en `core/checklist_rules.py:run_block_5` que detecta el
+anti-patrón inverso al 5.6.5:
+
+- Catch de `BancsOperationException`, `BancsClientException` o
+  `GlobalErrorException` en cuya ventana de 5 líneas se invoca
+  `buildFatalResponse`, `buildBancsErrorResponse`, `setTipo("FATAL")` o
+  `ERROR_TYPE_FATAL` → **FAIL HIGH**.
+- El catch-all genérico (`catch (Exception ...)`) sigue siendo válido como
+  FATAL — el check no lo dispara.
+
+### Tests
+
+- `tests/test_block_5_patterns.py`: +6 tests cubriendo el Check 5.7b
+  (`test_5_7b_bancs_routed_to_buildFatalResponse_is_high`,
+  `test_5_7b_global_error_with_setTipo_FATAL_is_high`,
+  `test_5_7b_bancs_with_ERROR_TYPE_FATAL_constant_is_high`,
+  `test_5_7b_bancs_routed_to_buildErrorResponse_passes`,
+  `test_5_7b_no_bancs_or_global_in_project_passes`,
+  `test_5_7b_catch_exception_with_FATAL_does_not_trigger`).
+- **Suite total: 884 passed, 0 failures** (era 878).
+
+### Migration notes
+
+- Servicios ya migrados con `BancsOperationException` / `BancsClientException`
+  mapeados a `ERROR_TYPE_FATAL` o `buildFatalResponse` van a fallar Check
+  5.7b HIGH. Refix: cambiar a `ERROR_TYPE_ERROR` / `buildErrorResponse`.
+- `WSClientes0013Controller.java:147` (hallazgo #3 del review previo): el
+  veredicto inicial era "cambiar ERROR_TYPE_ERROR → FATAL"; con la
+  aclaración de Kevin Armas el veredicto se **invierte** — `ERROR_TYPE_ERROR`
+  es correcto, no tocar.
+
 ## [0.27.0] - 2026-05-27
 
 ### Changed — Política nueva de validación `<headerIn>` (vigente 2026-05-26)

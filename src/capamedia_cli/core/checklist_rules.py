@@ -1808,6 +1808,72 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
+    # 5.7b - Errores de BANCS NO deben mapearse a FATAL (anti-patron inverso a 5.6.5).
+    # Origen: aclaracion oficial Kevin Armas / BPTPSRE 2026-05-27 -- "los errores
+    # de BANCS son ERROR, no FATAL". El caller puede reintentar -- es recuperable.
+    # FATAL queda solo para header faltante (9927) y catch-all generico (9999).
+    bancs_fatal_hits: list[tuple[Path, int, str]] = []
+    _BANCS_EXC_RE = re.compile(
+        r"catch\s*\(\s*(?:Bancs\w*Exception|GlobalErrorException)|"
+        r"instanceof\s+(?:Bancs\w*Exception|GlobalErrorException)|"
+        r"(?:Bancs\w*Exception|GlobalErrorException)\s+\w+\s*[=)]",
+    )
+    _BANCS_FATAL_TOKEN_RE = re.compile(
+        r'buildFatalResponse|buildBancsErrorResponse|'
+        r'setTipo\s*\(\s*"FATAL"|ERROR_TYPE_FATAL'
+    )
+    for f in src_java.rglob("*.java"):
+        if "test" in [p.lower() for p in f.parts]:
+            continue
+        if any(p == "build" or p == ".git" for p in f.parts):
+            continue
+        text = _read_or_empty(f)
+        if not any(
+            tok in text
+            for tok in ("BancsOperationException", "BancsClientException", "GlobalErrorException")
+        ):
+            continue
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            if not _BANCS_EXC_RE.search(line):
+                continue
+            window = "\n".join(lines[idx : idx + 6])
+            if _BANCS_FATAL_TOKEN_RE.search(window):
+                bancs_fatal_hits.append((f, idx + 1, line.strip()))
+                break  # un hit por archivo basta
+    if bancs_fatal_hits:
+        sample = bancs_fatal_hits[0]
+        results.append(
+            CheckResult(
+                "5.7b",
+                "Block 5",
+                "BANCS / GlobalErrorException NO se mapean a FATAL",
+                "fail",
+                severity="high",
+                detail=(
+                    f"{len(bancs_fatal_hits)} archivo(s) mapean errores de BANCS a "
+                    f"FATAL/buildFatalResponse. Ejemplo: "
+                    f"{_relative_display(sample[0], ctx.migrated_path)}:{sample[1]} -> {sample[2]}"
+                ),
+                suggested_fix=(
+                    "Errores de BANCS (BancsOperationException, BancsClientException, "
+                    "TimeoutException, GlobalErrorException) son tipo=ERROR (caller puede "
+                    "reintentar). FATAL queda solo para header faltante (9927) y catch-all "
+                    "generico (9999). Aclaracion oficial Kevin Armas / BPTPSRE 2026-05-27. "
+                    "Rerutear el catch a buildErrorResponse / tipo=ERROR / ERROR_TYPE_ERROR."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "5.7b",
+                "Block 5",
+                "BANCS / GlobalErrorException NO se mapean a FATAL",
+                "pass",
+            )
+        )
+
     # 5.8 - Fechas no informadas en BANCS = alto valor 31129999, no bajo valor.
     # Origen: informe QA WSClientes0011 (2026-05) -- "legacy usa alto valor
     # 31129999 (31 dic 9999), migrado usa bajo valor 01011901 (1 enero 1901)".
