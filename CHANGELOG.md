@@ -66,6 +66,19 @@ Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
     destino ya clonado). La convergencia retomar->migrate sobre destino
     pre-existente (sin re-generar Fabrics) se valida en un smoke real con
     credenciales — pendiente de la siguiente iteracion.
+- **Fase 5** — clone guiado + resumen visual del analisis (cumple la vision
+  "trae legacy -> resumen -> correr fabrics"):
+  - `_run_clone_with_progress`: trae el legacy (`clone_service`) con feedback;
+    idempotente (detecta legacy local); no rompe el wizard si falla (el pipeline
+    reintenta).
+  - `_render_analysis_summary`: **cierra el gap "el COMPLEXITY_<svc>.md se escribe
+    pero no se muestra"**. Lee el reporte y lo presenta con badge de complejidad
+    (LOW verde / MEDIUM amarillo / HIGH rojo) + `EffortProfile` (modelo Opus +
+    retries extra) + aviso de revision humana si HIGH (`needs_human_gate`). PURA
+    lectura. Se muestra ANTES del pipeline (init/fabrics/migrate).
+  - El pipeline luego corre y re-detecta el legacy local (clone idempotente).
+  - +2 tests (`_render_analysis_summary` lee el md y dispara gate en HIGH; sin
+    reporte no rompe). Suite: 927 passed.
 
 ## [0.28.1] - 2026-05-28
 

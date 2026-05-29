@@ -15,6 +15,7 @@ import capamedia_cli.commands.clone as clone_mod
 import capamedia_cli.commands.start as start_mod
 from capamedia_cli.commands.batch import BatchRow
 from capamedia_cli.commands.start import (
+    _render_analysis_summary,
     _resolve_branch_interactive,
     load_wizard_decisions,
     start_command,
@@ -44,6 +45,8 @@ def captured(monkeypatch, tmp_path):
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
     # Default: modo "nuevo" (sin destino migrado previo). No toca red.
     monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
+    # Clone explicito (Fase 5) mockeado: no toca red.
+    monkeypatch.setattr(clone_mod, "clone_service", lambda *a, **k: None)
     return grabbed
 
 
@@ -107,6 +110,7 @@ def test_start_model_matches_engine_not_hardcoded_claude(monkeypatch, tmp_path):
     monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _CodexEngine())
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
     monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
+    monkeypatch.setattr(clone_mod, "clone_service", lambda *a, **k: None)
 
     start_command(service="wsclientes0076", namespace="tnd", engine_name="codex", root=tmp_path)
     assert grabbed["model"] == "gpt-5.5"  # tier opus traducido a codex, no claude
@@ -123,6 +127,7 @@ def test_start_exits_nonzero_on_pipeline_fail(monkeypatch, tmp_path):
     monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _FakeEngine())
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
     monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
+    monkeypatch.setattr(clone_mod, "clone_service", lambda *a, **k: None)
 
     import typer
 
@@ -277,6 +282,35 @@ def test_flow_nuevo_when_no_migrated(captured, tmp_path):
     """Sin destino migrado (fixture default []): modo nuevo, sin picker."""
     start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
     assert load_wizard_decisions(tmp_path / "wsclientes0076")["flow_mode"] == "nuevo"
+
+
+# ── Fase 5: resumen visual del analisis ──────────────────────────────────────
+
+
+def test_render_analysis_summary_reads_complexity_md(tmp_path, capsys):
+    """Lee COMPLEXITY_<svc>.md y muestra el resumen + badge de complejidad."""
+    ws = tmp_path / "wsclientes0099"
+    ws.mkdir()
+    (ws / "COMPLEXITY_wsclientes0099.md").write_text(
+        "# Analisis\n- **Tipo:** `BUS`\n- **UMPs detectados:** 2\n"
+        "- **Complejidad:** `HIGH`\n",
+        encoding="utf-8",
+    )
+    _render_analysis_summary(ws, "wsclientes0099")
+    out = capsys.readouterr().out
+    assert "BUS" in out
+    assert "HIGH" in out
+    assert "revision humana" in out.lower()  # HIGH dispara el aviso de gate
+
+
+def test_render_analysis_summary_no_report(tmp_path, capsys):
+    """Sin COMPLEXITY md: no rompe, muestra 'sin reporte' y default MEDIUM."""
+    ws = tmp_path / "svc"
+    ws.mkdir()
+    _render_analysis_summary(ws, "svc")
+    out = capsys.readouterr().out
+    assert "sin reporte" in out.lower()
+    assert "revision humana" not in out.lower()  # MEDIUM no dispara gate
 
 
 def test_resolve_branch_non_ambiguous_delegates(monkeypatch, tmp_path):

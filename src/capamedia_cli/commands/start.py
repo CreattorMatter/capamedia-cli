@@ -319,6 +319,71 @@ def _ask_harnesses() -> list[str]:
     return chosen
 
 
+_COMPLEXITY_COLOR = {"low": "green", "medium": "yellow", "high": "red"}
+
+
+def _run_clone_with_progress(service: str, workspace: Path, shallow: bool, skip_tx: bool) -> bool:
+    """Trae el legacy (clone_service). Devuelve True si completo. Idempotente:
+    detecta el legacy local si ya esta. No rompe el wizard si falla — el pipeline
+    lo reintenta."""
+    from capamedia_cli.commands.clone import clone_service
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    console.print(f"[cyan]Trayendo legacy de {service}...[/cyan]")
+    try:
+        clone_service(service, workspace=workspace, shallow=shallow, skip_tx=skip_tx)
+        return True
+    except typer.Exit:
+        console.print("[yellow]El clone reporto un problema; el pipeline lo reintentara.[/yellow]")
+        return False
+    except Exception as exc:  # best-effort
+        console.print(
+            f"[yellow]Clone fallo ({type(exc).__name__}); el pipeline lo reintentara.[/yellow]"
+        )
+        return False
+
+
+def _render_analysis_summary(workspace: Path, service: str) -> None:
+    """Resumen visual del analisis (Fase 5). Cierra el gap "el COMPLEXITY_<svc>.md
+    se escribe pero no se muestra": lo lee y lo presenta con badge de complejidad
+    + EffortProfile + aviso de gate humano si HIGH. PURA lectura, no toca red."""
+    from capamedia_cli.core.effort_policy import effort_for, resolve_service_complexity
+
+    complexity = resolve_service_complexity(workspace, service)
+    profile = effort_for(complexity)
+    color = _COMPLEXITY_COLOR.get(complexity, "white")
+
+    md = workspace / f"COMPLEXITY_{service}.md"
+    body_lines: list[str] = []
+    if md.is_file():
+        text = md.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- **") or stripped.startswith("|"):
+                body_lines.append(stripped)
+    body = (
+        "\n".join(body_lines)
+        if body_lines
+        else "[dim]sin reporte de analisis (COMPLEXITY_*.md)[/dim]"
+    )
+
+    console.print(
+        Panel(
+            f"{body}\n\n"
+            f"Complejidad: [{color}]{complexity.upper()}[/{color}] · "
+            f"Modelo: [magenta]{profile.model_tier}[/magenta] (Opus) · "
+            f"retries extra: +{profile.extra_retries}",
+            title=f"Resumen del analisis — {service}",
+            border_style=color,
+        )
+    )
+    if profile.needs_human_gate:
+        console.print(
+            "[yellow]Servicio HIGH: se sugiere revision humana del migrado "
+            "(complejidad alta).[/yellow]"
+        )
+
+
 def _detect_and_prepare_flow(
     service: str, namespace: str, ws: Path, branch: str | None
 ) -> str:
@@ -459,6 +524,12 @@ def _run_pipeline_facade(
     # Flujo "ambos": detectar destino migrado existente (retomar) vs nuevo. En
     # retomar trae el destino y posiciona la rama; el pipeline corre con resume.
     flow_mode = _detect_and_prepare_flow(service, namespace, ws, branch)
+
+    # Fase 5: traer legacy + resumen visual del analisis ANTES del pipeline
+    # (cumple la vision "trae legacy -> resumen -> correr fabrics"). El clone es
+    # idempotente: el pipeline luego re-detecta el legacy local.
+    if _run_clone_with_progress(service, ws / service, shallow, skip_tx):
+        _render_analysis_summary(ws / service, service)
 
     schema_path = _ensure_migrate_schema(ws)
 
