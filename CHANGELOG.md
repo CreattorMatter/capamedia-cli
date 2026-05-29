@@ -6,6 +6,22 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### En progreso — Wizard "un click" `capamedia start` (rama `feature/wizard-start`)
+
+Implementacion por fases del blueprint [`docs/BLUEPRINT_WIZARD_GO.md`](docs/BLUEPRINT_WIZARD_GO.md).
+Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
+
+- **Fase 0** — backup (`v0.28.0` + rama `backup/v0.28.0-stable`), rama de trabajo
+  `feature/wizard-start`, baseline 907 tests verde.
+- **Fase 1** — esqueleto `capamedia start` (alias `go`/`wizard`): fachada
+  NO-interactiva sobre `batch._process_pipeline_service` (clone→init→fabrics→
+  migrate, con resume idempotente). Fuerza Opus 4.8 (`model_policy.anthropic_model('opus')`);
+  el wizard nunca pregunta modelo. Persiste decisiones en
+  `<ws>/<svc>/.capamedia/wizard.json`. NO reimplementa logica — solo importa y
+  llama. `--branch` se registra pero su integracion real es una fase posterior.
+  `src/capamedia_cli/commands/start.py` (nuevo) + `tests/test_start_skeleton.py`
+  (5 tests). Suite: 912 passed.
+
 ## [0.28.1] - 2026-05-28
 
 ### Added — Orquestación por complejidad (`batch migrate --auto-effort`)

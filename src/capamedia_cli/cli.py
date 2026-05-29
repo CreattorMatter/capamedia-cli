@@ -52,6 +52,7 @@ from capamedia_cli.commands import (
     install,
     qa,
     review,
+    start,
     status,
     uninstall,
     upgrade,
@@ -114,6 +115,10 @@ app.command("status")(status.status_command)
 app.command("check-install")(check_install.check_install)
 app.add_typer(auth.app, name="auth", help="Bootstrap de credenciales")
 app.command("pat")(auth.pat)
+# v0.29: wizard orquestador "un click" (Fase 1 esqueleto). Alias go/wizard.
+app.command("start")(start.start_command)
+app.command("go", hidden=True)(start.start_command)
+app.command("wizard", hidden=True)(start.start_command)
 app.command("init")(init.init_project)
 app.command("clone")(clone.clone_service)
 app.command("clone-migrated")(clone.clone_migrated_service)
