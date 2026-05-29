@@ -11,9 +11,14 @@ from __future__ import annotations
 import pytest
 
 import capamedia_cli.commands.batch as batch_mod
+import capamedia_cli.commands.clone as clone_mod
 import capamedia_cli.commands.start as start_mod
 from capamedia_cli.commands.batch import BatchRow
-from capamedia_cli.commands.start import load_wizard_decisions, start_command
+from capamedia_cli.commands.start import (
+    _resolve_branch_interactive,
+    load_wizard_decisions,
+    start_command,
+)
 
 
 class _FakeEngine:
@@ -170,7 +175,8 @@ def test_interactive_subwizard_collects_and_runs(monkeypatch, tmp_path, captured
     """
     _force_tty(monkeypatch, True)
     prompts = iter(["1", "wsclientes50", "tnd"])
-    confirms = iter([True, False, True])
+    # destino=True, harness_extra=False, especificar_rama=False, ejecutar=True
+    confirms = iter([True, False, False, True])
     monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: next(prompts))
     monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: next(confirms))
 
@@ -179,6 +185,19 @@ def test_interactive_subwizard_collects_and_runs(monkeypatch, tmp_path, captured
     assert captured["service"] == "wsclientes0050"  # auto-padding aplicado
     assert captured["namespace"] == "tnd"
     assert captured["model"] == "claude-opus-4-8"
+
+
+def test_interactive_subwizard_reprompts_on_empty_service(monkeypatch, tmp_path, captured, fake_preflight):
+    """Regresion: servicio vacio re-pregunta (no continua con '' y rompe luego)."""
+    _force_tty(monkeypatch, True)
+    # '1' menu -> '' (vacio, re-pregunta) -> 'wsclientes0050' -> 'tnd'
+    prompts = iter(["1", "", "wsclientes0050", "tnd"])
+    confirms = iter([True, False, False, True])
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: next(prompts))
+    monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: next(confirms))
+
+    start_command(root=tmp_path)
+    assert captured["service"] == "wsclientes0050"
 
 
 def test_interactive_subwizard_cancel_at_plan_does_not_run(monkeypatch, tmp_path, fake_preflight):
@@ -190,7 +209,8 @@ def test_interactive_subwizard_cancel_at_plan_does_not_run(monkeypatch, tmp_path
         lambda *a, **k: called.__setitem__("pipeline", True) or BatchRow("x", "ok", "", {}),
     )
     prompts = iter(["1", "wsclientes0050", "tnd"])
-    confirms = iter([True, False, False])  # destino ok, sin harness extra, NO ejecutar
+    # destino=True, harness_extra=False, especificar_rama=False, ejecutar=False
+    confirms = iter([True, False, False, False])
     monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: next(prompts))
     monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: next(confirms))
 
@@ -223,3 +243,59 @@ def test_interactive_resume_from_wizard_json(monkeypatch, tmp_path, captured, fa
     assert captured["service"] == "wsclientes0099"
     assert captured["namespace"] == "csg"
     assert captured["resume"] is True
+
+
+# ── Fase 4: _resolve_branch_interactive (picker de rama) ─────────────────────
+
+
+def test_resolve_branch_non_ambiguous_delegates(monkeypatch, tmp_path):
+    """explicit/auto/default: delega a _auto_checkout y devuelve tal cual (sin picker)."""
+    monkeypatch.setattr(
+        clone_mod, "_auto_checkout_migrated_branch",
+        lambda repo, req: ("feature/dev-X", "auto", ""),
+    )
+    branch, mode = _resolve_branch_interactive(tmp_path, None, "wsclientes0076")
+    assert (branch, mode) == ("feature/dev-X", "auto")
+
+
+def test_resolve_branch_ambiguous_picker_selects(monkeypatch, tmp_path):
+    """ambiguous -> picker; el usuario elige una rama existente -> checkout."""
+    monkeypatch.setattr(
+        clone_mod, "_auto_checkout_migrated_branch",
+        lambda repo, req: ("", "ambiguous", "varias"),
+    )
+    monkeypatch.setattr(
+        clone_mod, "_list_remote_branches",
+        lambda repo: ["feature/a", "feature/b"],
+    )
+    checked = {}
+    monkeypatch.setattr(
+        clone_mod, "_checkout_branch",
+        lambda repo, b: (checked.__setitem__("branch", b) or (True, "")),
+    )
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "2")  # elige feature/b
+
+    branch, mode = _resolve_branch_interactive(tmp_path, None, "wsclientes0076")
+    assert branch == "feature/b"
+    assert mode == "picker"
+    assert checked["branch"] == "feature/b"
+
+
+def test_resolve_branch_ambiguous_create_new(monkeypatch, tmp_path):
+    """ambiguous -> picker; el usuario elige '0' -> crea feature/migracion-<svc>."""
+    monkeypatch.setattr(
+        clone_mod, "_auto_checkout_migrated_branch",
+        lambda repo, req: ("", "ambiguous", "varias"),
+    )
+    monkeypatch.setattr(clone_mod, "_list_remote_branches", lambda repo: ["feature/a", "feature/b"])
+    ran = {}
+    monkeypatch.setattr(
+        start_mod.subprocess, "run",
+        lambda *a, **k: ran.__setitem__("cmd", a[0]) or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "0")
+
+    branch, mode = _resolve_branch_interactive(tmp_path, None, "wsclientes0076")
+    assert branch == "feature/migracion-wsclientes0076"
+    assert mode == "created"
+    assert "checkout" in ran["cmd"] and "-B" in ran["cmd"]

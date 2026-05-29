@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -182,12 +183,18 @@ def _show_engine_model_readonly(preflight: dict) -> None:
 
 
 def _ask_service(default: str | None = None) -> str:
-    """Pide el servicio y lo normaliza (auto-padding a 4 digitos en vivo)."""
+    """Pide el servicio (no vacio) y lo normaliza (auto-padding a 4 digitos)."""
     from capamedia_cli.commands.clone import normalize_service_name
 
-    raw = Prompt.ask("Servicio a migrar", default=default) if default else Prompt.ask(
-        "Servicio a migrar"
-    )
+    while True:
+        raw = (
+            Prompt.ask("Servicio a migrar", default=default)
+            if default
+            else Prompt.ask("Servicio a migrar")
+        )
+        if raw and raw.strip():
+            break
+        console.print("[yellow]El servicio no puede estar vacio.[/yellow]")
     normalized, padded = normalize_service_name(raw)
     if padded:
         console.print(f"[dim]Normalizado: {raw} -> {normalized}[/dim]")
@@ -220,6 +227,74 @@ def _ask_namespace(default: str = "tnd") -> str:
     from capamedia_cli.commands.fabrics import NAMESPACE_OPTIONS
 
     return Prompt.ask("Acronimo / namespace", choices=NAMESPACE_OPTIONS, default=default)
+
+
+def _ask_branch_optional() -> str | None:
+    """Rama deseada (opcional, sin tocar red). None = auto-detectar al clonar."""
+    if not Confirm.ask("Especificar rama destino?", default=False):
+        return None
+    branch = Prompt.ask("Rama (ej: feature/dev-BTHCCC-1234)").strip()
+    return branch or None
+
+
+def _resolve_branch_interactive(
+    repo_path: Path, requested_branch: str | None, service: str
+) -> tuple[str, str]:
+    """Resuelve la rama de un repo migrado YA CLONADO en `repo_path` (toca git).
+
+    Reusa los helpers de clone. Convierte el caso 'ambiguous' (hoy error duro en
+    `clone-migrated`) en un PICKER numerado de ramas remotas, con opcion de crear
+    una feature nueva. Para los demas modos (explicit/auto/default) delega tal
+    cual. Devuelve (branch, mode).
+    """
+    from capamedia_cli.commands.clone import (
+        _auto_checkout_migrated_branch,
+        _checkout_branch,
+        _list_remote_branches,
+    )
+
+    branch, mode, error = _auto_checkout_migrated_branch(repo_path, requested_branch)
+    if mode != "ambiguous":
+        if error:
+            console.print(f"[yellow]Rama ({mode}): {error}[/yellow]")
+        else:
+            console.print(f"[green]Rama:[/green] {branch or '(default)'} [dim]({mode})[/dim]")
+        return branch, mode
+
+    branches = _list_remote_branches(repo_path)
+    new_branch = f"feature/migracion-{service}"
+    console.print("[yellow]Multiples ramas candidatas — elegi una:[/yellow]")
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    for i, b in enumerate(branches, 1):
+        table.add_row(f"[cyan]{i}[/cyan]", b)
+    table.add_row("[cyan]0[/cyan]", f"[+] crear {new_branch}")
+    console.print(table)
+    sel = Prompt.ask("Rama", choices=[str(i) for i in range(len(branches) + 1)], default="0")
+
+    if sel == "0":
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "checkout", "-B", new_branch],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            console.print(
+                f"[red]No se pudo crear {new_branch}: "
+                f"{(result.stderr or result.stdout or '').strip()}[/red]"
+            )
+        else:
+            console.print(f"[green]Rama creada y posicionada:[/green] {new_branch}")
+        return new_branch, "created"
+
+    chosen = branches[int(sel) - 1]
+    ok, err = _checkout_branch(repo_path, chosen)
+    if not ok:
+        console.print(f"[red]checkout de {chosen} fallo: {err}[/red]")
+    else:
+        console.print(f"[green]Rama posicionada:[/green] {chosen}")
+    return chosen, "picker"
 
 
 def _derive_azure_target(namespace: str, service: str) -> str:
@@ -276,10 +351,11 @@ def _collect_inputs_interactive(
         console.print("[yellow]Cancelado.[/yellow]")
         return None
     harnesses = _ask_harnesses()
+    branch_value = branch if branch else _ask_branch_optional()
     inputs = {
         "service": svc,
         "namespace": ns,
-        "branch": branch,
+        "branch": branch_value,
         "ola_label": ola_label_value,
         "lib_version": lib_version,
         "azure_target": azure_target,

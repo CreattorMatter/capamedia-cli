@@ -43,6 +43,22 @@ Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
   (Table) + gate `Confirm("Ejecutar?", default=False)`. Persiste `config.yaml`
   (via `init._save_config`) + `wizard.json`. La opcion 1 del menu ahora abre el
   sub-wizard cuando faltan inputs. +2 tests. Suite: 919 passed.
+- **Revision Fase 3**: fix — `_ask_service` valida no-vacio (re-pregunta en
+  vez de continuar con `""` y romper el pipeline luego). +1 test de regresion.
+- **Fase 4 (parcial)** — rama interactiva. Piezas entregadas y testeadas:
+  - `_ask_branch_optional`: en el sub-wizard, registra la rama deseada (sin
+    tocar red; None = auto-detectar al clonar).
+  - `_resolve_branch_interactive(repo_path, requested_branch, service)`: reusa
+    `clone._auto_checkout_migrated_branch` y convierte el caso `ambiguous` (hoy
+    error duro) en un PICKER numerado de ramas remotas + opcion de crear
+    `feature/migracion-<svc>` (toca git sobre un repo YA clonado). +3 tests.
+  - **Pendiente de decision del owner** (open question #3 del blueprint): el
+    pipeline actual genera el destino con Fabrics, NO lo clona de
+    `tpl-middleware`. El picker opera sobre un destino clonado, asi que su
+    cableado pleno depende de si el wizard soporta el flujo "retomar"
+    (`clone_migrated_service`, traer destino existente + posicionar rama) ademas
+    del flujo "nuevo". Las piezas quedan listas; el cableado espera esa decision.
+  Suite: 923 passed.
 
 ## [0.28.1] - 2026-05-28
 
