@@ -73,7 +73,7 @@ grep -c "livenessProbe\|readinessProbe" helm/*.yml
 for env in dev test prod; do
   grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
 done
-# Expected: requests cpu=50m mem=350Mi; limits cpu=200m mem=500Mi;
+# Expected: requests cpu=50m mem=100Mi; limits cpu=200m mem=400Mi;
 #           hpa min=1 max=1; averageValue=100m
 ```
 

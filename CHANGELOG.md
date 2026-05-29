@@ -6,6 +6,27 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-05-29
+
+### Changed — Helm capacity baseline: memory `350Mi/500Mi` → `100Mi/400Mi`
+
+Ajuste oficial de capacity del banco (kevin armas, 2026-05-29: "se ha realizado
+un ajuste en los recursos"). Reemplaza los valores del mail previo de Dario
+Simbaña. **Solo cambia la memoria** (cpu y hpa sin cambios):
+
+- `resources.requests.memory`: `350Mi` → **`100Mi`**
+- `resources.limits.memory`: `500Mi` → **`400Mi`**
+- `resources.requests.cpu` (`50m`), `resources.limits.cpu` (`200m`) y el bloque
+  `hpa` (minReplicas/maxReplicas=1, CPU averageValue=100m) **se mantienen**.
+
+Actualizado en la fuente única (`HELM_CAPACITY_BASELINE` en
+[`checklist_rules.py`](src/capamedia_cli/core/checklist_rules.py) y
+`HELM_CAPACITY_BASELINE_FIX` en
+[`bank_autofix.py`](src/capamedia_cli/core/bank_autofix.py)) — Check 7.5e y
+autofix `fix_helm_capacity_baseline` ahora exigen/reescriben los nuevos valores.
+Canónicos y prompts sincronizados (`bank-official-rules.md`, `validador-hex.md`,
+`migrate-rest-full.md`, `migrate-soap-full.md`).
+
 ## [0.28.3] - 2026-05-29
 
 ### Added — Check 8.8 + autofix `fix_netty_full_tree_pin`: árbol Netty completo en WebFlux

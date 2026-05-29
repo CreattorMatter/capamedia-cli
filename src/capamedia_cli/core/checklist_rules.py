@@ -269,14 +269,15 @@ def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     )
 
 
-# Baseline oficial Helm — mail Dario Simbaña, capacity Banco Pichincha 2026-05.
-# Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores referenciales
-# hasta que las pruebas de rendimiento definan los definitivos.
+# Baseline oficial Helm capacity (Banco Pichincha). Ajuste 2026-05-29 (kevin
+# armas): requests.memory 350Mi->100Mi, limits.memory 500Mi->400Mi (cpu y hpa
+# sin cambios). Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores
+# referenciales hasta que las pruebas de rendimiento definan los definitivos.
 HELM_CAPACITY_BASELINE: dict[str, str] = {
     "requests.cpu": "50m",
-    "requests.memory": "350Mi",
+    "requests.memory": "100Mi",
     "limits.cpu": "200m",
-    "limits.memory": "500Mi",
+    "limits.memory": "400Mi",
 }
 
 _REPLICAS_LINE_RE = re.compile(
@@ -2422,8 +2423,8 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         detail="; ".join(resources_issues[:8]),
                         suggested_fix=(
                             "Baseline oficial del banco (Dario Simbaña, 2026-05): "
-                            "resources.requests cpu=50m memory=350Mi; "
-                            "resources.limits cpu=200m memory=500Mi. "
+                            "resources.requests cpu=50m memory=100Mi; "
+                            "resources.limits cpu=200m memory=400Mi. "
                             "Aplica a los 3 helms. Si performance tests definieron "
                             "otros valores, documentar en MIGRATION_REPORT.md."
                         ),

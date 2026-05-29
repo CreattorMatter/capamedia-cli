@@ -375,8 +375,8 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 ```yaml
 resources:
-  requests: { cpu: 50m,  memory: 350Mi }
-  limits:   { cpu: 200m, memory: 500Mi }
+  requests: { cpu: 50m,  memory: 100Mi }
+  limits:   { cpu: 200m, memory: 400Mi }
 
 hpa:
   minReplicas: 1
@@ -3024,7 +3024,7 @@ for env in dev test prod; do
   echo "--- helm/$env.yml ---"
   grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
 done
-# EXPECTED: requests cpu=50m memory=350Mi; limits cpu=200m memory=500Mi;
+# EXPECTED: requests cpu=50m memory=100Mi; limits cpu=200m memory=400Mi;
 #           hpa min=1 max=1; averageValue=100m
 
 # CHECK 3: Probes are configured

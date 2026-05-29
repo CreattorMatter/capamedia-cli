@@ -887,10 +887,10 @@ resultados de las pruebas de rendimiento. El MCP Fabrics desde la version
 resources:
   requests:
     cpu: 50m
-    memory: 350Mi
+    memory: 100Mi
   limits:
     cpu: 200m
-    memory: 500Mi
+    memory: 400Mi
 
 hpa:
   minReplicas: 1
@@ -914,7 +914,7 @@ hpa:
 - 7.5b: `averageValue` distinto de `100m` en cualquier helm.
 - 7.5d: `hpa.minReplicas` o `maxReplicas` distintos de `1`.
 - 7.5e: cualquier valor de `resources.requests` o `resources.limits` distinto
-  del baseline (`50m / 350Mi / 200m / 500Mi`).
+  del baseline (`50m / 100Mi / 200m / 400Mi`).
 
 El autofix `fix_helm_capacity_baseline` aplica los 8 valores en los 3 helms
 si difieren. Es idempotente. Si las pruebas de rendimiento definen otros
@@ -955,7 +955,7 @@ separa como argumentos JVM.
   bajando memory footprint en servicios con muchos textos repetidos
   (validaciones, mensajes de error, mapping).
 - `-XX:+UseG1GC`: garbage collector recomendado para Java 21 + heap mediano
-  (~350Mi-500Mi como define la Regla 9h.1).
+  (~100Mi-400Mi como define la Regla 9h.1).
 
 **NEVER**:
 - Definir `JAVA_OPTIONS` con `-Xms` / `-Xmx` literales en lugar de los

@@ -483,6 +483,10 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.4 — Helm capacity: memory 100Mi/400Mi (ajuste banco)
+
+- [x] v0.28.4 - **Ajuste de capacity (kevin armas, 2026-05-29)**: `resources.requests.memory` `350Mi`→`100Mi` y `resources.limits.memory` `500Mi`→`400Mi`. CPU (`50m`/`200m`) y `hpa` (min/max=1, CPU avg 100m) sin cambios. Fuente única `HELM_CAPACITY_BASELINE` (Check 7.5e + autofix `fix_helm_capacity_baseline`); canónicos/prompts sincronizados
+
 ### Release 0.28.3 — Arbol Netty completo en WebFlux (Check 8.8 + autofix)
 
 - [x] v0.28.3 - **Check 8.8 + `fix_netty_full_tree_pin`**: el BOM de Spring Boot 3.5.14 trae `io.netty` 4.1.121.Final vulnerable; pinear solo `netty-codec*` dejaba transitivos como `netty-handler-proxy` vulnerables (WSClientes0013: 9 CVEs). Ahora se exige/autofixea el **árbol core de 12 módulos** a `4.1.133.Final` con **doble mecanismo** (`dependencyManagement` + `resolutionStrategy.force`). Constante `NETTY_CORE_MODULES` en `version_policy.py`. NO 4.2.x (rompe Reactor Netty). +10 tests

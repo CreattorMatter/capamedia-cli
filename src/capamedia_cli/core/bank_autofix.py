@@ -990,17 +990,19 @@ def fix_extract_inner_records_to_model(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
-# Regla 9h.1 — Helm capacity baseline oficial (Dario Simbaña, capacity Banco
-# Pichincha, 2026-05). Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml.
-# Valores referenciales hasta que pruebas de rendimiento definan definitivos.
+# Regla 9h.1 — Helm capacity baseline oficial (capacity Banco Pichincha). Ajuste
+# 2026-05-29 (kevin armas): requests.memory 350Mi->100Mi, limits.memory
+# 500Mi->400Mi (cpu y hpa sin cambios). Aplica a helm/dev.yml, helm/test.yml,
+# helm/prod.yml. Valores referenciales hasta que pruebas de rendimiento definan
+# definitivos.
 # ---------------------------------------------------------------------------
 
 
 HELM_CAPACITY_BASELINE_FIX: dict[str, str] = {
     "requests.cpu": "50m",
-    "requests.memory": "350Mi",
+    "requests.memory": "100Mi",
     "limits.cpu": "200m",
-    "limits.memory": "500Mi",
+    "limits.memory": "400Mi",
 }
 
 _HELM_REPLICAS_FIX_RE = re.compile(
