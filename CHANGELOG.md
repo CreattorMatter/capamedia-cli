@@ -6,6 +6,27 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-05-29
+
+### Fixed — `doublecheck` no debe quitar el pin de Netty en WebFlux
+
+El prompt canonico [`doublecheck.md`](src/capamedia_cli/data/canonical/prompts/doublecheck.md)
+no documentaba la excepcion oficial del Check 8.7: su regla 11 solo hablaba de
+Netty como servidor embebido (vs Undertow), pero no protegia el pin
+`io.netty:*:4.1.133.Final` del `dependencyManagement`. El comportamiento ya
+estaba bien en el codigo (`fix_remove_netty_pin` preserva el pin en WebFlux
+desde v0.27.0) y en los demas canonicales (`bank-official-rules.md`,
+`checklist-rules.md`, `migrate-rest-full.md`), pero un agente ejecutando
+`capamedia ai doublecheck` solo leia el prompt y podia eliminar el pin —
+rompiendo el CVE-fix Snyk 2026-05 aprobado.
+
+- Regla 11 de `doublecheck.md` ampliada: deja explicito que el doublecheck
+  **NO** debe eliminar `io.netty:*:4.1.133.Final` en proyectos WebFlux
+  (`spring-boot-starter-webflux` presente). MVC/SOAP siguen sin pin manual de
+  ninguna version; cualquier otra version en WebFlux sigue bloqueada por 8.7.
+- Cierra el drift codigo↔canonical: ahora los 4 canonicales que mencionan el
+  pin de Netty coinciden con el autofix.
+
 ## [0.28.1] - 2026-05-28
 
 ### Added — Orquestación por complejidad (`batch migrate --auto-effort`)
