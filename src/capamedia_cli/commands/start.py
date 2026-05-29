@@ -34,11 +34,14 @@ from capamedia_cli import __version__
 from capamedia_cli.commands.init import LOGO
 from capamedia_cli.core.auth import probe_azure_devops_pat
 from capamedia_cli.core.engine import available_engines, engine_from_env, select_engine
-from capamedia_cli.core.model_policy import anthropic_model
+from capamedia_cli.core.model_policy import anthropic_model, engine_model
 
 console = Console()
 
 WIZARD_STATE_FILE = "wizard.json"
+# Modelo mostrado en la bienvenida (claude-first). El modelo REAL que se pasa al
+# pipeline se deriva del engine activo con engine_model("opus", engine.name) —
+# claude -> claude-opus-4-8, codex -> gpt-5.5 (el tope de cada engine).
 OPUS_MODEL = anthropic_model("opus")
 
 
@@ -218,6 +221,11 @@ def _run_pipeline_facade(
     if engine.name not in harnesses:
         harnesses.append(engine.name)
 
+    # Tier "opus" SIEMPRE (decision owner), traducido al modelo del engine activo:
+    # claude -> claude-opus-4-8, codex -> gpt-5.5. Evita pasarle un modelo Claude
+    # a Codex (o viceversa).
+    model = engine_model("opus", engine.name)
+
     schema_path = _ensure_migrate_schema(ws)
 
     decisions = {
@@ -225,7 +233,7 @@ def _run_pipeline_facade(
         "namespace": namespace,
         "branch": branch,
         "engine": engine.name,
-        "model": OPUS_MODEL,
+        "model": model,
         "harnesses": harnesses,
         "group_id": group_id,
         "root": str(ws),
@@ -239,8 +247,8 @@ def _run_pipeline_facade(
             "[bold]capamedia start[/bold]\n"
             f"Servicio: [cyan]{service}[/cyan] · Namespace: {namespace} · "
             f"Rama: {branch or '[dim](pendiente integracion)[/dim]'}\n"
-            f"Engine: [green]{engine.name}[/green] · Modelo: [magenta]{OPUS_MODEL}[/magenta] "
-            "[dim](siempre Opus)[/dim]\n"
+            f"Engine: [green]{engine.name}[/green] · Modelo: [magenta]{model}[/magenta] "
+            "[dim](tier opus del engine activo)[/dim]\n"
             f"Harnesses: {', '.join(harnesses)} · Resume: {'SI' if resume else 'NO'}\n"
             f"Decisiones: [dim]{wizard_path}[/dim]",
             border_style="cyan",
@@ -256,7 +264,7 @@ def _run_pipeline_facade(
         namespace=namespace,
         group_id=group_id,
         engine=engine,
-        model=OPUS_MODEL,
+        model=model,
         prompt_file=None,
         timeout_minutes=timeout_minutes,
         skip_tx=skip_tx,
@@ -390,7 +398,9 @@ def start_command(
                     service=service, namespace=namespace, resume=resume, **facade_kwargs
                 )
                 return
-            if resumable:
+            # Solo ofrecemos reanudar otro servicio si el usuario NO especifico
+            # uno por flag (evita reanudar X cuando pediste migrar Y).
+            if resumable and not service:
                 svc = resumable[0]
                 prev = load_wizard_decisions(ws / svc)
                 ns = prev.get("namespace")

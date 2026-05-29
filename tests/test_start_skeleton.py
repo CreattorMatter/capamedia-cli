@@ -81,6 +81,30 @@ def test_start_resume_propagates(captured, tmp_path):
     assert captured["resume"] is True
 
 
+def test_start_model_matches_engine_not_hardcoded_claude(monkeypatch, tmp_path):
+    """Regresion: el modelo se deriva del engine activo, NO se hardcodea claude.
+    Con --engine codex, el modelo debe ser el tope de codex (gpt-5.5), no
+    claude-opus-4-8 (que romperia Codex)."""
+    grabbed: dict = {}
+
+    def fake_pipeline(service, root, schema_path, **kwargs):
+        grabbed.update(kwargs)
+        return BatchRow(service, "ok", "ok", {})
+
+    class _CodexEngine:
+        name = "codex"
+        subscription_type = "api"
+
+    monkeypatch.setattr(batch_mod, "_process_pipeline_service", fake_pipeline)
+    monkeypatch.setattr(batch_mod, "_ensure_migrate_schema", lambda ws: ws / "schema.json")
+    monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _CodexEngine())
+    monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
+
+    start_command(service="wsclientes0076", namespace="tnd", engine_name="codex", root=tmp_path)
+    assert grabbed["model"] == "gpt-5.5"  # tier opus traducido a codex, no claude
+    assert load_wizard_decisions(tmp_path / "wsclientes0076")["model"] == "gpt-5.5"
+
+
 def test_start_exits_nonzero_on_pipeline_fail(monkeypatch, tmp_path):
     monkeypatch.setattr(
         batch_mod,
