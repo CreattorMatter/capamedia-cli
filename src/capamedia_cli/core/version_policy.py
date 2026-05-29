@@ -12,6 +12,17 @@ import re
 # activo (Check 8.2) y sin pins manuales de io.netty:* (Check 8.7).
 SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 
+# Excepcion oficial (v0.27.0): en proyectos WebFlux el pin
+# `io.netty:*:4.1.133.Final` esta permitido porque cierra los CVEs Snyk 2026-05
+# del netty-codec-http sin esperar al proximo BOM. Cualquier otra version
+# manual sigue bloqueada por Check 8.7. MVC/SOAP: ningun pin manual permitido.
+#
+# Fuente unica: el canonical (bank-official-rules.md Regla 8.5, checklist-rules.md
+# Check 8.7, migrate-rest-full.md) debe citar este mismo valor. El test
+# test_version_policy_canonical_sync lo verifica para evitar el drift que causo
+# v0.27.2 (codigo y canonical desincronizados).
+NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
+
 
 def parse_numeric_version(version: str) -> tuple[int, ...]:
     """Return numeric version parts, ignoring suffixes such as -SNAPSHOT."""

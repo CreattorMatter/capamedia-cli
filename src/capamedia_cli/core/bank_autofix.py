@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
+from capamedia_cli.core.version_policy import NETTY_WEBFLUX_ALLOWED_VERSION
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -1428,7 +1429,6 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
 # ---------------------------------------------------------------------------
 
 
-NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
 _NETTY_PIN_LINE_RE = re.compile(
     r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s+"
     r"['\"]io\.netty:[^:]+:[^'\"]+['\"][^\n]*\n?",

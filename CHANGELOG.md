@@ -6,6 +6,58 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-05-28
+
+### Added — Visión de orquestador + cierre del drift código↔canonical
+
+Primer paso del reencuadre del CLI como **orquestador** (reparte trabajo
+heterogéneo a workers heterogéneos y verifica en cada frontera). Documento de
+diseño completo en [`docs/ARQUITECTURA_ORQUESTADOR.md`](docs/ARQUITECTURA_ORQUESTADOR.md).
+
+**`core/model_policy.py` (nuevo) — fuente única de modelos + Opus 4.8**
+- Centraliza el mapeo tier lógico → ID de modelo Anthropic. `opus` ahora resuelve
+  a `claude-opus-4-8` (antes los adapters tenían hardcodeado `claude-opus-4-7`,
+  desactualizado y drifteando en silencio).
+- `adapters/claude.py` y `adapters/opencode.py` consumen desde ahí; se eliminó
+  el `MODEL_MAP` duplicado en cada uno y el hardcode suelto de
+  `opencode.json` (`opencode.py:104`).
+- El tier lógico expresa el **rol**: `opus` = analista/migrador HIGH (1M ctx),
+  `sonnet` = grueso del trabajo, `haiku` = workers paralelos baratos.
+
+**`NETTY_WEBFLUX_ALLOWED_VERSION` movido a `version_policy.py` (single-source)**
+- Antes estaba duplicada en `checklist_rules.py` y `bank_autofix.py`. Ahora
+  ambos importan de un solo lugar. Ataca de raíz el drift que causó v0.27.2
+  (código y canonical desincronizados sobre la versión de Netty).
+
+### Added — Tests anti-drift (gates del orquestador)
+
+- `tests/test_model_policy.py`: guard que **falla si aparece un ID de modelo
+  Claude hardcodeado fuera de `model_policy.py`**. Previene la regresión del
+  mapeo desactualizado.
+- `tests/test_version_policy_sync.py`: verifica que los valores de
+  `version_policy.py` (Netty WebFlux, Spring Boot baseline) estén **citados en
+  los canonicales** que los documentan. Atrapa "cambié la constante pero olvidé
+  el canonical".
+- `tests/test_canonical_code_consistency.py`: congela el drift heredado
+  (16 checks ejecutables sin doc, 27 reglas documentadas sin check) en un
+  **baseline documentado por categoría** (sub-check / solo-doc / gap de
+  enforcement conocido) y **falla ante drift nuevo**. Normaliza sub-checks al ID
+  raíz (`0.2a` → `0.2`). El test anti-rot ya atrapó dos entradas mal
+  clasificadas durante el desarrollo.
+
+### Notas de diseño
+
+- El test de consistencia **no** atrapa cambios semánticos de un mismo Check
+  (eso fue v0.27.2) — para eso está el single-source de constantes. Son
+  mecanismos complementarios.
+- El baseline `DOC_WITHOUT_CHECK` documenta los gaps de enforcement detectados
+  en review (Block 4 headerIn, códigos fuera de catálogo, Spring Boot Validation
+  14.1) como candidatos a Check futuro (roadmap v0.29).
+
+### Tests
+
+- **Suite total: 895 passed, 0 failures** (era 884; +11 tests anti-drift).
+
 ## [0.27.2] - 2026-05-27
 
 ### Fixed — Canonicals sincronizados con la excepción Netty `4.1.133.Final` en WebFlux

@@ -1,4 +1,4 @@
-# capamedia-cli - v0.27.2
+# capamedia-cli - v0.28.0
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal **OLA 1 / OLA 2**.
 
@@ -482,6 +482,13 @@ capamedia-cli/
 - [x] v0.26.2 - Compactacion del prompt `checklist-rules.md` (<25 KB) para evitar fatiga de contexto; severidades de logs (2.8/2.9) y "Quitar Etiquetas" (18.3) degradadas a `info`
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
+
+### Release 0.28.0 — Vision de orquestador + cierre del drift codigo↔canonical
+
+- [x] v0.28.0 - **`core/model_policy.py`**: fuente unica de modelos Claude. `opus → claude-opus-4-8` (antes hardcodeado `4-7` y drifteando). Adapters consumen desde ahi; eliminado `MODEL_MAP` duplicado. El tier logico expresa el ROL (opus=analista/1M, sonnet=grueso, haiku=workers paralelos)
+- [x] v0.28.0 - **Single-source de constantes**: `NETTY_WEBFLUX_ALLOWED_VERSION` movida a `version_policy.py` (ataca de raiz el drift de v0.27.2)
+- [x] v0.28.0 - **3 tests anti-drift**: guard de modelos hardcodeados, sync version_policy↔canonical, consistencia canonical↔codigo con baseline (congela 16 checks-sin-doc + 27 reglas-sin-check, falla ante drift nuevo)
+- [x] v0.28.0 - **[`docs/ARQUITECTURA_ORQUESTADOR.md`](docs/ARQUITECTURA_ORQUESTADOR.md)**: diseno del CLI como orquestador (rol→modelo, complejidad→esfuerzo, contratos, gates) + roadmap v0.28.x/v0.29
 
 ### Release 0.27.2 — Canonicals sincronizados con excepcion Netty WebFlux
 

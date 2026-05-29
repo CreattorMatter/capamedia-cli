@@ -8,12 +8,7 @@ from pathlib import Path
 from capamedia_cli.adapters.base import HarnessAdapter
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
-
-MODEL_MAP = {
-    "opus": "claude-opus-4-7",
-    "sonnet": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5",
-}
+from capamedia_cli.core.model_policy import anthropic_model
 
 
 def _resolve_model(asset: CanonicalAsset) -> str | None:
@@ -22,7 +17,7 @@ def _resolve_model(asset: CanonicalAsset) -> str | None:
     if anthropic:
         return str(anthropic)
     fb = asset.fallback_model
-    return MODEL_MAP.get(fb, fb) if fb else None
+    return anthropic_model(fb) if fb else None
 
 
 class ClaudeCodeAdapter(HarnessAdapter):

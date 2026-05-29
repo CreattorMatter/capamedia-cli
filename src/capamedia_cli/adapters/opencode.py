@@ -8,23 +8,22 @@ from pathlib import Path
 from capamedia_cli.adapters.base import HarnessAdapter
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
-
-MODEL_MAP = {
-    "opus": "anthropic/claude-opus-4-7",
-    "sonnet": "anthropic/claude-sonnet-4-6",
-    "haiku": "anthropic/claude-haiku-4-5",
-}
+from capamedia_cli.core.model_policy import (
+    OPENCODE_PROVIDER_PREFIX,
+    default_opencode_model,
+    opencode_model,
+)
 
 
 def _resolve_model(asset: CanonicalAsset) -> str | None:
     pm = asset.preferred_model
     anthropic = pm.get("anthropic")
-    if anthropic and not anthropic.startswith("anthropic/"):
-        return f"anthropic/{anthropic}"
+    if anthropic and not anthropic.startswith(OPENCODE_PROVIDER_PREFIX):
+        return f"{OPENCODE_PROVIDER_PREFIX}{anthropic}"
     if anthropic:
         return anthropic
     fb = asset.fallback_model
-    return MODEL_MAP.get(fb)
+    return opencode_model(fb) if fb else None
 
 
 class OpencodeAdapter(HarnessAdapter):
@@ -101,7 +100,7 @@ class OpencodeAdapter(HarnessAdapter):
                 json.dumps(
                     {
                         "$schema": "https://opencode.ai/config.json",
-                        "model": "anthropic/claude-sonnet-4-6",
+                        "model": default_opencode_model(),
                     },
                     indent=2,
                 ),

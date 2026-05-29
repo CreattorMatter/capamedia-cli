@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from capamedia_cli.core.version_policy import (
+    NETTY_WEBFLUX_ALLOWED_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
     is_version_lower,
 )
@@ -645,7 +646,6 @@ _NETTY_PIN_RE = re.compile(
     r"^\s*(?:dependency|implementation|runtimeOnly|compileOnly)\s*"
     r"['\"]io\.netty:[^:]+:[^'\"]+['\"]",
 )
-NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
 _NETTY_ALLOWED_PIN_RE = re.compile(
     r"['\"]io\.netty:[^:]+:" + re.escape(NETTY_WEBFLUX_ALLOWED_VERSION) + r"['\"]",
 )
