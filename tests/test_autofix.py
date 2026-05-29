@@ -12,9 +12,9 @@ from capamedia_cli.core.autofix import (
     fix_backend_from_catalog,
     fix_bancs_exception_wrapping,
     fix_componente_from_catalog,
+    fix_empty_mensajeNegocio_setter,
     fix_lombok_slf4j_removal,
     fix_recurso_format,
-    fix_remove_mensajeNegocio_setter,
     fix_slf4j_to_bplogger,
     run_autofix_loop,
 )
@@ -194,7 +194,7 @@ def test_fix_bancs_exception_wrapping_skips_when_already_present(tmp_path: Path)
     assert result.applied is False
 
 
-def test_fix_remove_mensajenegocio_setter_deletes_calls(tmp_path: Path) -> None:
+def test_fix_empty_mensajenegocio_setter_empties_calls(tmp_path: Path) -> None:
     root = _make_root(tmp_path)
     file = (
         root
@@ -211,15 +211,17 @@ def test_fix_remove_mensajenegocio_setter_deletes_calls(tmp_path: Path) -> None:
         "    }\n"
         "}\n",
     )
-    result = fix_remove_mensajeNegocio_setter(root, _violation("15.1"))
+    result = fix_empty_mensajeNegocio_setter(root, _violation("15.1"))
     assert result.applied is True
     text = file.read_text(encoding="utf-8")
-    assert "setMensajeNegocio" not in text
+    # El tag NO se elimina: queda vacio para que DataPower lo complete
+    assert 'setMensajeNegocio("")' in text
+    assert "Hola negocio" not in text
     assert "setCodigo" in text
-    assert "setMensaje" in text  # no confundir con mensajeNegocio
+    assert 'setMensaje("hola")' in text  # no confundir con mensajeNegocio
 
 
-def test_fix_remove_mensajenegocio_preserves_empty_slot(tmp_path: Path) -> None:
+def test_fix_empty_mensajenegocio_preserves_empty_slot(tmp_path: Path) -> None:
     root = _make_root(tmp_path)
     file = (
         root
@@ -236,7 +238,7 @@ def test_fix_remove_mensajenegocio_preserves_empty_slot(tmp_path: Path) -> None:
         "}\n",
     )
 
-    result = fix_remove_mensajeNegocio_setter(root, _violation("15.1"))
+    result = fix_empty_mensajeNegocio_setter(root, _violation("15.1"))
     text = file.read_text(encoding="utf-8")
 
     assert result.applied is False

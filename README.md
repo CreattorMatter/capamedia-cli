@@ -483,6 +483,10 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.5 — mensajeNegocio: no borrar el tag (vaciar) + respetar legacy
+
+- [x] v0.28.5 - **`mensajeNegocio` regla refinada**: el tag NUNCA se elimina; vacío por defecto (`<mensajeNegocio/>`). El micro no inventa valor (lo pone DataPower) **salvo que el legacy lo poblara**. Check 15.1 cross-chequea el legacy (`_legacy_populates_mensaje_negocio`): no poblaba→HIGH, poblaba→PASS, sin legacy→LOW. Autofix `fix_remove_mensajeNegocio_setter`→`fix_empty_mensajeNegocio_setter`: **vacía** en vez de borrar. Canónico `bank-error-structure.md` + self_correction + catalog_injector alineados. +3 tests
+
 ### Release 0.28.4 — Helm capacity: memory 100Mi/400Mi (ajuste banco)
 
 - [x] v0.28.4 - **Ajuste de capacity (kevin armas, 2026-05-29)**: `resources.requests.memory` `350Mi`→`100Mi` y `resources.limits.memory` `500Mi`→`400Mi`. CPU (`50m`/`200m`) y `hpa` (min/max=1, CPU avg 100m) sin cambios. Fuente única `HELM_CAPACITY_BASELINE` (Check 7.5e + autofix `fix_helm_capacity_baseline`); canónicos/prompts sincronizados

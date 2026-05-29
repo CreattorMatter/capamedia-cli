@@ -34,22 +34,30 @@ copiar ni reformular la tabla** en otro lado.
 
 ## Regla maestra — `mensajeNegocio`
 
-**MUST**: el servicio **NUNCA** setea un valor real de negocio en
-`mensajeNegocio`. Ese campo lo completa **DataPower** en su capa de
-transformacion, consultando reglas de negocio especificas del banco.
+**MUST**: el tag `mensajeNegocio` **siempre presente** y por defecto **vacio**
+(`<mensajeNegocio/>` / `setMensajeNegocio("")`). El valor de negocio lo completa
+**DataPower**. **El tag NUNCA se elimina** — debe quedar el slot vacio para que
+DataPower lo complete.
+
+**Excepcion — respetar el legacy**: si el **legacy del servicio** (BUS/WAS/ORQ)
+ya poblaba `mensajeNegocio` con un valor real, la migracion **lo respeta**. El
+Check 15.1 cross-chequea el legacy (`_legacy_populates_mensaje_negocio`): solo
+marca **HIGH** cuando el migrado pone un valor que el legacy **no** tenia. Sin
+legacy disponible para verificar → **LOW** (revisar manual).
 
 **NEVER**:
-- Poblar `mensajeNegocio` con texto desde el codigo del microservicio migrado.
-- Copiar el valor desde otro campo (ej. asignarle el `mensajeCliente`).
+- Inventar texto en `mensajeNegocio` desde el codigo migrado cuando el legacy no
+  lo poblaba.
+- **Eliminar** el tag o el setter — dejarlo vacio, no borrarlo (rompe el slot
+  que DataPower completa).
 
 **OK**:
-- `setMensajeNegocio(null)` o no llamar al setter cuando el contrato permite
-  omitir el elemento.
-- `setMensajeNegocio("")` solo cuando la respuesta SOAP debe conservar el tag
-  vacio (`<mensajeNegocio/>`) para que DataPower tenga el slot que completa.
+- `setMensajeNegocio("")` / `null` para conservar el slot vacio
+  (`<mensajeNegocio/>`) — **caso por defecto**.
+- `setMensajeNegocio("<valor>")` **solo** si el legacy del servicio ya lo poblaba.
 
 ```java
-// ✘ NO — el servicio NUNCA setea mensajeNegocio
+// ✘ NO — no inventar valor si el legacy no lo poblaba (vaciar, NO borrar el tag)
 error.setMensajeNegocio("Transacción exitosa");
 
 // ✔ OK — null/ausente; DataPower lo completa si aplica

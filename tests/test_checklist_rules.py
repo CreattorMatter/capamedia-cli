@@ -902,8 +902,7 @@ def test_block_15_allows_empty_mensaje_negocio_slot(tmp_path: Path) -> None:
     assert "aceptado" in check.detail
 
 
-def test_block_15_rejects_real_mensaje_negocio_value(tmp_path: Path) -> None:
-    root = _make_migrated(tmp_path)
+def _write_migrated_real_mensaje_negocio(root: Path) -> None:
     mapper = root / "src/main/java/com/pichincha/sp/infrastructure/ErrorMapper.java"
     mapper.write_text(
         "package com.pichincha.sp.infrastructure;\n"
@@ -911,12 +910,51 @@ def test_block_15_rejects_real_mensaje_negocio_value(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    ctx = CheckContext(migrated_path=root, legacy_path=None)
-    results = run_block_15(ctx)
-    check = _by_id(results, "15.1")
+
+def _legacy_with_mensaje_negocio(tmp_path: Path, *, populated: bool) -> Path:
+    legacy = tmp_path / "legacy" / "svc"
+    legacy.mkdir(parents=True, exist_ok=True)
+    body = (
+        "SET OutputRoot.XMLNSC.error.mensajeNegocio = 'Texto de negocio';\n"
+        if populated
+        else "SET OutputRoot.XMLNSC.error.codigo = '0';\n"
+    )
+    (legacy / "flow.esql").write_text(body, encoding="utf-8")
+    return tmp_path / "legacy"
+
+
+def test_block_15_rejects_real_value_when_legacy_did_not_populate(tmp_path: Path) -> None:
+    """Valor real en migrado + legacy NO lo poblaba -> HIGH."""
+    root = _make_migrated(tmp_path)
+    _write_migrated_real_mensaje_negocio(root)
+    legacy = _legacy_with_mensaje_negocio(tmp_path, populated=False)
+
+    check = _by_id(run_block_15(CheckContext(migrated_path=root, legacy_path=legacy)), "15.1")
 
     assert check.status == "fail"
     assert check.severity == "high"
+
+
+def test_block_15_allows_real_value_when_legacy_populated(tmp_path: Path) -> None:
+    """Valor real en migrado + el legacy ya lo poblaba -> PASS (se respeta)."""
+    root = _make_migrated(tmp_path)
+    _write_migrated_real_mensaje_negocio(root)
+    legacy = _legacy_with_mensaje_negocio(tmp_path, populated=True)
+
+    check = _by_id(run_block_15(CheckContext(migrated_path=root, legacy_path=legacy)), "15.1")
+
+    assert check.status == "pass"
+
+
+def test_block_15_low_when_real_value_and_no_legacy(tmp_path: Path) -> None:
+    """Valor real en migrado pero sin legacy para verificar -> LOW (revision manual)."""
+    root = _make_migrated(tmp_path)
+    _write_migrated_real_mensaje_negocio(root)
+
+    check = _by_id(run_block_15(CheckContext(migrated_path=root, legacy_path=None)), "15.1")
+
+    assert check.status == "fail"
+    assert check.severity == "low"
 
 
 def test_block_21_tx_mapping_passes_when_java_and_yaml_match(tmp_path: Path) -> None:

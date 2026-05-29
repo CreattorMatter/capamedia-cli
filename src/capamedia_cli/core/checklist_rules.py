@@ -591,6 +591,32 @@ def _allowed_mensaje_negocio_slot(line: str) -> bool:
     )
 
 
+def _legacy_populates_mensaje_negocio(legacy_path: Path | None) -> bool | None:
+    """Heuristica: ¿el legacy del servicio poblaba `mensajeNegocio` con valor real?
+
+    - True  → hay una asignacion a mensajeNegocio con RHS no vacio en el legacy
+              (.esql/.java/.msgflow/.subflow): la migracion debe respetarlo.
+    - False → solo asignaciones vacias/null, o ninguna.
+    - None  → no hay legacy disponible para verificar.
+
+    Conservadora: ante una asignacion con valor (literal o variable) asume
+    poblado. Getters (`getMensajeNegocio()`) y vacios/null no cuentan.
+    """
+    if legacy_path is None or not legacy_path.exists():
+        return None
+    assign_re = re.compile(r"(?i)mensajeNegocio\s*(?:=|\()")
+    empty_re = re.compile(
+        r"(?i)mensajeNegocio\s*(?:=|\()\s*"
+        r"(?:''|\"\"|null|StringUtils\.EMPTY|EMPTY|\)|;|$)"
+    )
+    for glob in ("**/*.esql", "**/*.java", "**/*.msgflow", "**/*.subflow"):
+        for _f, _ln, line in _grep_files(legacy_path, r"(?i)mensajeNegocio", glob):
+            if not assign_re.search(line) or empty_re.search(line):
+                continue  # mencion sin asignacion, getter, o asignacion vacia/null
+            return True
+    return False
+
+
 def _collect_tx_codes_from_yaml(text: str) -> set[str]:
     return set(re.findall(r"\bws-tx(\d{6})\b", text, flags=re.IGNORECASE))
 
@@ -2813,7 +2839,8 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
 
     8 campos contractuales: codigo, mensaje, mensajeNegocio, tipo, recurso,
     componente, backend, severidad. Reglas:
-    - mensajeNegocio: NUNCA lo setea el microservicio (lo pone DataPower)
+    - mensajeNegocio: tag SIEMPRE presente, slot vacio por defecto. El micro no
+      inventa valor (lo pone DataPower) SALVO que el legacy ya lo poblara
     - recurso: formato <NOMBRE_SERVICIO>/<METODO>
     - componente IIB: <NOMBRE_SERVICIO> / ApiClient / TX<NNNNNN>
     - componente WAS: <NOMBRE_SERVICIO>, <METODO>, <VALOR_ARCHIVO_CONFIG>
@@ -2824,30 +2851,67 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
     if not src_java.exists():
         return results
 
-    # 15.1 - mensajeNegocio no debe tener valor real desde el codigo.
-    # Empty/null is allowed to preserve the SOAP/DataPower slot when JAXB would
-    # otherwise omit the element.
+    # 15.1 - mensajeNegocio: el tag NO se elimina (slot vacio por defecto). El
+    # micro no inventa valor de negocio (lo pone DataPower) SALVO que el legacy
+    # del servicio ya lo poblara, en cuyo caso se respeta. Empty/null preservan
+    # el slot SOAP que JAXB omitiria.
+    title_151 = "mensajeNegocio sin valor real desde el codigo"
     hits = _grep_files(src_java, r"setMensajeNegocio\s*\(")
     bad = [(f, ln, line) for f, ln, line in hits if not _allowed_mensaje_negocio_slot(line)]
     empty_slots = [(f, ln, line) for f, ln, line in hits if _allowed_mensaje_negocio_slot(line)]
     if bad:
-        results.append(
-            CheckResult(
-                "15.1",
-                "Block 15",
-                "mensajeNegocio sin valor real desde el codigo",
-                "fail",
-                severity="high",
-                detail=(
-                    f"{len(bad)} hit(s) con valor real: DataPower gestiona "
-                    "mensajeNegocio; el servicio solo puede emitir null/vacio."
-                ),
-                suggested_fix=(
-                    "No poblar mensajeNegocio con texto de negocio. Usar null o "
-                    '"" solo cuando el contrato SOAP requiere que el tag exista.'
-                ),
+        legacy_has = _legacy_populates_mensaje_negocio(ctx.legacy_path)
+        if legacy_has is True:
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "pass",
+                    detail=(
+                        f"{len(bad)} setter(s) con valor real RESPETADO(s): el "
+                        "legacy del servicio ya poblaba mensajeNegocio."
+                    ),
+                )
             )
-        )
+        elif legacy_has is None:
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "fail",
+                    severity="low",
+                    detail=(
+                        f"{len(bad)} setter(s) con valor real, sin legacy "
+                        "disponible para verificar si lo poblaba. Revisar manual."
+                    ),
+                    suggested_fix=(
+                        "Si el legacy NO poblaba mensajeNegocio, vaciar el slot "
+                        '(setMensajeNegocio("")) sin eliminar el tag; DataPower lo '
+                        "completa. Si lo poblaba, el valor es valido."
+                    ),
+                )
+            )
+        else:  # False — el legacy no lo poblaba
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"{len(bad)} hit(s) con valor real que el legacy NO "
+                        "poblaba: DataPower gestiona mensajeNegocio; el servicio "
+                        "debe emitir el slot vacio (sin eliminar el tag)."
+                    ),
+                    suggested_fix=(
+                        'Vaciar el setter (setMensajeNegocio("")), NO eliminar el '
+                        "tag. Solo se permite valor si el legacy ya lo poblaba."
+                    ),
+                )
+            )
     else:
         detail = (
             f"{len(empty_slots)} setter(s) null/vacio aceptado(s) para preservar el slot SOAP"
@@ -2858,7 +2922,7 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
             CheckResult(
                 "15.1",
                 "Block 15",
-                "mensajeNegocio sin valor real desde el codigo",
+                title_151,
                 "pass",
                 detail=detail,
             )

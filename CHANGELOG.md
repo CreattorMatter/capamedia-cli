@@ -6,6 +6,29 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.5] - 2026-05-29
+
+### Changed — `mensajeNegocio`: no eliminar el tag (vaciar) + respetar el legacy
+
+Regla refinada del banco sobre el campo `mensajeNegocio` del bloque `<error>`:
+el tag **nunca se elimina**; por defecto **vacío** (`<mensajeNegocio/>`). El
+microservicio no inventa valor de negocio (lo completa DataPower), **salvo que el
+legacy del servicio (BUS/WAS/ORQ) ya lo poblara**, en cuyo caso se respeta.
+
+- **Check 15.1** ahora cross-chequea el legacy (`_legacy_populates_mensaje_negocio`
+  en [`checklist_rules.py`](src/capamedia_cli/core/checklist_rules.py)):
+  - valor real en migrado + el legacy **NO** lo poblaba → **FAIL HIGH**.
+  - valor real + el legacy **SÍ** lo poblaba → **PASS** (se respeta).
+  - valor real + **sin legacy** para verificar → **FAIL LOW** (revisión manual).
+- **Autofix** renombrado `fix_remove_mensajeNegocio_setter` →
+  `fix_empty_mensajeNegocio_setter`: ahora **vacía** el setter
+  (`setMensajeNegocio("")`) en vez de **borrar la línea**, preservando el slot
+  que DataPower completa. Solo corre cuando 15.1 falla HIGH (legacy no lo poblaba).
+- Canónico [`bank-error-structure.md`](src/capamedia_cli/data/canonical/context/bank-error-structure.md)
+  (Regla maestra), `self_correction.py` y `catalog_injector.py` alineados.
+- Tests: +3 (legacy pobló / no pobló / sin legacy) + autofix vacía-no-borra.
+  Suite **919 verde**.
+
 ## [0.28.4] - 2026-05-29
 
 ### Changed — Helm capacity baseline: memory `350Mi/500Mi` → `100Mi/400Mi`
