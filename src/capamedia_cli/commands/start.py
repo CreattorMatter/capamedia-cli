@@ -27,7 +27,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from capamedia_cli import __version__
@@ -178,6 +178,120 @@ def _show_engine_model_readonly(preflight: dict) -> None:
     console.print(Panel.fit("\n".join(lines), title="Engine y modelo", border_style="cyan"))
 
 
+# ── Sub-wizard de inputs (Fase 3) — recolecta SIN tocar red ──────────────────
+
+
+def _ask_service(default: str | None = None) -> str:
+    """Pide el servicio y lo normaliza (auto-padding a 4 digitos en vivo)."""
+    from capamedia_cli.commands.clone import normalize_service_name
+
+    raw = Prompt.ask("Servicio a migrar", default=default) if default else Prompt.ask(
+        "Servicio a migrar"
+    )
+    normalized, padded = normalize_service_name(raw)
+    if padded:
+        console.print(f"[dim]Normalizado: {raw} -> {normalized}[/dim]")
+    return normalized
+
+
+def _show_ola(service: str) -> tuple[str, str]:
+    """Deriva y MUESTRA la OLA + version de lib (del catalogo oficial ola_policy).
+
+    No se pregunta: la version de lib-bnc-api-client la determina is_ola2 sobre
+    el catalogo oficial. El wizard la informa para transparencia.
+    """
+    from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
+
+    label = ola_label(service)
+    lib = lib_bnc_api_client_version(service)
+    console.print(
+        Panel.fit(
+            f"OLA detectada: [bold]{label}[/bold]\n"
+            f"lib-bnc-api-client: [magenta]{lib}[/magenta] "
+            "[dim](derivado del catalogo oficial — no configurable aqui)[/dim]",
+            title="OLA",
+            border_style="cyan",
+        )
+    )
+    return label, lib
+
+
+def _ask_namespace(default: str = "tnd") -> str:
+    from capamedia_cli.commands.fabrics import NAMESPACE_OPTIONS
+
+    return Prompt.ask("Acronimo / namespace", choices=NAMESPACE_OPTIONS, default=default)
+
+
+def _derive_azure_target(namespace: str, service: str) -> str:
+    """Repo destino migrado (derivado): tpl-middleware/<ns>-msa-sp-<svc>."""
+    from capamedia_cli.commands.clone import AZURE_PROJECTS
+
+    return f"{AZURE_PROJECTS['middleware']}/{namespace}-msa-sp-{service}"
+
+
+def _ask_harnesses() -> list[str]:
+    """Harnesses para el scaffold. Default: solo claude (siempre Opus). Ofrece el
+    picker completo si el usuario quiere agregar otros."""
+    if not Confirm.ask(
+        "Configurar harnesses adicionales? (default: solo claude)", default=False
+    ):
+        return ["claude"]
+    from capamedia_cli.commands.init import _interactive_harness_picker
+
+    chosen = _interactive_harness_picker()
+    if "claude" not in chosen:
+        chosen.append("claude")  # forzamos claude — el wizard migra con Opus
+    return chosen
+
+
+def _confirm_plan(inputs: dict, model: str) -> bool:
+    """Resumen pre-ejecucion + gate humano. Default NO (banca)."""
+    table = Table(title="Plan de migracion", title_style="bold cyan")
+    table.add_column("Campo")
+    table.add_column("Valor")
+    table.add_row("Servicio", inputs["service"])
+    table.add_row("OLA", inputs["ola_label"])
+    table.add_row("lib-bnc-api-client", inputs["lib_version"])
+    table.add_row("Namespace", inputs["namespace"])
+    table.add_row("Azure destino", inputs["azure_target"])
+    table.add_row("Rama", inputs["branch"] or "(pendiente integracion)")
+    table.add_row("Harnesses", ", ".join(inputs["harnesses"]))
+    table.add_row("Modelo", f"{model} (siempre Opus)")
+    console.print(table)
+    return Confirm.ask("Ejecutar la migracion?", default=False)
+
+
+def _collect_inputs_interactive(
+    *, service: str | None = None, namespace: str | None = None, branch: str | None = None
+) -> dict | None:
+    """Recolecta TODAS las decisiones del wizard. NO toca red. Devuelve el dict
+    de inputs, o None si el usuario cancela en cualquier gate."""
+    console.print("\n[bold cyan]Sub-wizard de inputs[/bold cyan] [dim](no toca red)[/dim]")
+    svc = service or _ask_service()
+    ola_label_value, lib_version = _show_ola(svc)
+    ns = namespace or _ask_namespace()
+    azure_target = _derive_azure_target(ns, svc)
+    console.print(f"Azure destino (derivado): [cyan]{azure_target}[/cyan]")
+    if not Confirm.ask("Confirmas el destino?", default=True):
+        console.print("[yellow]Cancelado.[/yellow]")
+        return None
+    harnesses = _ask_harnesses()
+    inputs = {
+        "service": svc,
+        "namespace": ns,
+        "branch": branch,
+        "ola_label": ola_label_value,
+        "lib_version": lib_version,
+        "azure_target": azure_target,
+        "harnesses": harnesses,
+    }
+    # El modelo se muestra como el de claude (engine default del wizard).
+    if not _confirm_plan(inputs, OPUS_MODEL):
+        console.print("[yellow]Cancelado por el usuario en el resumen.[/yellow]")
+        return None
+    return inputs
+
+
 # ── Fachada Fase 1 (reusable desde flags y desde el menu) ────────────────────
 
 
@@ -209,6 +323,7 @@ def _run_pipeline_facade(
         _ensure_migrate_schema,
         _process_pipeline_service,
     )
+    from capamedia_cli.commands.init import _save_config
 
     env_pref = engine_from_env()
     eff_engine_name = env_pref or engine_name
@@ -241,6 +356,13 @@ def _run_pipeline_facade(
         "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
     }
     wizard_path = _save_wizard_decisions(ws / service, decisions)
+    # Persistir tambien config.yaml (formato init) para que otros comandos del
+    # CLI reconozcan el workspace sin re-preguntar harnesses.
+    try:
+        (ws / service).mkdir(parents=True, exist_ok=True)
+        _save_config(ws / service, service, harnesses)
+    except Exception:
+        pass  # config.yaml es best-effort; el wizard.json es la fuente del wizard
 
     console.print(
         Panel.fit(
@@ -391,29 +513,38 @@ def start_command(
             _show_engine_model_readonly(preflight)
             continue
         if choice == "1":
-            # Fase 2: si ya hay service+namespace por flag, corre. Si no, el
-            # sub-wizard de inputs es Fase 3 -> guiar al usuario, sin colgar.
+            # Atajo: service+namespace por flag -> corre directo.
             if service and namespace:
                 _run_pipeline_facade(
                     service=service, namespace=namespace, resume=resume, **facade_kwargs
                 )
                 return
-            # Solo ofrecemos reanudar otro servicio si el usuario NO especifico
-            # uno por flag (evita reanudar X cuando pediste migrar Y).
+            # Reanudar una sesion previa solo si el usuario NO especifico service
+            # por flag (evita reanudar X cuando pediste migrar Y).
             if resumable and not service:
                 svc = resumable[0]
-                prev = load_wizard_decisions(ws / svc)
-                ns = prev.get("namespace")
-                if ns:
-                    console.print(f"[cyan]Reanudando[/cyan] {svc} (namespace={ns})")
-                    _run_pipeline_facade(
-                        service=svc, namespace=ns, resume=True, **facade_kwargs
-                    )
-                    return
-            console.print(
-                "[yellow]El sub-wizard interactivo de inputs (servicio, OLA, rama) "
-                "llega en la proxima fase.[/yellow]\n"
-                "Por ahora, inicia con flags: "
-                "[cyan]capamedia start --service <svc> --namespace <ns>[/cyan]"
+                if Confirm.ask(f"Reanudar sesion previa de {svc}?", default=True):
+                    prev = load_wizard_decisions(ws / svc)
+                    ns = prev.get("namespace")
+                    if ns:
+                        console.print(f"[cyan]Reanudando[/cyan] {svc} (namespace={ns})")
+                        _run_pipeline_facade(
+                            service=svc, namespace=ns, resume=True, **facade_kwargs
+                        )
+                        return
+            # Fase 3: sub-wizard de inputs (recolecta sin tocar red) + gate.
+            inputs = _collect_inputs_interactive(
+                service=service, namespace=namespace, branch=branch
+            )
+            if inputs is None:
+                return
+            run_kwargs = dict(facade_kwargs)
+            run_kwargs["branch"] = inputs["branch"]
+            run_kwargs["ai"] = ",".join(inputs["harnesses"])
+            _run_pipeline_facade(
+                service=inputs["service"],
+                namespace=inputs["namespace"],
+                resume=resume,
+                **run_kwargs,
             )
             return

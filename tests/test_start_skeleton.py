@@ -162,18 +162,40 @@ def test_interactive_menu_exit(monkeypatch, tmp_path, fake_preflight):
     assert called["pipeline"] is False
 
 
-def test_interactive_iniciar_without_inputs_guides_user(monkeypatch, tmp_path, fake_preflight):
-    """Elegir 'Iniciar' (1) sin inputs ni sesion previa: guia al usuario, no corre pipeline."""
+def test_interactive_subwizard_collects_and_runs(monkeypatch, tmp_path, captured, fake_preflight):
+    """Fase 3: 'Iniciar' (1) sin flags abre el sub-wizard, recolecta inputs y corre.
+
+    Prompt.ask: '1' (menu) -> 'wsclientes50' (servicio, se normaliza) -> 'tnd' (ns).
+    Confirm.ask: True (destino) -> False (harnesses extra) -> True (ejecutar plan).
+    """
+    _force_tty(monkeypatch, True)
+    prompts = iter(["1", "wsclientes50", "tnd"])
+    confirms = iter([True, False, True])
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: next(prompts))
+    monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: next(confirms))
+
+    start_command(root=tmp_path)
+
+    assert captured["service"] == "wsclientes0050"  # auto-padding aplicado
+    assert captured["namespace"] == "tnd"
+    assert captured["model"] == "claude-opus-4-8"
+
+
+def test_interactive_subwizard_cancel_at_plan_does_not_run(monkeypatch, tmp_path, fake_preflight):
+    """Si el usuario rechaza el gate final 'Ejecutar?', NO corre el pipeline."""
     _force_tty(monkeypatch, True)
     called = {"pipeline": False}
     monkeypatch.setattr(
         batch_mod, "_process_pipeline_service",
         lambda *a, **k: called.__setitem__("pipeline", True) or BatchRow("x", "ok", "", {}),
     )
-    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "1")
+    prompts = iter(["1", "wsclientes0050", "tnd"])
+    confirms = iter([True, False, False])  # destino ok, sin harness extra, NO ejecutar
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: next(prompts))
+    monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: next(confirms))
 
     start_command(root=tmp_path)
-    assert called["pipeline"] is False  # sin inputs, Fase 3 pendiente
+    assert called["pipeline"] is False
 
 
 def test_interactive_iniciar_with_flags_runs(monkeypatch, tmp_path, captured, fake_preflight):
@@ -194,6 +216,8 @@ def test_interactive_resume_from_wizard_json(monkeypatch, tmp_path, captured, fa
         '{"service": "wsclientes0099", "namespace": "csg"}', encoding="utf-8"
     )
     monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "1")
+    # Ahora se pide confirmacion explicita para reanudar (default True).
+    monkeypatch.setattr(start_mod.Confirm, "ask", lambda *a, **k: True)
 
     start_command(root=tmp_path)
     assert captured["service"] == "wsclientes0099"

@@ -30,7 +30,19 @@ Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
   menu. Fallback no-TTY/CI: error claro pidiendo flags en vez de colgarse. El
   sub-wizard de inputs (pedir servicio/OLA/rama) y la edicion de configuracion
   llegan en la Fase 3 (hoy las opciones de config son read-only). +5 tests.
-  Suite: 917 passed.
+- **Revision Fases 1-2**: fix — el modelo se deriva del engine activo
+  (`engine_model('opus', engine.name)`: claude→claude-opus-4-8, codex→gpt-5.5),
+  ya no se hardcodea Claude (rompia con `--engine codex`). +1 test de regresion.
+  Caso borde: no reanudar otro servicio si el usuario dio `--service` por flag.
+- **Fase 3** — sub-wizard de inputs (recolecta SIN tocar red): servicio
+  (`normalize_service_name`, auto-padding en vivo), OLA derivada y mostrada
+  (`ola_label` + `lib_bnc_api_client_version` del catalogo oficial, no se
+  pregunta), namespace (`Prompt.ask(choices=NAMESPACE_OPTIONS)`), Azure destino
+  derivado (`tpl-middleware/<ns>-msa-sp-<svc>`) + confirmacion, harnesses
+  (default claude, picker opcional, fuerza claude). Resumen pre-ejecucion
+  (Table) + gate `Confirm("Ejecutar?", default=False)`. Persiste `config.yaml`
+  (via `init._save_config`) + `wizard.json`. La opcion 1 del menu ahora abre el
+  sub-wizard cuando faltan inputs. +2 tests. Suite: 919 passed.
 
 ## [0.28.1] - 2026-05-28
 
