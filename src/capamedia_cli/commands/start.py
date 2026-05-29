@@ -319,6 +319,45 @@ def _ask_harnesses() -> list[str]:
     return chosen
 
 
+def _detect_and_prepare_flow(
+    service: str, namespace: str, ws: Path, branch: str | None
+) -> str:
+    """Flujo "ambos" (decision owner): detecta si el servicio YA tiene destino
+    migrado en tpl-middleware y rutea.
+
+    - Si el destino existe -> modo "retomar": queda clonado en `destino/` y se
+      posiciona la rama con el picker de Fase 4 (`_resolve_branch_interactive`).
+    - Si no existe -> modo "nuevo": Fabrics generara el destino en el pipeline.
+
+    Reusa `clone._clone_migrated_repos` con el namespace ya elegido (1 intento de
+    red). Nunca lanza: ante error de red, asume modo "nuevo" e informa.
+    Devuelve "retomar" | "nuevo".
+    """
+    from capamedia_cli.commands.clone import _clone_migrated_repos
+
+    try:
+        results = _clone_migrated_repos(service, ws, namespace=namespace)
+    except Exception as exc:  # best-effort: no romper el wizard ante error de red
+        console.print(
+            f"[yellow]No se pudo verificar destino migrado ({type(exc).__name__}). "
+            "Modo nuevo.[/yellow]"
+        )
+        return "nuevo"
+
+    cloned = [r for r in results if getattr(r, "path", None)]
+    if not cloned:
+        console.print(
+            "[cyan]Modo nuevo[/cyan]: sin migrado previo en tpl-middleware; "
+            "Fabrics generara el destino."
+        )
+        return "nuevo"
+
+    dest = cloned[0].path
+    console.print(f"[cyan]Modo retomar[/cyan]: destino existente -> [dim]{dest}[/dim]")
+    _resolve_branch_interactive(dest, branch, service)
+    return "retomar"
+
+
 def _confirm_plan(inputs: dict, model: str) -> bool:
     """Resumen pre-ejecucion + gate humano. Default NO (banca)."""
     table = Table(title="Plan de migracion", title_style="bold cyan")
@@ -417,6 +456,10 @@ def _run_pipeline_facade(
     # a Codex (o viceversa).
     model = engine_model("opus", engine.name)
 
+    # Flujo "ambos": detectar destino migrado existente (retomar) vs nuevo. En
+    # retomar trae el destino y posiciona la rama; el pipeline corre con resume.
+    flow_mode = _detect_and_prepare_flow(service, namespace, ws, branch)
+
     schema_path = _ensure_migrate_schema(ws)
 
     decisions = {
@@ -428,6 +471,7 @@ def _run_pipeline_facade(
         "harnesses": harnesses,
         "group_id": group_id,
         "root": str(ws),
+        "flow_mode": flow_mode,
         "phase": "1-skeleton",
         "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
     }

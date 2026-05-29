@@ -42,6 +42,8 @@ def captured(monkeypatch, tmp_path):
     monkeypatch.setattr(batch_mod, "_ensure_migrate_schema", lambda ws: ws / "schema.json")
     monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _FakeEngine())
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
+    # Default: modo "nuevo" (sin destino migrado previo). No toca red.
+    monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
     return grabbed
 
 
@@ -104,6 +106,7 @@ def test_start_model_matches_engine_not_hardcoded_claude(monkeypatch, tmp_path):
     monkeypatch.setattr(batch_mod, "_ensure_migrate_schema", lambda ws: ws / "schema.json")
     monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _CodexEngine())
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
+    monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
 
     start_command(service="wsclientes0076", namespace="tnd", engine_name="codex", root=tmp_path)
     assert grabbed["model"] == "gpt-5.5"  # tier opus traducido a codex, no claude
@@ -119,6 +122,7 @@ def test_start_exits_nonzero_on_pipeline_fail(monkeypatch, tmp_path):
     monkeypatch.setattr(batch_mod, "_ensure_migrate_schema", lambda ws: ws / "schema.json")
     monkeypatch.setattr(start_mod, "select_engine", lambda *a, **k: _FakeEngine())
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
+    monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
 
     import typer
 
@@ -246,6 +250,33 @@ def test_interactive_resume_from_wizard_json(monkeypatch, tmp_path, captured, fa
 
 
 # ── Fase 4: _resolve_branch_interactive (picker de rama) ─────────────────────
+
+
+def test_flow_retomar_detected_runs_branch_picker(monkeypatch, tmp_path, captured):
+    """Flujo 'ambos': si el destino migrado existe, modo retomar -> se posiciona
+    la rama (picker) y se registra flow_mode='retomar'."""
+
+    class _Result:
+        path = tmp_path / "wsclientes0076" / "destino" / "tnd-msa-sp-wsclientes0076"
+
+    # Override del default 'nuevo' del fixture: ahora SI hay destino.
+    monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [_Result()])
+    branch_called = {}
+    monkeypatch.setattr(
+        start_mod, "_resolve_branch_interactive",
+        lambda repo, req, svc: branch_called.update({"repo": repo, "svc": svc}) or ("feature/x", "picker"),
+    )
+
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+
+    assert branch_called["svc"] == "wsclientes0076"
+    assert load_wizard_decisions(tmp_path / "wsclientes0076")["flow_mode"] == "retomar"
+
+
+def test_flow_nuevo_when_no_migrated(captured, tmp_path):
+    """Sin destino migrado (fixture default []): modo nuevo, sin picker."""
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+    assert load_wizard_decisions(tmp_path / "wsclientes0076")["flow_mode"] == "nuevo"
 
 
 def test_resolve_branch_non_ambiguous_delegates(monkeypatch, tmp_path):

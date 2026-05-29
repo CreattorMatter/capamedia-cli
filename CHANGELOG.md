@@ -52,13 +52,20 @@ Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
     `clone._auto_checkout_migrated_branch` y convierte el caso `ambiguous` (hoy
     error duro) en un PICKER numerado de ramas remotas + opcion de crear
     `feature/migracion-<svc>` (toca git sobre un repo YA clonado). +3 tests.
-  - **Pendiente de decision del owner** (open question #3 del blueprint): el
-    pipeline actual genera el destino con Fabrics, NO lo clona de
-    `tpl-middleware`. El picker opera sobre un destino clonado, asi que su
-    cableado pleno depende de si el wizard soporta el flujo "retomar"
-    (`clone_migrated_service`, traer destino existente + posicionar rama) ademas
-    del flujo "nuevo". Las piezas quedan listas; el cableado espera esa decision.
   Suite: 923 passed.
+- **Fase 4 (completa)** — flujo "ambos" cableado (decision owner): el wizard
+  DETECTA si el servicio ya tiene destino migrado en `tpl-middleware` y rutea.
+  - `_detect_and_prepare_flow(service, namespace, ws, branch)`: reusa
+    `clone._clone_migrated_repos` con el namespace elegido (1 intento de red).
+    Si el destino existe -> modo **retomar**: queda clonado y se posiciona la
+    rama con `_resolve_branch_interactive` (picker en `ambiguous`). Si no ->
+    modo **nuevo**: Fabrics genera el destino en el pipeline. Nunca lanza: ante
+    error de red asume "nuevo". El modo queda en `wizard.json` (`flow_mode`).
+  - +2 tests de ruteo (retomar dispara picker; nuevo no). Suite: 925 passed.
+  - Nota: en modo retomar el pipeline corre con resume (clone legacy + el
+    destino ya clonado). La convergencia retomar->migrate sobre destino
+    pre-existente (sin re-generar Fabrics) se valida en un smoke real con
+    credenciales — pendiente de la siguiente iteracion.
 
 ## [0.28.1] - 2026-05-28
 
