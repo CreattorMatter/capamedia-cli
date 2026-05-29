@@ -8,8 +8,6 @@ logica nueva.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 import capamedia_cli.commands.batch as batch_mod
@@ -97,3 +95,83 @@ def test_start_exits_nonzero_on_pipeline_fail(monkeypatch, tmp_path):
 
     with pytest.raises(typer.Exit):
         start_command(service="wsx0001", namespace="tnd", root=tmp_path)
+
+
+# ── Fase 2: modo interactivo (bienvenida + preflight + menu) ─────────────────
+
+
+@pytest.fixture
+def fake_preflight(monkeypatch):
+    """PAT ok + claude disponible, sin tocar red."""
+    monkeypatch.setattr(start_mod, "probe_azure_devops_pat", lambda *a, **k: ("ok", "PAT valido"))
+    monkeypatch.setattr(
+        start_mod,
+        "available_engines",
+        lambda **k: {"claude": (True, "claude 1.0"), "codex": (False, "no instalado")},
+    )
+
+
+def _force_tty(monkeypatch, is_tty: bool):
+    monkeypatch.setattr(start_mod.sys.stdin, "isatty", lambda: is_tty)
+
+
+def test_non_interactive_without_flags_raises_when_no_tty(monkeypatch, tmp_path):
+    """Sin TTY y sin --service/--namespace: error claro, NO se cuelga."""
+    _force_tty(monkeypatch, False)
+    import typer
+
+    with pytest.raises(typer.BadParameter):
+        start_command(root=tmp_path)
+
+
+def test_interactive_menu_exit(monkeypatch, tmp_path, fake_preflight):
+    """TTY, sin flags: muestra menu; elegir '0' sale sin tocar el pipeline."""
+    _force_tty(monkeypatch, True)
+    called = {"pipeline": False}
+    monkeypatch.setattr(
+        batch_mod, "_process_pipeline_service",
+        lambda *a, **k: called.__setitem__("pipeline", True) or BatchRow("x", "ok", "", {}),
+    )
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "0")
+
+    start_command(root=tmp_path)  # no raise, no pipeline
+    assert called["pipeline"] is False
+
+
+def test_interactive_iniciar_without_inputs_guides_user(monkeypatch, tmp_path, fake_preflight):
+    """Elegir 'Iniciar' (1) sin inputs ni sesion previa: guia al usuario, no corre pipeline."""
+    _force_tty(monkeypatch, True)
+    called = {"pipeline": False}
+    monkeypatch.setattr(
+        batch_mod, "_process_pipeline_service",
+        lambda *a, **k: called.__setitem__("pipeline", True) or BatchRow("x", "ok", "", {}),
+    )
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "1")
+
+    start_command(root=tmp_path)
+    assert called["pipeline"] is False  # sin inputs, Fase 3 pendiente
+
+
+def test_interactive_iniciar_with_flags_runs(monkeypatch, tmp_path, captured, fake_preflight):
+    """TTY pero con --service/--namespace: corre directo (no entra al menu)."""
+    _force_tty(monkeypatch, True)
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+    assert captured["service"] == "wsclientes0076"
+    assert captured["model"] == "claude-opus-4-8"
+
+
+def test_interactive_resume_from_wizard_json(monkeypatch, tmp_path, captured, fake_preflight):
+    """Hay wizard.json previo: 'Iniciar' reanuda ese servicio."""
+    _force_tty(monkeypatch, True)
+    # Sembramos una sesion previa
+    svc_ws = tmp_path / "wsclientes0099"
+    (svc_ws / ".capamedia").mkdir(parents=True)
+    (svc_ws / ".capamedia" / "wizard.json").write_text(
+        '{"service": "wsclientes0099", "namespace": "csg"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(start_mod.Prompt, "ask", lambda *a, **k: "1")
+
+    start_command(root=tmp_path)
+    assert captured["service"] == "wsclientes0099"
+    assert captured["namespace"] == "csg"
+    assert captured["resume"] is True

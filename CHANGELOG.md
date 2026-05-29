@@ -19,8 +19,18 @@ Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
   el wizard nunca pregunta modelo. Persiste decisiones en
   `<ws>/<svc>/.capamedia/wizard.json`. NO reimplementa logica — solo importa y
   llama. `--branch` se registra pero su integracion real es una fase posterior.
-  `src/capamedia_cli/commands/start.py` (nuevo) + `tests/test_start_skeleton.py`
-  (5 tests). Suite: 912 passed.
+  `src/capamedia_cli/commands/start.py` (nuevo) + `tests/test_start_skeleton.py`.
+- **Fase 2** — capa de entrada interactiva (solo agrega, no toca nada existente):
+  Panel "Bienvenido a Capa Media" (LOGO + version + "Modelo: Opus 4.8");
+  preflight verde/rojo NO-bloqueante (PAT via `probe_azure_devops_pat` +
+  engines via `available_engines`); menu raiz numerado estilo Claude Code
+  (`rich.Prompt.ask(choices=...)`, SIN deps nuevas); deteccion de `wizard.json`
+  para reanudar. `--service`/`--namespace` pasan a opcionales: con ambos (o
+  `--yes`, o sin TTY) corre el flujo no-interactivo; sin ellos en TTY abre el
+  menu. Fallback no-TTY/CI: error claro pidiendo flags en vez de colgarse. El
+  sub-wizard de inputs (pedir servicio/OLA/rama) y la edicion de configuracion
+  llegan en la Fase 3 (hoy las opciones de config son read-only). +5 tests.
+  Suite: 917 passed.
 
 ## [0.28.1] - 2026-05-28
 
