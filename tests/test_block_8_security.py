@@ -21,9 +21,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from capamedia_cli.core.bank_autofix import fix_remove_netty_pin
+from capamedia_cli.core.bank_autofix import (
+    fix_netty_full_tree_pin,
+    fix_remove_netty_pin,
+)
 from capamedia_cli.core.checklist_rules import CheckContext, run_block_8
-from capamedia_cli.core.version_policy import SPRING_BOOT_BASELINE_VERSION
+from capamedia_cli.core.version_policy import (
+    NETTY_CORE_MODULES,
+    NETTY_WEBFLUX_ALLOWED_VERSION,
+    SPRING_BOOT_BASELINE_VERSION,
+)
 
 
 def _make_minimal_project(tmp_path: Path) -> Path:
@@ -523,3 +530,192 @@ dependencyManagement {
     assert result.applied is True
     assert "io.netty:netty-codec-http:4.1.133.Final" in text
     assert "netty-resolver-dns" not in text
+
+
+# ---------------------------------------------------------------------------
+# Check 8.8 + autofix fix_netty_full_tree_pin — arbol Netty completo (12 modulos)
+# en WebFlux con doble mecanismo (dependencyManagement + resolutionStrategy.force).
+# WSClientes0013 (2026-05-29): pinear solo netty-codec* dejaba 9 CVEs vivos.
+# ---------------------------------------------------------------------------
+
+_CORE_4 = ("netty-codec", "netty-codec-dns", "netty-codec-http", "netty-codec-http2")
+_VER = NETTY_WEBFLUX_ALLOWED_VERSION
+
+
+def _webflux_gradle(dep_mods, force_mods=None, version=_VER) -> str:
+    """build.gradle WebFlux con pins de Netty en dependencyManagement y,
+    opcionalmente, un bloque resolutionStrategy.force."""
+    dep_lines = "\n".join(
+        f"        dependency 'io.netty:{m}:{version}'" for m in dep_mods
+    )
+    blocks = [
+        "plugins { id 'org.springframework.boot' version '3.5.14' }",
+        "",
+        "dependencies {",
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'",
+        "}",
+        "",
+        "dependencyManagement {",
+        "    dependencies {",
+        dep_lines,
+        "    }",
+        "}",
+    ]
+    if force_mods is not None:
+        force_lines = "\n".join(
+            f"        force 'io.netty:{m}:{version}'" for m in force_mods
+        )
+        blocks += [
+            "",
+            "configurations.all {",
+            "    resolutionStrategy {",
+            force_lines,
+            "    }",
+            "}",
+        ]
+    return "\n".join(blocks) + "\n"
+
+
+def test_8_8_fail_when_tree_incomplete(tmp_path: Path) -> None:
+    """WebFlux con solo 4 modulos pineados -> FAIL HIGH listando faltantes."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _webflux_gradle(_CORE_4, _CORE_4))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.8")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "netty-handler-proxy" in check.detail  # faltante representativo
+
+
+def test_8_8_pass_when_tree_complete(tmp_path: Path) -> None:
+    """Los 12 modulos core en dependency + force -> PASS."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _webflux_gradle(NETTY_CORE_MODULES, NETTY_CORE_MODULES))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.8")
+
+    assert check is not None
+    assert check.status == "pass"
+
+
+def test_8_8_fail_when_force_missing(tmp_path: Path) -> None:
+    """12 en dependencyManagement pero 0 en force -> FAIL (falta el doble pin)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _webflux_gradle(NETTY_CORE_MODULES))  # sin bloque force
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.8")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert "force" in check.detail.lower()
+
+
+def test_8_8_not_emitted_without_netty_pin(tmp_path: Path) -> None:
+    """WebFlux sin ningun pin io.netty -> el 8.8 no aplica (no se emite)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(
+        root,
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies {\n"
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+        "}\n",
+    )
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.8")
+
+    assert check is None
+
+
+def test_autofix_full_tree_completes_dependency_and_force(tmp_path: Path) -> None:
+    """4 modulos en dependency + force -> autofix completa a 12 + 12."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(root, _webflux_gradle(_CORE_4, _CORE_4))
+
+    result = fix_netty_full_tree_pin(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    dep = sum(1 for ln in text.splitlines() if ln.strip().startswith("dependency 'io.netty"))
+    force = sum(1 for ln in text.splitlines() if ln.strip().startswith("force 'io.netty"))
+    assert dep == len(NETTY_CORE_MODULES)
+    assert force == len(NETTY_CORE_MODULES)
+    for mod in NETTY_CORE_MODULES:
+        assert f"dependency 'io.netty:{mod}:{_VER}'" in text
+        assert f"force 'io.netty:{mod}:{_VER}'" in text
+
+
+def test_autofix_full_tree_creates_force_block(tmp_path: Path) -> None:
+    """4 modulos en dependency, SIN bloque force -> autofix crea el force block."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(root, _webflux_gradle(_CORE_4))  # sin force
+
+    result = fix_netty_full_tree_pin(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    assert "configurations.all" in text
+    assert "resolutionStrategy" in text
+    force = sum(1 for ln in text.splitlines() if ln.strip().startswith("force 'io.netty"))
+    assert force == len(NETTY_CORE_MODULES)
+    # gradle balanceado tras crear el bloque
+    assert text.count("{") == text.count("}")
+
+
+def test_autofix_full_tree_idempotent(tmp_path: Path) -> None:
+    """Segunda pasada no agrega duplicados ni reescribe el archivo."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(root, _webflux_gradle(_CORE_4, _CORE_4))
+
+    fix_netty_full_tree_pin(root)
+    after_first = f.read_text(encoding="utf-8")
+    second = fix_netty_full_tree_pin(root)
+    after_second = f.read_text(encoding="utf-8")
+
+    assert second.applied is False
+    assert after_first == after_second
+
+
+def test_autofix_full_tree_skips_non_webflux(tmp_path: Path) -> None:
+    """MVC/SOAP: no se pinea el arbol Netty (no aplica)."""
+    root = _make_minimal_project(tmp_path)
+    gradle = _webflux_gradle(_CORE_4, _CORE_4).replace(
+        "spring-boot-starter-webflux", "spring-boot-starter-web"
+    )
+    f = _write_gradle(root, gradle)
+
+    result = fix_netty_full_tree_pin(root)
+
+    assert result.applied is False
+    assert f.read_text(encoding="utf-8") == gradle
+
+
+def test_autofix_full_tree_skips_wrong_version(tmp_path: Path) -> None:
+    """Si el pin base es 4.2.x (no permitida), el full-tree no completa
+    (lo gobierna el Check/autofix 8.7)."""
+    root = _make_minimal_project(tmp_path)
+    gradle = _webflux_gradle(_CORE_4, _CORE_4, version="4.2.13.Final")
+    f = _write_gradle(root, gradle)
+
+    result = fix_netty_full_tree_pin(root)
+
+    assert result.applied is False
+    assert f.read_text(encoding="utf-8") == gradle
+
+
+def test_autofix_full_tree_skips_without_base_pin(tmp_path: Path) -> None:
+    """WebFlux sin ningun pin io.netty -> no forzamos pins (skip)."""
+    root = _make_minimal_project(tmp_path)
+    gradle = (
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies {\n"
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+        "}\n"
+    )
+    f = _write_gradle(root, gradle)
+
+    result = fix_netty_full_tree_pin(root)
+
+    assert result.applied is False
+    assert f.read_text(encoding="utf-8") == gradle

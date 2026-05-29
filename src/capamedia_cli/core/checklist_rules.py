@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from capamedia_cli.core.version_policy import (
+    NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
     is_version_lower,
@@ -697,6 +698,29 @@ def _netty_dependency_management_pins(
                 continue
             pins.append(f"{rel}:{line_no} -> {stripped[:120]}")
     return pins
+
+
+# Detección de módulos del árbol Netty para el Check 8.8 (completitud del pin).
+_NETTY_DEPENDENCY_LINE_RE = re.compile(r"^\s*dependency\s+['\"]io\.netty:")
+_NETTY_FORCE_PIN_RE = re.compile(r"^\s*force\s+['\"]io\.netty:")
+_NETTY_MODULE_VER_RE = re.compile(
+    r"io\.netty:(?P<mod>[A-Za-z0-9._\-]+):(?P<ver>[A-Za-z0-9._\-]+)"
+)
+
+
+def _netty_modules_pinned_cl(text: str, line_re: re.Pattern[str]) -> dict[str, str]:
+    """Mapa {modulo: version} de lineas io.netty `dependency '...'`/`force '...'`
+    que matchean `line_re`, ignorando comentarios."""
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        if raw.strip().startswith(("//", "/*", "*")):
+            continue
+        if not line_re.match(raw):
+            continue
+        m = _NETTY_MODULE_VER_RE.search(raw)
+        if m:
+            found.setdefault(m.group("mod"), m.group("ver"))
+    return found
 
 
 def _datasource_flavor(gradle_text: str, yml_text: str) -> str:
@@ -2602,9 +2626,11 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
         if allow_webflux_pin:
             suggested_fix = (
                 f"En proyectos WebFlux solo esta permitido el pin "
-                f"`io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}` (cierra los "
-                f"CVEs 2026-05). Cualquier otra version manual debe eliminarse "
-                f"del bloque dependencyManagement."
+                f"`io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}`. NO usar 4.2.x: "
+                f"rompe Reactor Netty del Spring Boot 3.5.x "
+                f"(StacklessClosedChannelException en "
+                f"AbstractChannel$AbstractUnsafe.ensureOpen). Cualquier otra "
+                f"version manual debe eliminarse del bloque dependencyManagement."
             )
         results.append(
             CheckResult(
@@ -2636,6 +2662,63 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 detail=detail,
             )
         )
+
+    # 8.8 - Arbol Netty completo (12 modulos core) en WebFlux con doble mecanismo
+    # (dependencyManagement.dependency + resolutionStrategy.force). Solo aplica
+    # cuando ya hay un pin io.netty en la version permitida: el BOM de Spring Boot
+    # 3.5.x trae 4.1.121.Final vulnerable, y pinear solo `netty-codec*` deja
+    # transitivos cercanos (netty-handler-proxy...) en version vulnerable
+    # (WSClientes0013, 9 CVEs). NO 4.2.x: rompe Reactor Netty.
+    if allow_webflux_pin:
+        combined = "\n".join(_read_or_empty(gf) for gf in gradle_files)
+        dep_mods = _netty_modules_pinned_cl(combined, _NETTY_DEPENDENCY_LINE_RE)
+        if NETTY_WEBFLUX_ALLOWED_VERSION in dep_mods.values():
+            force_mods = _netty_modules_pinned_cl(combined, _NETTY_FORCE_PIN_RE)
+            missing_dep = [m for m in NETTY_CORE_MODULES if m not in dep_mods]
+            missing_force = [m for m in NETTY_CORE_MODULES if m not in force_mods]
+            if missing_dep or missing_force:
+                parts: list[str] = []
+                if missing_dep:
+                    parts.append(
+                        f"dependencyManagement faltan {len(missing_dep)}: "
+                        + ", ".join(missing_dep)
+                    )
+                if missing_force:
+                    parts.append(
+                        f"resolutionStrategy.force faltan {len(missing_force)}: "
+                        + ", ".join(missing_force)
+                    )
+                results.append(
+                    CheckResult(
+                        "8.8",
+                        "Block 8",
+                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(parts),
+                        suggested_fix=(
+                            f"Pinear los 12 modulos core de Netty a "
+                            f"{NETTY_WEBFLUX_ALLOWED_VERSION} con doble mecanismo "
+                            f"(dependencyManagement.dependency + "
+                            f"resolutionStrategy.force). Autofix: "
+                            f"fix_netty_full_tree_pin. NO usar 4.2.x (rompe "
+                            f"Reactor Netty)."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "8.8",
+                        "Block 8",
+                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        "pass",
+                        detail=(
+                            f"12 modulos core pineados a "
+                            f"{NETTY_WEBFLUX_ALLOWED_VERSION} (dependency + force)"
+                        ),
+                    )
+                )
     return results
 
 

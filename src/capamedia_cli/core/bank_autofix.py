@@ -22,7 +22,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
-from capamedia_cli.core.version_policy import NETTY_WEBFLUX_ALLOWED_VERSION
+from capamedia_cli.core.version_policy import (
+    NETTY_CORE_MODULES,
+    NETTY_WEBFLUX_ALLOWED_VERSION,
+)
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -1558,6 +1561,170 @@ def _remove_netty_pins_from_dependency_management(
 
 
 # ---------------------------------------------------------------------------
+# Regla 8.8 — Arbol Netty completo pineado a la version permitida en WebFlux.
+#
+# El BOM de Spring Boot 3.5.14 trae `io.netty:*:4.1.121.Final` (vulnerable). En
+# WebFlux hay que pinear el arbol core de Netty (12 modulos, NETTY_CORE_MODULES)
+# a NETTY_WEBFLUX_ALLOWED_VERSION con DOBLE mecanismo:
+#   - `dependencyManagement { dependencies { dependency '...' } }`
+#   - `configurations.all { resolutionStrategy { force '...' } }`
+# El `force` es necesario porque dependencyManagement no siempre gana sobre
+# transitivas (lib-bnc, el propio BOM). Validado en WSClientes0013 (2026-05-29):
+# pinear solo `netty-codec*` dejaba `netty-handler-proxy` y otros transitivos en
+# version vulnerable (9 CVEs). NO bumpear a 4.2.x: rompe Reactor Netty
+# (StacklessClosedChannelException en AbstractChannel$AbstractUnsafe.ensureOpen).
+# ---------------------------------------------------------------------------
+
+_NETTY_DEP_LINE_RE = re.compile(r"^\s*dependency\s+['\"]io\.netty:")
+_NETTY_FORCE_LINE_RE = re.compile(r"^\s*force\s+['\"]io\.netty:")
+_NETTY_GA_RE = re.compile(r"io\.netty:(?P<mod>[A-Za-z0-9._\-]+):(?P<ver>[A-Za-z0-9._\-]+)")
+
+
+def _netty_modules_pinned(text: str, line_re: re.Pattern[str]) -> dict[str, str]:
+    """Mapa {modulo: version} de lineas io.netty que matchean `line_re`
+    (`dependency '...'` o `force '...'`), ignorando comentarios."""
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        if raw.strip().startswith(("//", "/*", "*")):
+            continue
+        if not line_re.match(raw):
+            continue
+        m = _NETTY_GA_RE.search(raw)
+        if m:
+            found.setdefault(m.group("mod"), m.group("ver"))
+    return found
+
+
+def _insert_after_last_match(
+    lines: list[str],
+    anchor_re: re.Pattern[str],
+    modules: list[str],
+    keyword: str,
+    version: str,
+) -> list[str]:
+    """Inserta `<keyword> 'io.netty:<mod>:<version>'` por cada modulo, justo
+    despues de la ultima linea (no comentario) que matchea `anchor_re`,
+    replicando su indentacion. Si no hay ancla, devuelve `lines` sin tocar."""
+    last_idx = -1
+    indent = "        "
+    for i, raw in enumerate(lines):
+        if raw.strip().startswith(("//", "/*", "*")):
+            continue
+        if anchor_re.match(raw):
+            last_idx = i
+            indent = raw[: len(raw) - len(raw.lstrip())]
+    if last_idx == -1:
+        return lines
+    additions = [f"{indent}{keyword} 'io.netty:{mod}:{version}'\n" for mod in modules]
+    return lines[: last_idx + 1] + additions + lines[last_idx + 1 :]
+
+
+def _append_resolution_force_block(text: str, modules: list[str], version: str) -> str:
+    """Agrega al final del archivo un bloque
+    `configurations.all { resolutionStrategy { force ... } }` con los modulos
+    dados. Gradle acumula multiples `configurations.all {}`, asi que es seguro
+    aunque ya exista otro."""
+    forces = "\n".join(f"        force 'io.netty:{mod}:{version}'" for mod in modules)
+    block = (
+        "\n"
+        "configurations.all {\n"
+        "    resolutionStrategy {\n"
+        "        // Pin completo del arbol Netty (CVE-fix; el BOM de Spring Boot\n"
+        "        // 3.5.x trae io.netty 4.1.121.Final vulnerable). NO bumpear a\n"
+        "        // 4.2.x: rompe Reactor Netty (StacklessClosedChannelException).\n"
+        f"{forces}\n"
+        "    }\n"
+        "}\n"
+    )
+    if not text.endswith("\n"):
+        text += "\n"
+    return text + block
+
+
+def fix_netty_full_tree_pin(project_root: Path) -> BankAutofixResult:
+    """En proyectos WebFlux que YA pinean `io.netty` en la version permitida,
+    asegura que los 12 modulos core (`NETTY_CORE_MODULES`) esten pineados a
+    `NETTY_WEBFLUX_ALLOWED_VERSION` con doble mecanismo (dependencyManagement
+    `dependency` + resolutionStrategy `force`).
+
+    Idempotente. Solo AGREGA modulos faltantes; no toca pins existentes. Skip si:
+    no hay build.gradle, no es WebFlux, o no hay pin io.netty en la version
+    permitida en `dependencyManagement` (eso lo gobierna el Check/autofix 8.7).
+    """
+    result = BankAutofixResult(rule="8.8", applied=False)
+    gradle_files = [
+        f
+        for f in (project_root / "build.gradle", project_root / "build.gradle.kts")
+        if f.exists()
+    ]
+    if not gradle_files:
+        result.notes = "no se encontro build.gradle"
+        return result
+
+    is_webflux = any(
+        "spring-boot-starter-webflux" in f.read_text(encoding="utf-8", errors="replace")
+        for f in gradle_files
+    )
+    if not is_webflux:
+        result.notes = "no es WebFlux; el arbol Netty solo se pinea en WebFlux"
+        return result
+
+    modified: list[Path] = []
+    for f in gradle_files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        dep_modules = _netty_modules_pinned(text, _NETTY_DEP_LINE_RE)
+        # Solo completar cuando ya hay un pin en la version permitida; si la
+        # version es otra (4.2.x, 4.1.132...) lo resuelve el Check/autofix 8.7.
+        if NETTY_WEBFLUX_ALLOWED_VERSION not in dep_modules.values():
+            continue
+        version = NETTY_WEBFLUX_ALLOWED_VERSION
+        force_modules = _netty_modules_pinned(text, _NETTY_FORCE_LINE_RE)
+        missing_dep = [m for m in NETTY_CORE_MODULES if m not in dep_modules]
+        missing_force = [m for m in NETTY_CORE_MODULES if m not in force_modules]
+        if not missing_dep and not missing_force:
+            continue
+
+        new_text = text
+        if missing_dep:
+            lines = new_text.splitlines(keepends=True)
+            lines = _insert_after_last_match(
+                lines, _NETTY_DEP_LINE_RE, missing_dep, "dependency", version
+            )
+            new_text = "".join(lines)
+        if missing_force:
+            if force_modules:
+                lines = new_text.splitlines(keepends=True)
+                lines = _insert_after_last_match(
+                    lines, _NETTY_FORCE_LINE_RE, missing_force, "force", version
+                )
+                new_text = "".join(lines)
+            else:
+                new_text = _append_resolution_force_block(
+                    new_text, missing_force, version
+                )
+
+        if new_text != text:
+            f.write_text(new_text, encoding="utf-8")
+            modified.append(f)
+            bits = []
+            if missing_dep:
+                bits.append(f"+{len(missing_dep)} dependency")
+            if missing_force:
+                bits.append(f"+{len(missing_force)} force")
+            result.changes.append(
+                f"{f.relative_to(project_root)}: arbol Netty completado "
+                f"({', '.join(bits)}) en {version}"
+            )
+
+    if modified:
+        result.applied = True
+        result.files_modified = modified
+    else:
+        result.notes = "arbol Netty ya completo, o sin pin base en la version permitida"
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1581,7 +1748,7 @@ def run_bank_autofix(
     wanted = (
         set(rules)
         if rules
-        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2", "8.7"}
+        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2", "8.7", "8.8"}
     )
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
@@ -1617,4 +1784,6 @@ def run_bank_autofix(
         results.append(fix_helm_java_options(project_root))
     if "8.7" in wanted:
         results.append(fix_remove_netty_pin(project_root))
+    if "8.8" in wanted:
+        results.append(fix_netty_full_tree_pin(project_root))
     return results

@@ -6,6 +6,39 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-05-29
+
+### Added — Check 8.8 + autofix `fix_netty_full_tree_pin`: árbol Netty completo en WebFlux
+
+El BOM de Spring Boot 3.5.14 trae `io.netty` en versión vulnerable
+(`4.1.121.Final`). Pinear solo `netty-codec*` (4 módulos) deja transitivos
+cercanos como `netty-handler-proxy` vulnerables: Snyk reportó 9 CVEs HIGH/MEDIUM
+en WSClientes0013 (2026-05-29). El fix correcto pinea el **árbol core de Netty
+(12 módulos)** a `4.1.133.Final` con **doble mecanismo** (`dependencyManagement`
++ `resolutionStrategy.force`), porque `dependencyManagement` no siempre gana
+sobre transitivas (lib-bnc, el propio BOM).
+
+- **`NETTY_CORE_MODULES`** (12 módulos) en
+  [`version_policy.py`](src/capamedia_cli/core/version_policy.py): netty-common,
+  netty-buffer, netty-transport, netty-resolver, netty-resolver-dns, netty-codec,
+  netty-codec-dns, netty-codec-http, netty-codec-http2, netty-codec-socks,
+  netty-handler, netty-handler-proxy. Excluye binarios nativos y `netty-tcnative-*`.
+- **Check 8.8** (HIGH): en WebFlux con pin Netty en la versión permitida, exige
+  los 12 módulos en `dependencyManagement` **y** en `resolutionStrategy.force`.
+- **Autofix `fix_netty_full_tree_pin`**: completa los módulos faltantes
+  (dependency + force) y crea el bloque `resolutionStrategy` si no existe.
+  Idempotente; solo agrega faltantes; no actúa si la versión base no es la
+  permitida (eso lo gobierna 8.7).
+- **Check 8.7** mejorado: el mensaje recuerda que 4.2.x rompe Reactor Netty
+  (`StacklessClosedChannelException`) — **NO bumpear a 4.2.x**.
+- Canónicos sincronizados (`bank-official-rules.md`, `checklist-rules.md`,
+  `migrate-rest-full.md`). +10 tests (suite 917 verde).
+
+> Contexto: este release reemplaza el v0.28.3 descartado que alineaba a
+> `4.2.13.Final` (revertido antes de pushear — 4.2.x rompe Reactor Netty). La
+> versión permitida sigue siendo `4.1.133.Final`; lo nuevo es exigir el árbol
+> **completo** con doble mecanismo.
+
 ## [0.28.2] - 2026-05-29
 
 ### Fixed — `doublecheck` no debe quitar el pin de Netty en WebFlux

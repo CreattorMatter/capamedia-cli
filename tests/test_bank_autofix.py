@@ -397,8 +397,8 @@ def test_run_bank_autofix_does_not_add_bancs_without_context(tmp_path: Path) -> 
     )
 
     results = run_bank_autofix(tmp_path)
-    # 11 reglas (4, 6, 7, 8, 8b, 9, 9j, 5.6.5, 9h.1, 9h.2, 8.7) — la 6 tiene 2 fixes -> 12 results
-    assert len(results) == 12
+    # 12 reglas (4, 6, 7, 8, 8b, 9, 9j, 5.6.5, 9h.1, 9h.2, 8.7, 8.8) — la 6 tiene 2 fixes -> 13 results
+    assert len(results) == 13
     rules_applied = {r.rule for r in results if r.applied}
     # Deberia aplicar 4, 7 y 9. La regla 8 queda en modo conservador:
     # normaliza si existe, pero no inventa BANCS sin matriz BUS/IIB+invocaBancs.
