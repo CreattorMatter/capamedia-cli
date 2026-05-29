@@ -15,8 +15,8 @@ from capamedia_cli.core import model_policy
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "capamedia_cli"
 
-# Patron de ID de modelo Claude concreto: claude-<tier>-<major>-<minor>
-_CLAUDE_MODEL_RE = re.compile(r"claude-(?:opus|sonnet|haiku)-\d")
+# IDs de modelo concretos: claude-<tier>-<major>-<minor> y gpt-5.x
+_CLAUDE_MODEL_RE = re.compile(r"claude-(?:opus|sonnet|haiku)-\d|gpt-5\.\d")
 
 
 def test_opus_tier_resolves_to_latest() -> None:

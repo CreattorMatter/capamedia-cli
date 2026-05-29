@@ -1,4 +1,4 @@
-# capamedia-cli - v0.28.0
+# capamedia-cli - v0.28.1
 
 CLI multi-harness para migrar servicios legacy (IIB / WAS / ORQ) de Banco Pichincha a Java 21 + Spring Boot hexagonal **OLA 1 / OLA 2**.
 
@@ -482,6 +482,13 @@ capamedia-cli/
 - [x] v0.26.2 - Compactacion del prompt `checklist-rules.md` (<25 KB) para evitar fatiga de contexto; severidades de logs (2.8/2.9) y "Quitar Etiquetas" (18.3) degradadas a `info`
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
+
+### Release 0.28.1 — Orquestacion por complejidad (`--auto-effort`)
+
+- [x] v0.28.1 - **`core/effort_policy.py`**: complejidad del servicio → perfil de esfuerzo. Decision owner: **siempre Opus 4.8**; la complejidad modula reasoning effort (Codex), retries-extra (LOW+0/MEDIUM+1/HIGH+2) y gate humano (solo HIGH)
+- [x] v0.28.1 - **`batch migrate --auto-effort`** (opt-in): deriva esfuerzo por servicio, muestra el plan (transparencia), señala HIGH para revision humana. `--model` explicito gana. Default = comportamiento actual
+- [x] v0.28.1 - **Mapeo Codex centralizado** en `model_policy.py` (fuente unica total tier→modelo); guard extendido a `gpt-5.x`
+- [x] v0.28.1 - North Star documentada (wizard "un click" de punta a punta) + backup `v0.28.0`/`backup/v0.28.0-stable`
 
 ### Release 0.28.0 — Vision de orquestador + cierre del drift codigo↔canonical
 

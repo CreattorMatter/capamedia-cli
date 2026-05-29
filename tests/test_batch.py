@@ -18,9 +18,12 @@ from capamedia_cli.commands.batch import (
     _process_pipeline_service,
     _read_services_file,
     _read_structured_message,
+    _render_effort_plan,
+    _render_human_gate_summary,
     _write_csv_report,
     _write_markdown_report,
 )
+from capamedia_cli.core.effort_policy import effort_for
 from capamedia_cli.core.engine import EngineResult
 from capamedia_cli.core.gitignore_policy import DEPLOYMENT_GITIGNORE_ENTRIES
 
@@ -213,6 +216,29 @@ def test_migrate_output_schema_is_codex_strict_compatible() -> None:
 
     assert MIGRATE_OUTPUT_SCHEMA["additionalProperties"] is False
     assert required == properties
+
+
+# ── --auto-effort: helpers de transparencia del orquestador ──────────────────
+
+
+def test_render_effort_plan_smoke() -> None:
+    """El plan de esfuerzo se renderiza sin error para las 3 complejidades."""
+    plan = {
+        "wsclientes0001": effort_for("low"),
+        "wsclientes0002": effort_for("medium"),
+        "orqclientes0003": effort_for("high"),
+    }
+    # No debe lanzar; cubre la traduccion tier->modelo por engine.
+    _render_effort_plan(plan, engine_name="claude", base_retries=0, user_model=None)
+    _render_effort_plan(plan, engine_name="codex", base_retries=1, user_model="gpt-5.5")
+
+
+def test_render_human_gate_summary_only_high() -> None:
+    """El resumen de gate humano se emite solo si hay servicios HIGH."""
+    # Sin HIGH: no debe lanzar (no imprime panel).
+    _render_human_gate_summary({"a": effort_for("low"), "b": effort_for("medium")})
+    # Con HIGH: tampoco lanza (imprime panel).
+    _render_human_gate_summary({"a": effort_for("high")})
 
 
 def test_process_migrate_service_success(tmp_path: Path, monkeypatch) -> None:

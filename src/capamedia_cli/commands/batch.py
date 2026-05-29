@@ -45,6 +45,11 @@ from capamedia_cli.core.batch_state import (
     stage_ok,
     state_file,
 )
+from capamedia_cli.core.effort_policy import (
+    EffortProfile,
+    effort_for,
+    resolve_service_complexity,
+)
 from capamedia_cli.core.engine import (
     Engine,
     EngineInput,
@@ -57,6 +62,10 @@ from capamedia_cli.core.gitignore_policy import (
     ensure_deployment_gitignore,
 )
 from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
+from capamedia_cli.core.model_policy import (
+    DEFAULT_CODEX_REASONING_EFFORT,
+    engine_model,
+)
 from capamedia_cli.core.scheduler import BatchScheduler
 from capamedia_cli.core.self_correction import (
     build_correction_appendix,
@@ -73,7 +82,6 @@ app = typer.Typer(
 )
 
 CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
-DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
 
 
 @dataclass
@@ -2192,6 +2200,51 @@ def batch_pipeline(
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
 
 
+def _render_effort_plan(
+    effort_by_service: dict[str, EffortProfile],
+    *,
+    engine_name: str,
+    base_retries: int,
+    user_model: str | None,
+) -> None:
+    """Muestra el plan de orquestacion por complejidad (transparencia del
+    orquestador): que modelo/reasoning/retries/gate recibe cada servicio."""
+    table = Table(title="Plan de esfuerzo por complejidad", title_style="bold cyan")
+    table.add_column("Servicio")
+    table.add_column("Complejidad")
+    table.add_column("Modelo")
+    table.add_column("Reasoning")
+    table.add_column("Retries")
+    table.add_column("Gate humano")
+    for service in sorted(effort_by_service):
+        prof = effort_by_service[service]
+        model_concrete = user_model or engine_model(prof.model_tier, engine_name)
+        reasoning = prof.reasoning_effort if engine_name == "codex" else "(n/a)"
+        table.add_row(
+            service,
+            prof.complexity.upper(),
+            model_concrete,
+            reasoning,
+            str(base_retries + prof.extra_retries),
+            "SI" if prof.needs_human_gate else "-",
+        )
+    console.print(table)
+
+
+def _render_human_gate_summary(effort_by_service: dict[str, EffortProfile]) -> None:
+    """Lista los servicios HIGH que el orquestador senala para revision humana."""
+    flagged = sorted(s for s, p in effort_by_service.items() if p.needs_human_gate)
+    if not flagged:
+        return
+    console.print(
+        Panel.fit(
+            "[bold yellow]Revision humana sugerida (complejidad HIGH):[/bold yellow]\n"
+            + "\n".join(f"  - {s}" for s in flagged),
+            border_style="yellow",
+        )
+    )
+
+
 @app.command("migrate")
 def batch_migrate(
     file: Annotated[
@@ -2253,6 +2306,17 @@ def batch_migrate(
     retries: Annotated[
         int, typer.Option("--retries", help="Reintentos adicionales por servicio")
     ] = 0,
+    auto_effort: Annotated[
+        bool,
+        typer.Option(
+            "--auto-effort",
+            help=(
+                "Orquesta por complejidad: asigna modelo (siempre Opus), reasoning "
+                "effort y retries-extra por servicio segun complejidad LOW/MEDIUM/HIGH. "
+                "Senaliza los HIGH para revision humana. --model explicito sigue ganando."
+            ),
+        ),
+    ] = False,
     unsafe: Annotated[
         bool,
         typer.Option(
@@ -2305,6 +2369,22 @@ def batch_migrate(
     schema_path = _ensure_migrate_schema(ws)
     eff_reasoning = _normalize_reasoning_effort(reasoning_effort if engine.name == "codex" else None)
 
+    # Orquestacion por complejidad (opt-in --auto-effort). Resuelve la
+    # complejidad de cada servicio y deriva su perfil de esfuerzo. El modelo es
+    # siempre Opus (decision owner); lo que varia: reasoning effort, retries-extra
+    # y la senal de gate humano. --model explicito del usuario sigue ganando.
+    effort_by_service: dict[str, EffortProfile] = {}
+    if auto_effort:
+        for service in services:
+            complexity = resolve_service_complexity(ws / service, service)
+            effort_by_service[service] = effort_for(complexity)
+        _render_effort_plan(
+            effort_by_service,
+            engine_name=engine.name,
+            base_retries=retries,
+            user_model=model,
+        )
+
     console.print(
         Panel.fit(
             f"[bold]batch migrate[/bold]\n"
@@ -2313,10 +2393,33 @@ def batch_migrate(
             f"Model: {model or '(default)'} · Reasoning: {eff_reasoning or '(engine default)'} · "
             f"Checklist: {'NO' if skip_check else 'SI'}\n"
             f"Resume: {'SI' if resume else 'NO'} · Retries: {retries} · "
+            f"Auto-effort: {'SI' if auto_effort else 'NO'} · "
             f"Window: {max_services_per_window or 'off'}/{window_hours}h",
             border_style="cyan",
         )
     )
+
+    def _make_migrate_callable(svc_model: str | None, svc_reasoning: str | None):
+        """Factory que captura modelo/reasoning POR VALOR (evita el bug de
+        closure tardio cuando varian por servicio en el loop)."""
+
+        def _run(svc: str, attempt: int) -> BatchRow:
+            return _process_migrate_service(
+                svc,
+                ws,
+                schema_path,
+                engine=engine,
+                model=svc_model,
+                reasoning_effort=svc_reasoning,
+                prompt_file=prompt_file,
+                timeout_minutes=timeout_minutes,
+                run_check=not skip_check,
+                unsafe=unsafe,
+                resume=resume or attempt > 0,
+                scheduler=scheduler,
+            )
+
+        return _run
 
     rows: list[BatchRow] = []
 
@@ -2329,31 +2432,32 @@ def batch_migrate(
     ) as progress:
         task = progress.add_task("Migrando", total=len(services))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [
-                pool.submit(
-                    _run_service_with_retries,
-                    service,
-                    lambda svc, attempt: _process_migrate_service(
-                        svc,
-                        ws,
-                        schema_path,
-                        engine=engine,
-                        model=model,
-                        reasoning_effort=eff_reasoning,
-                        prompt_file=prompt_file,
-                        timeout_minutes=timeout_minutes,
-                        run_check=not skip_check,
-                        unsafe=unsafe,
-                        resume=resume or attempt > 0,
-                        scheduler=scheduler,
-                    ),
-                    retries=retries,
-                    workspace_resolver=lambda svc: ws / svc,
-                    project_resolver=lambda svc, wsp: _find_project_from_fabrics_metadata(wsp) or _find_migrated_project(wsp, svc),
-                    run_kind="migrate",
+            futures = []
+            for service in services:
+                profile = effort_by_service.get(service)
+                if profile is not None:
+                    svc_model = model or engine_model(profile.model_tier, engine.name)
+                    svc_reasoning = (
+                        _normalize_reasoning_effort(profile.reasoning_effort)
+                        if engine.name == "codex"
+                        else None
+                    )
+                    svc_retries = retries + profile.extra_retries
+                else:
+                    svc_model = model
+                    svc_reasoning = eff_reasoning
+                    svc_retries = retries
+                futures.append(
+                    pool.submit(
+                        _run_service_with_retries,
+                        service,
+                        _make_migrate_callable(svc_model, svc_reasoning),
+                        retries=svc_retries,
+                        workspace_resolver=lambda svc: ws / svc,
+                        project_resolver=lambda svc, wsp: _find_project_from_fabrics_metadata(wsp) or _find_migrated_project(wsp, svc),
+                        run_kind="migrate",
+                    )
                 )
-                for service in services
-            ]
             for future in as_completed(futures):
                 rows.append(future.result())
                 progress.advance(task)
@@ -2362,6 +2466,8 @@ def batch_migrate(
     _render_table("migrate", rows, MIGRATE_FIELD_ORDER)
     md = _write_markdown_report("migrate", rows, ws, MIGRATE_FIELD_ORDER)
     console.print(f"\n[bold]Reporte:[/bold] [cyan]{md}[/cyan]")
+    if auto_effort:
+        _render_human_gate_summary(effort_by_service)
 
 
 @app.command("engines")

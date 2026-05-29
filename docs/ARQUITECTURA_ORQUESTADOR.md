@@ -4,6 +4,40 @@
 > y el roadmap; no todo lo descrito está implementado (cada sección marca el
 > estado real).
 
+## North Star — el orquestador "un click" (visión del owner, 2026-05-28)
+
+La esencia del producto: **un click que migra un servicio de 0 a 100**, de punta
+a punta, con subagentes en cada etapa, aprovechando al máximo Opus 4.8 y
+workflows. Hoy esto es **alfa**; el norte es una experiencia guiada:
+
+1. **Instalación simple** (un click, sin fricción) → pantalla *"Bienvenido a
+   Capa Media"*.
+2. **Elegir OLA** (el sistema soporta varias olas y se actualiza; el wizard
+   muestra las disponibles).
+3. **Configuración** navegable con flechas (estilo menú de Claude Code).
+4. **Wizard de migración** que pide lo mínimo para tener contexto completo:
+   - Servicio a migrar.
+   - Acrónimo de nomenclatura (`tnd`/`csg`/`tpr`/…).
+   - Proyecto Azure DevOps destino.
+   - Rama: la **verifica/crea**, se posiciona, y trae el legacy + `destino/`.
+5. **Resumen automático** del análisis: tipo (BUS/WAS/ORQ), UMPs, TX, properties
+   referenciadas → habilita correr **Fabrics**.
+6. **"Migrar automáticamente"**: abre el cloud, manda contexto + orden, migra.
+7. **Doublecheck** automático tras la migración.
+8. **Tests**: llegar hasta correr los tests del servicio migrado.
+
+Todo orquestado con **subagentes de inicio a fin**. Las dimensiones de abajo
+son los cimientos técnicos de esa experiencia; el roadmap las ordena hacia el
+"un click".
+
+## Decisión de modelo — siempre Opus 4.8 (owner, 2026-05-28)
+
+El modelo de trabajo es **Opus 4.8 siempre** — calidad sobre costo. La
+complejidad del servicio **no** modula el modelo (es opus para todos); modula
+las otras palancas de esfuerzo (reasoning effort de Codex, retries-extra, gate
+humano). Implementado en
+[`core/effort_policy.py`](../src/capamedia_cli/core/effort_policy.py).
+
 ## Premisa
 
 `capamedia` no es un generador de prompts ni un wrapper de un modelo. Es un
@@ -32,11 +66,17 @@ Cada etapa del pipeline es un **rol**, y cada rol tiene un perfil de cómputo
 distinto. Usar un solo modelo para todo desperdicia capacidad en lo simple y
 queda corto en lo complejo.
 
-| Rol | Etapa CLI | Tier sugerido | Por qué |
+> **Nota (owner 2026-05-28)**: la decisión vigente es **siempre Opus** para el
+> trabajo de migración. La tabla de abajo es el modelo conceptual de roles; en
+> la práctica el migrador corre en Opus 4.8 para todas las complejidades. Los
+> tiers `sonnet`/`haiku` quedan como opción para roles auxiliares baratos
+> (revisores, documentador) a evaluar más adelante.
+
+| Rol | Etapa CLI | Tier conceptual | Por qué |
 |---|---|---|---|
-| **Analista de legacy** | discovery / análisis | `opus` (Opus 4.8, 1M ctx) | Lee ESQL + msgflow + WSDL + UMPs completos sin truncar. Razonamiento profundo, baja frecuencia |
-| **Migrador** | `ai migrate` | `opus` si HIGH / `sonnet` resto | Escribe el hexagonal. Profundidad según complejidad del servicio |
-| **Corrector** | `ai doublecheck` | `sonnet` | Aplica checklist + autofix; no necesita Opus |
+| **Analista de legacy** | discovery / análisis | `opus` (Opus 4.8, 1M ctx) | Lee ESQL + msgflow + WSDL + UMPs completos sin truncar. Razonamiento profundo |
+| **Migrador** | `ai migrate` | **`opus` siempre** | Escribe el hexagonal. Calidad sobre costo |
+| **Corrector** | `ai doublecheck` | `opus` / `sonnet` | Aplica checklist + autofix |
 | **Revisores por dimensión** | review AI (hexagonal/bancs/error/helm) | `haiku` ×N en paralelo | Baratos, paralelos, structured output |
 | **QA Karate** | agente SQA Migration | `sonnet` | Genera features/XMLs |
 | **Documentador** | `documentacion` | `haiku` | Plantilla determinista |
@@ -69,22 +109,32 @@ servicios. Pero ese resultado **solo se escribe en `COMPLEXITY_<svc>.md`**: el
 batch después trata a todos igual — mismo engine, mismo modelo, mismo flujo,
 mismos retries.
 
-Un orquestador usa ese ranking para decidir el **nivel de esfuerzo por servicio**:
+El orquestador usa ese ranking para decidir el **nivel de esfuerzo por
+servicio**. Con la decisión "siempre Opus", el modelo no varía; lo que escala
+es reasoning effort (Codex), retries-extra y la señal de gate humano:
 
-| Complejidad | Modelo migrador | Profundidad | Retries | Gate humano |
+| Complejidad | Modelo | Reasoning (Codex) | Retries extra | Gate humano |
 |---|---|---|---|---|
-| **LOW** (WAS 1-op, sin BD) | `sonnet` / `haiku` | fast path | 1 | no |
-| **MEDIUM** | `sonnet` | normal | 2 | no |
-| **HIGH** (ORQ, muchos UMPs, BANCS, log transaccional) | `opus` (1M) | deep path | 3 | sí |
+| **LOW** (WAS 1-op, sin BD) | `opus` | `high` | +0 | no |
+| **MEDIUM** | `opus` | `xhigh` | +1 | no |
+| **HIGH** (ORQ, muchos UMPs, BANCS, log transaccional) | `opus` | `xhigh` | +2 | **sí** |
 
 **Estado real:**
 - ✅ `score_complexity` y `batch complexity` existen y funcionan.
-- ⚠️ La complejidad del **asset** (`CanonicalAsset.complexity`,
-  [canonical.py:45](../src/capamedia_cli/core/canonical.py)) sí mapea a
-  `reasoning_effort` en Codex ([adapters/codex.py](../src/capamedia_cli/adapters/codex.py)).
-  Pero es la complejidad del *prompt*, no la del *servicio*.
-- ⏳ **Falta**: conectar `score_complexity(servicio)` → asignación de
-  modelo/profundidad/retries en `batch migrate` / `batch pipeline`. Es la
+- ✅ **v0.28.1**: [`core/effort_policy.py`](../src/capamedia_cli/core/effort_policy.py)
+  traduce complejidad → `EffortProfile` (modelo opus + reasoning + retries-extra
+  + gate). `resolve_service_complexity()` lee `COMPLEXITY_<svc>.md` o recalcula.
+- ✅ **v0.28.1**: `capamedia batch migrate --auto-effort` (opt-in) deriva el
+  esfuerzo por servicio, muestra el plan (transparencia) y señala los HIGH para
+  revisión humana. `--model` explícito sigue ganando.
+- ⏳ **Falta**: extender `--auto-effort` a `batch pipeline`; volverlo default
+  cuando esté validado en producción.
+
+(Histórico) La complejidad del **asset** (`CanonicalAsset.complexity`,
+[canonical.py:45](../src/capamedia_cli/core/canonical.py)) ya mapeaba a
+`reasoning_effort` en Codex — pero es la complejidad del *prompt*, no la del
+*servicio*. Lo nuevo es orquestar por la complejidad del *servicio*. Sigue
+pendiente:
   mejora de orquestación de mayor ROI porque reaprovecha algo ya construido.
 
 ---
@@ -152,14 +202,22 @@ v0.28.0 ataca esto de raíz con dos mecanismos complementarios:
 - [x] Test de sync version_policy↔canonical.
 - [x] Este documento.
 
-### v0.28.x — Orquestación por complejidad (próximo)
-- [ ] `batch migrate`/`pipeline`: leer `score_complexity` y asignar
-      modelo/profundidad/retries por servicio (Dimensión 2).
-- [ ] Poblar `preferred_model` en los assets según la tabla de roles (Dimensión 1).
+### v0.28.1 — Orquestación por complejidad (hecho)
+- [x] `core/effort_policy.py`: complejidad → `EffortProfile` (siempre Opus +
+      reasoning + retries-extra + gate humano).
+- [x] `batch migrate --auto-effort` (opt-in): deriva esfuerzo por servicio,
+      muestra el plan, señala HIGH para revisión humana.
+- [x] Mapeo de modelos Codex centralizado en `model_policy.py` (fuente única
+      total tier→modelo).
+
+### v0.28.x — Completar la orquestación (próximo)
+- [ ] Extender `--auto-effort` a `batch pipeline`.
+- [ ] Volver `--auto-effort` default cuando esté validado en producción.
+- [ ] Poblar `preferred_model` en los assets auxiliares (revisores/doc → haiku).
 - [ ] `capamedia doctor`: avisar si el `model_policy` quedó atrás del modelo
       activo de la sesión.
 
-### v0.29 — Workers finos (Agent SDK)
+### v0.29 — Workers finos (Agent SDK) + camino al "un click"
 - [ ] Migrar `ClaudeEngine` de shell-out `claude -p` al Agent SDK: structured
       output nativo, prompt caching del canonical, subagentes programáticos
       (Dimensión 3). *Verificar nombre exacto del package del SDK antes.*

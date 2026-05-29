@@ -25,6 +25,19 @@ ANTHROPIC_MODELS: dict[str, str] = {
     "haiku": "claude-haiku-4-5",
 }
 
+# Lineup Codex (OpenAI) por tier logico. Centralizado aca (antes vivia en
+# adapters/codex.py) para tener UN solo lugar donde se mapea tier -> modelo,
+# sin importar el engine. `gpt-5.5` para el trabajo pesado, `gpt-5.4-mini`
+# para el fast-path (equivalente al tier haiku).
+CODEX_MODELS: dict[str, str] = {
+    "opus": "gpt-5.5",
+    "sonnet": "gpt-5.5",
+    "haiku": "gpt-5.4-mini",
+}
+
+# Reasoning effort default de Codex. Claude lo ignora.
+DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
+
 # Default cuando un asset no declara tier (`fallback_model`). El grueso del
 # trabajo de migracion corre en sonnet por relacion costo/capacidad.
 DEFAULT_TIER = "sonnet"
@@ -50,6 +63,25 @@ def opencode_model(tier: str) -> str:
     return f"{OPENCODE_PROVIDER_PREFIX}{model}"
 
 
+def codex_model(tier: str) -> str:
+    """Devuelve el ID concreto del modelo Codex para un tier logico.
+
+    Si `tier` ya es un ID concreto (no esta en el mapa), se devuelve tal cual.
+    """
+    return CODEX_MODELS.get(tier, tier)
+
+
+def engine_model(tier: str, engine_name: str) -> str:
+    """Traduce un tier logico al modelo concreto del engine activo.
+
+    El orquestador razona en tiers (rol); cada engine lo materializa en su
+    propio lineup. `claude`/`auto` -> Anthropic; `codex` -> OpenAI.
+    """
+    if engine_name == "codex":
+        return codex_model(tier)
+    return anthropic_model(tier)
+
+
 def default_anthropic_model() -> str:
     """Modelo Anthropic del tier default."""
     return anthropic_model(DEFAULT_TIER)
@@ -58,3 +90,8 @@ def default_anthropic_model() -> str:
 def default_opencode_model() -> str:
     """Modelo opencode del tier default."""
     return opencode_model(DEFAULT_TIER)
+
+
+def default_codex_model() -> str:
+    """Modelo Codex del tier default."""
+    return codex_model(DEFAULT_TIER)

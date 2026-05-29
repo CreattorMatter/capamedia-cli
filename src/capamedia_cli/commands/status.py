@@ -24,6 +24,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from capamedia_cli.core.engine import available_engines
+from capamedia_cli.core.model_policy import (
+    DEFAULT_CODEX_REASONING_EFFORT,
+    default_codex_model,
+)
 
 console = Console()
 
@@ -100,9 +104,10 @@ def _check_codex_model_config() -> StatusCheck:
 
     model = str(data.get("model", "")).strip()
     effort = str(data.get("model_reasoning_effort", "")).strip()
+    expected_model = default_codex_model()
     return StatusCheck(
-        name="Codex GPT-5.5/xhigh",
-        ok=model == "gpt-5.5" and effort == "xhigh",
+        name=f"Codex {expected_model}/{DEFAULT_CODEX_REASONING_EFFORT}",
+        ok=model == expected_model and effort == DEFAULT_CODEX_REASONING_EFFORT,
         detail=f"model={model or '?'} reasoning={effort or '?'}",
         required=False,
     )

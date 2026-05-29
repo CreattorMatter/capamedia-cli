@@ -6,6 +6,64 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-05-28
+
+### Added — Orquestación por complejidad (`batch migrate --auto-effort`)
+
+Primer paso ejecutable de la visión de orquestador (Dimensión 2 de
+[`docs/ARQUITECTURA_ORQUESTADOR.md`](docs/ARQUITECTURA_ORQUESTADOR.md)): el CLI
+ya calculaba la complejidad de cada servicio (`score_complexity`) pero no la
+usaba. Ahora puede orquestar el esfuerzo por servicio.
+
+**`core/effort_policy.py` (nuevo)**
+- `effort_for(complexity)` → `EffortProfile` (modelo, reasoning, retries-extra,
+  gate humano). **Decisión del owner (2026-05-28): el modelo es siempre Opus
+  4.8** — calidad sobre costo. La complejidad NO modula el modelo; modula:
+  - `reasoning_effort` (solo Codex): LOW→high, MEDIUM/HIGH→xhigh.
+  - `extra_retries`: LOW +0, MEDIUM +1, HIGH +2 (sobre el `--retries` base).
+  - `needs_human_gate`: solo HIGH.
+- `resolve_service_complexity(workspace, service)`: lee `COMPLEXITY_<svc>.md`
+  (output de `clone`) o recalcula con `analyze_legacy`; default MEDIUM. Nunca lanza.
+
+**`batch migrate --auto-effort` (flag opt-in)**
+- Resuelve la complejidad de cada servicio y deriva su perfil de esfuerzo.
+- Muestra el **plan de esfuerzo** (tabla servicio→modelo/reasoning/retries/gate)
+  antes de arrancar — transparencia del orquestador.
+- Al final, **señala los servicios HIGH para revisión humana** (no bloquea).
+- `--model` explícito del usuario sigue ganando como override.
+- Default (sin flag) = comportamiento actual, sin sorpresas en producción.
+- Factory `_make_migrate_callable` captura modelo/reasoning POR VALOR (evita el
+  bug de closure tardío al variar por servicio en el loop).
+
+### Changed — Mapeo de modelos Codex centralizado en `model_policy.py`
+
+- `CODEX_MODELS`, `DEFAULT_CODEX_REASONING_EFFORT`, `codex_model(tier)` y
+  `engine_model(tier, engine_name)` ahora viven en `model_policy.py`. Es la
+  **fuente única total** tier→modelo, sin importar el engine.
+- `adapters/codex.py` consume desde ahí (re-exporta `DEFAULT_CODEX_MODEL` /
+  `FAST_CODEX_MODEL` para compat). `commands/batch.py` y `commands/status.py`
+  dejan de hardcodear `gpt-5.5`/`xhigh`.
+- El guard `test_model_policy` ahora también falla si aparece un ID `gpt-5.x`
+  hardcodeado fuera de `model_policy.py`.
+
+### Added — Visión North Star documentada
+
+- `docs/ARQUITECTURA_ORQUESTADOR.md`: sección "North Star — el orquestador
+  'un click'" (instalación → bienvenida → OLA → wizard servicio/acrónimo/
+  proyecto/rama → legacy+destino → resumen → Fabrics → migrar auto →
+  doublecheck → tests, con subagentes de inicio a fin) + decisión siempre-Opus.
+
+### Backup
+
+- Tag `v0.28.0` + rama `backup/v0.28.0-stable` (estado estable de 895 tests)
+  antes de tocar el corazón del batch.
+
+### Tests
+
+- `tests/test_effort_policy.py` (+10), `tests/test_batch.py` (+2 render helpers),
+  guard Codex en `tests/test_model_policy.py`.
+- **Suite total: 907 passed, 0 failures** (era 895).
+
 ## [0.28.0] - 2026-05-28
 
 ### Added — Visión de orquestador + cierre del drift código↔canonical

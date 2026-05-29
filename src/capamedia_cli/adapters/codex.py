@@ -9,16 +9,15 @@ import tomli_w
 from capamedia_cli.adapters.base import HarnessAdapter, model_hint_comment
 from capamedia_cli.core.canonical import CanonicalAsset
 from capamedia_cli.core.frontmatter import serialize_frontmatter
+from capamedia_cli.core.model_policy import (
+    DEFAULT_CODEX_REASONING_EFFORT,
+    codex_model,
+    default_codex_model,
+)
 
-DEFAULT_CODEX_MODEL = "gpt-5.5"
-FAST_CODEX_MODEL = "gpt-5.4-mini"
-DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
-
-MODEL_MAP = {
-    "opus": DEFAULT_CODEX_MODEL,
-    "sonnet": DEFAULT_CODEX_MODEL,
-    "haiku": FAST_CODEX_MODEL,
-}
+# Re-exports para compatibilidad: model_policy.py es la fuente unica de los IDs.
+DEFAULT_CODEX_MODEL = default_codex_model()
+FAST_CODEX_MODEL = codex_model("haiku")
 
 REASONING_MAP = {
     "high": "xhigh",
@@ -34,7 +33,7 @@ def _resolve_model(asset: CanonicalAsset) -> str:
     preferred = asset.preferred_model.get("openai")
     if preferred:
         return preferred
-    return MODEL_MAP.get(asset.fallback_model, DEFAULT_CODEX_MODEL)
+    return codex_model(asset.fallback_model)
 
 
 def _resolve_reasoning(asset: CanonicalAsset) -> str:
