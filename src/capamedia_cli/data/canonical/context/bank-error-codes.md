@@ -43,6 +43,21 @@ checklist Block 5.5.
 
 (ampliar con mas codes del errores.xml segun se encuentren)
 
+## Codigos de backend (`codigosBackend.xml`)
+
+Identifican **que backend respondio** (campo `backend` del `<error>`). Distinto del
+catalogo de error codes de arriba (`errores.xml`). Verificado contra el codigo real
+(`SoapResponseHelper` usa `backendCodes.bancsApp()` / `backendCodes.iib()`).
+
+| Backend | Significado | Cuando |
+|---|---|---|
+| `00045` | BANCS aplicacion | error/exito propagado desde BANCS |
+| `00638` | IIB (broker de integracion) | error/exito desde el broker IIB |
+| `00000` | Infra/legacy — **NO oficial** | NUNCA usar como fallback; viene de servicios viejos |
+
+**NEVER**: hardcodear `00000`. **MUST**: resolver `backend` del catalogo oficial
+`sqb-cfg-codigosBackend-config/codigosBackend.xml` (ver `bank-official-rules.md` Regla 5.4).
+
 ## Patron canonico en Java
 
 ```java

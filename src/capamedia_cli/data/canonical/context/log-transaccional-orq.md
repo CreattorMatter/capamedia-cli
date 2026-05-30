@@ -372,7 +372,7 @@ lo que la plantilla espera.
       "codigo":         "0",                         // "0" = OK, otros = codigo backend
       "mensaje":        "OK",                        // mensaje tecnico backend
       "mensajeNegocio": "Transaccion procesada exitosamente",  // mensaje para UX
-      "tipo":           "INFO"                       // INFO / ERROR / FATAL (ver reference_error_types.md)
+      "tipo":           "INFO"                       // INFO / ERROR / FATAL (ver bank-error-structure.md)
     }
   }
 }
@@ -386,7 +386,7 @@ lo que la plantilla espera.
 - El adapter **no** necesita medir `fechaHoraInicio` / `fechaHoraFin`. La
   librería lo hace automáticamente al interceptar el método con `@EventAudit`.
 - `error.mensajeNegocio` viene de la `BusinessException`/mapping de errores del
-  adapter. `error.tipo` = `INFO`/`ERROR`/`FATAL` según `reference_error_types.md`.
+  adapter. `error.tipo` = `INFO`/`ERROR`/`FATAL` según `bank-error-structure.md`.
 - El `lotElastico.bodyIn` / `bodyOut` se rellena según la **plantilla XML** del
   yml — por eso LT-4 es obligatoria.
 
@@ -404,7 +404,7 @@ del evento (PDF 1, ejemplo de `<NS1:evento>`):
 </error>
 ```
 
-**Mapeo de `backend`** (cruzar con `reference_codigos_backend.md`):
+**Mapeo de `backend`** (cruzar con `bank-error-codes.md`):
 
 | Backend value | Significado                                       |
 |---------------|---------------------------------------------------|
@@ -413,7 +413,7 @@ del evento (PDF 1, ejemplo de `<NS1:evento>`):
 | `00000`       | Usado por servicios legacy — **NO es oficial**, evitar|
 | otros         | Consultar catálogo oficial del banco              |
 
-**Mapeo de `tipo`** (cruzar con `reference_error_types.md`):
+**Mapeo de `tipo`** (cruzar con `bank-error-structure.md`):
 
 | Tipo    | Cuándo                                                |
 |---------|-------------------------------------------------------|

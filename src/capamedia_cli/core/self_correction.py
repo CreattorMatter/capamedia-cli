@@ -57,7 +57,7 @@ _CHECK_HINTS: dict[str, str] = {
     "15.1": "Vaciar el setter de mensajeNegocio (setMensajeNegocio(\"\")), NO eliminar el tag: el slot debe existir para que DataPower lo complete. Solo se permite valor real si el legacy del servicio ya lo poblaba.",
     "15.2": "Normalizar el formato de <recurso>: usar slash-prefix tipo '/servicio/operacion'. Ver PDF BPTPSRE.",
     "15.3": "setComponente debe recibir exactamente uno de: nombre-servicio, 'ApiClient', o el valor canonico del PDF BPTPSRE. No inventar valores.",
-    "15.4": "setBackend debe usar un codigo del catalogo oficial (ej 00638 para IIB, 00045 para BANCS app). Consultar reference_codigos_backend.md.",
+    "15.4": "setBackend debe usar un codigo del catalogo oficial (ej 00638 para IIB, 00045 para BANCS app). Consultar bank-error-codes.md.",
 }
 
 _GENERIC_FIX_HINT = (

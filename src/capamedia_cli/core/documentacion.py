@@ -21,6 +21,7 @@ from capamedia_cli.core.discovery import (
     load_discovery_entry,
 )
 from capamedia_cli.core.legacy_analyzer import analyze_wsdl, find_wsdl
+from capamedia_cli.core.version_policy import SPRING_BOOT_BASELINE_VERSION
 
 VERIFY = "[VERIFICAR]"
 
@@ -1030,7 +1031,7 @@ def render_html(doc: ServiceDocumentation) -> str:
     tech_rows = [
         ["Java", "21"],
         ["Gradle", doc.gradle_version or "8.14"],
-        ["Spring Boot", doc.spring_boot_version or "3.5.13"],
+        ["Spring Boot", doc.spring_boot_version or SPRING_BOOT_BASELINE_VERSION],
         ["Stack web", doc.framework or "WebFlux"],
         ["CXF", "4.1.1"],
         ["Arquitectura", "Hexagonal"],

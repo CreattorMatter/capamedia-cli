@@ -91,7 +91,7 @@ error.setBackend(backend);                                           // catálog
 
 ## Tipos canónicos (`error.tipo`)
 
-Referencia cruzada con `reference_error_types.md` (memoria del equipo):
+Referencia cruzada con `bank-error-structure.md` (memoria del equipo):
 
 | Caso | Tipo | Ejemplo |
 |---|---|---|
@@ -198,7 +198,7 @@ En servicios nuevos: no replicar el bloque
    nunca mezclar orden ni inventar campos.
 3. **`mensajeNegocio` siempre sin valor real**: `null`/ausente o `""` cuando el contrato SOAP exige tag vacio.
 4. **`backend`** resuelto desde el catálogo `codigosBackend.xml` (ver
-   `reference_codigos_backend.md`: `bancs_app=00045`, `iib=00638`).
+   `bank-error-codes.md`: `bancs_app=00045`, `iib=00638`).
 5. **`recurso`** = `<SERVICIO>/<MÉTODO>` y **`componente`** = método o componente
    backend (ej. `TXNNNNNN`) — ambos del recurso donde ocurre el fallo.
 6. Si el PR reviewer señala el formato, **citar este canonical** — no
