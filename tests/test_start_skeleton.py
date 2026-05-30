@@ -411,3 +411,90 @@ def test_skip_doublecheck_does_not_run_it(captured, tmp_path, monkeypatch):
     )
     start_command(service="wsclientes0076", namespace="tnd", root=tmp_path, skip_doublecheck=True)
     assert called["dc"] is False
+
+
+# ── Fase 7: runner de tests opcional (--run-tests) + resumen final ───────────
+
+
+def test_detect_build_tool_gradle(tmp_path):
+    (tmp_path / "gradlew").write_text("", encoding="utf-8")
+    assert start_mod._detect_build_tool(tmp_path) == "gradle"
+
+
+def test_detect_build_tool_maven(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
+    assert start_mod._detect_build_tool(tmp_path) == "maven"
+
+
+def test_detect_build_tool_none(tmp_path):
+    assert start_mod._detect_build_tool(tmp_path) is None
+
+
+def test_run_tests_off_by_default(captured, tmp_path, monkeypatch):
+    """Sin --run-tests, NO se invoca el build."""
+    called = {"build": False}
+    monkeypatch.setattr(
+        start_mod, "_run_build_tests",
+        lambda *a, **k: called.__setitem__("build", True) or True,
+    )
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+    assert called["build"] is False
+
+
+def test_run_tests_invoked_when_flag(captured, tmp_path, monkeypatch):
+    """--run-tests -> se invoca el build con el timeout dado."""
+    grabbed = {}
+    monkeypatch.setattr(
+        start_mod, "_run_build_tests",
+        lambda service, ws, timeout: grabbed.update({"service": service, "timeout": timeout}) or True,
+    )
+    start_command(
+        service="wsclientes0076", namespace="tnd", root=tmp_path,
+        run_tests=True, tests_timeout=15,
+    )
+    assert grabbed["service"] == "wsclientes0076"
+    assert grabbed["timeout"] == 15
+
+
+def test_run_build_tests_no_project_returns_false(tmp_path, monkeypatch):
+    """Sin proyecto migrado -> False, no rompe."""
+    monkeypatch.setattr(ai_mod, "_project_for_workspace", lambda ws, svc: None)
+    assert start_mod._run_build_tests("wsx0001", tmp_path, 30) is False
+
+
+def test_run_build_tests_gradle_pass(tmp_path, monkeypatch):
+    """gradlew presente + build returncode 0 -> True (sin tocar red real)."""
+    proj = tmp_path / "wsx0001" / "destino" / "tnd-msa-sp-wsx0001"
+    proj.mkdir(parents=True)
+    (proj / "gradlew").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ai_mod, "_project_for_workspace", lambda ws, svc: proj)
+
+    class _R:
+        returncode = 0
+
+    import capamedia_cli.core.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "_run_text_process", lambda *a, **k: _R())
+    monkeypatch.setattr(
+        "capamedia_cli.core.gradle_properties.remove_committed_gradle_java_home",
+        lambda p: type("C", (), {"removed": None})(),
+    )
+    assert start_mod._run_build_tests("wsx0001", tmp_path, 30) is True
+
+
+def test_run_build_tests_gradle_fail(tmp_path, monkeypatch):
+    """build returncode != 0 -> False."""
+    proj = tmp_path / "wsx0001" / "destino" / "tnd-msa-sp-wsx0001"
+    proj.mkdir(parents=True)
+    (proj / "gradlew").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ai_mod, "_project_for_workspace", lambda ws, svc: proj)
+
+    class _R:
+        returncode = 1
+
+    import capamedia_cli.core.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "_run_text_process", lambda *a, **k: _R())
+    monkeypatch.setattr(
+        "capamedia_cli.core.gradle_properties.remove_committed_gradle_java_home",
+        lambda p: type("C", (), {"removed": None})(),
+    )
+    assert start_mod._run_build_tests("wsx0001", tmp_path, 30) is False

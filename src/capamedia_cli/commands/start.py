@@ -475,6 +475,125 @@ def _collect_inputs_interactive(
 # ── Fachada Fase 1 (reusable desde flags y desde el menu) ────────────────────
 
 
+def _detect_build_tool(project: Path) -> str | None:
+    """Detecta el build tool del proyecto migrado. 'gradle' | 'maven' | None."""
+    import os as _os
+
+    if (project / ("gradlew.bat" if _os.name == "nt" else "gradlew")).exists():
+        return "gradle"
+    if (project / "gradlew").exists() or (project / "build.gradle").exists():
+        return "gradle"
+    if (project / "pom.xml").exists():
+        return "maven"
+    return None
+
+
+def _run_build_tests(service: str, ws: Path, timeout_minutes: int) -> bool:
+    """Fase 7: corre el build+tests del proyecto migrado (UNICO bloque nuevo).
+
+    OFF por default — solo se invoca con --run-tests. Reusa el patron de subprocess
+    gradle ya probado (`fabrics._run_gradlew_wsdl_import`): env de Azure Artifacts,
+    Java 21 forzado, saneo de gradle.properties, wrapper con path absoluto. No
+    reimplementa runner: usa `engine._run_text_process`. Devuelve True si el build
+    paso. Best-effort: nunca rompe el wizard (los tests son opcionales).
+    """
+    import os as _os
+
+    from capamedia_cli.commands.ai import _project_for_workspace
+    from capamedia_cli.core.engine import _run_text_process
+    from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
+
+    workspace = ws / service
+    project = _project_for_workspace(workspace, service)
+    if project is None:
+        console.print("[yellow]Tests: no se encontro proyecto migrado en destino/.[/yellow]")
+        return False
+
+    tool = _detect_build_tool(project)
+    if tool is None:
+        console.print(f"[yellow]Tests: no se detecto gradlew ni pom.xml en {project.name}.[/yellow]")
+        return False
+    if tool == "maven":
+        console.print(
+            "[yellow]Tests: el proyecto usa Maven (pom.xml). El runner del wizard "
+            "solo soporta Gradle por ahora. Corre `mvn test` manualmente.[/yellow]"
+        )
+        return False
+
+    is_windows = _os.name == "nt"
+    wrapper = project / ("gradlew.bat" if is_windows else "gradlew")
+    if not wrapper.exists():
+        console.print(f"[yellow]Tests: no existe {wrapper.name} en {project.name}.[/yellow]")
+        return False
+
+    # Mismo saneo que fabrics: Azure Artifacts env + Java 21 + sin java.home local.
+    env = _os.environ.copy()
+    try:
+        from capamedia_cli.commands.fabrics import _artifact_env_from_mcp, _find_java21_home
+
+        env.update(_artifact_env_from_mcp(ws))
+        java21 = _find_java21_home()
+        if java21:
+            env["JAVA_HOME"] = str(java21)
+    except Exception:
+        pass  # best-effort: si no hay helpers, corre con el entorno tal cual
+    remove_committed_gradle_java_home(project)
+    if not is_windows:
+        import contextlib
+
+        with contextlib.suppress(OSError):
+            wrapper.chmod(0o755)
+
+    console.print(f"[cyan]Corriendo build+tests de {project.name} (Gradle)...[/cyan]")
+    try:
+        result = _run_text_process(
+            [str(wrapper), "build", "--no-daemon"],
+            timeout_seconds=timeout_minutes * 60,
+            cwd=str(project),
+            stream_output=True,
+        )
+    except Exception as exc:  # best-effort
+        console.print(f"[yellow]Tests no pudieron correr ({type(exc).__name__}).[/yellow]")
+        return False
+
+    if result.returncode == 0:
+        console.print("[green]Build+tests OK[/green]")
+        return True
+    console.print(
+        "[red]Build+tests FALLARON.[/red] Revisa la salida de Gradle arriba. "
+        "El wizard NO hace push."
+    )
+    return False
+
+
+def _final_summary(service: str, ws: Path, *, tests_ran: bool, tests_ok: bool) -> None:
+    """Resumen final del wizard (Fase 7). Lee el estado de las etapas y recuerda
+    que el PR es paso MANUAL (revision humana, banca)."""
+    decisions = load_wizard_decisions(ws / service)
+    table = Table(title=f"Resumen final — {service}", title_style="bold cyan")
+    table.add_column("Etapa")
+    table.add_column("Estado")
+    table.add_row("Servicio", service)
+    table.add_row("Namespace", str(decisions.get("namespace", "?")))
+    table.add_row("Flujo", str(decisions.get("flow_mode", "?")))
+    table.add_row("Modelo", str(decisions.get("model", "?")))
+    table.add_row("Pipeline (clone/init/fabrics/migrate)", "[green]OK[/green]")
+    table.add_row("Doble check AI", "[green]OK[/green]")
+    if tests_ran:
+        table.add_row("Build+tests", "[green]OK[/green]" if tests_ok else "[red]FAIL[/red]")
+    else:
+        table.add_row("Build+tests", "[dim]no corrido (usa --run-tests)[/dim]")
+    console.print(table)
+    console.print(
+        Panel.fit(
+            "[bold]Proximo paso (MANUAL):[/bold] revisa el diff, commit y abri el PR.\n"
+            "[dim]El wizard NUNCA hace push ni abre PR — la revision humana es "
+            "obligatoria en banca.[/dim]",
+            border_style="cyan",
+        )
+    )
+
+
 def _run_doublecheck_with_gate(
     *,
     service: str,
@@ -558,11 +677,14 @@ def _run_pipeline_facade(
     unsafe: bool,
     resume: bool,
     skip_doublecheck: bool = False,
+    run_tests: bool = False,
+    tests_timeout: int = 30,
 ) -> None:
     """Orquesta el pipeline existente para UN servicio, forzando Opus 4.8.
 
     No reimplementa logica: importa y llama `batch._process_pipeline_service`.
-    Tras el pipeline encadena el doublecheck con gate BLOCKED_BY_HIGH (Fase 6).
+    Tras el pipeline encadena el doublecheck con gate BLOCKED_BY_HIGH (Fase 6)
+    y, si --run-tests, el build+tests del proyecto migrado (Fase 7).
     """
     from capamedia_cli.adapters import resolve_harnesses
     from capamedia_cli.commands.batch import (
@@ -672,6 +794,14 @@ def _run_pipeline_facade(
             resume=resume,
         )
 
+    # Fase 7: build+tests del proyecto migrado (OFF por default; --run-tests).
+    tests_ok = False
+    if run_tests:
+        tests_ok = _run_build_tests(service, ws, tests_timeout)
+
+    # Cierre: resumen final + recordatorio de que el PR es paso MANUAL.
+    _final_summary(service, ws, tests_ran=run_tests, tests_ok=tests_ok)
+
 
 def start_command(
     service: Annotated[
@@ -711,6 +841,8 @@ def start_command(
     skip_tx: Annotated[bool, typer.Option("--skip-tx", help="No clonar repos de TX")] = False,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="No ejecutar checklist post-migracion")] = False,
     skip_doublecheck: Annotated[bool, typer.Option("--skip-doublecheck", help="No correr el doble check AI tras la migracion")] = False,
+    run_tests: Annotated[bool, typer.Option("--run-tests", help="Correr build+tests del proyecto migrado (Gradle). OFF por default.")] = False,
+    tests_timeout: Annotated[int, typer.Option("--tests-timeout", help="Timeout en minutos para build+tests (default 30)")] = 30,
     unsafe: Annotated[bool, typer.Option("--unsafe", help="Permisos full para el engine")] = False,
     resume: Annotated[bool, typer.Option("--resume", help="Reanuda saltando etapas ya exitosas")] = False,
     yes: Annotated[
@@ -741,6 +873,8 @@ def start_command(
         "skip_tx": skip_tx,
         "skip_check": skip_check,
         "skip_doublecheck": skip_doublecheck,
+        "run_tests": run_tests,
+        "tests_timeout": tests_timeout,
         "unsafe": unsafe,
     }
 

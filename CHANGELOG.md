@@ -31,6 +31,15 @@ hasta cerrar la ultima fase. Detalle completo por fase en los commits de la rama
     de la Fase 3; el fan-out de subagentes "en la nube" sigue siendo v0.29 (Agent SDK).
   - +3 tests (doublecheck OK completa; BLOCKED_BY_HIGH frena con Exit 2;
     `--skip-doublecheck` no lo invoca). Suite: 942 passed.
+- **Fase 7** — runner de tests opcional + cierre del wizard (UNICO bloque
+  nuevo): `_detect_build_tool` (gradle/maven), `_run_build_tests` (reusa el
+  patron gradlew de fabrics: env Azure Artifacts + Java 21 + saneo
+  gradle.properties; corre `gradlew build` via `engine._run_text_process`),
+  `_final_summary` (tabla de etapas + recordatorio de que el PR es MANUAL).
+  Flags `--run-tests` (OFF por default — el "un click" no se cuelga en builds
+  lentos) y `--tests-timeout` (default 30 min). Maven detectado pero delegado
+  a `mvn` manual. Best-effort: nunca rompe el wizard. +8 tests. Suite: 950.
+  Con esto el wizard `capamedia start` cubre el flujo de 0 a 100 (Fases 0-7).
 
 ### Merge
 
