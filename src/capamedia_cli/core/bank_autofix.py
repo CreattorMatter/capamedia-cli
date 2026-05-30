@@ -1213,12 +1213,162 @@ def fix_legacy_name_in_error_payload(project_root: Path) -> BankAutofixResult:
                 f"{java.relative_to(project_root)}: nombre legacy reemplazado por '{component_name}'"
             )
 
+    # Pass 2 (Etapa 5): cubre los 3 patrones que la Pass 1 NO ve.
+    # - LITERAL en builder fluent (.recurso("..."), .resource("..."), etc.)
+    # - CONST_CLASS en setter o builder: edita el archivo de la clase de constantes
+    # - CONST_LOCAL en setter o builder: edita la def de la constante en el mismo archivo
+    pass2_files = _fix_legacy_via_field_usages(project_root, component_name, migrated_short)
+    for f in pass2_files:
+        if f not in modified_files:
+            modified_files.append(f)
+            result.changes.append(
+                f"{f.relative_to(project_root)}: nombre legacy reemplazado en "
+                f"constante/builder por '{component_name}' (Pass 2)"
+            )
+
     if modified_files:
         result.applied = True
         result.files_modified = modified_files
     else:
-        result.notes = "ningun setter de recurso/componente con nombre legacy"
+        result.notes = "ningun setter/builder/constante de recurso/componente con nombre legacy"
     return result
+
+
+def _fix_legacy_via_field_usages(
+    project_root: Path,
+    migrated_name: str,
+    migrated_short: str,
+) -> list[Path]:
+    """Pass 2 del autofix 9j: cubre los patrones que la Pass 1 (regex setter
+    + literal) no ve. Usa _find_field_usages + _resolve_const para localizar
+    LEGACY en constantes y builders, y edita el LITERAL donde realmente vive
+    (que puede ser otro archivo: la clase de constantes).
+
+    Reglas:
+    - Solo reescribe si el nombre legacy detectado coincide con `migrated_short`
+      (caso-insensitive). Si el legacy es de otro servicio (ej. un downstream
+      legitimo en logs), NO se toca.
+    - El sufijo despues del '/' se preserva: 'WSClientes0010/op' -> 'tnd-msa-sp-wsclientes0010/op'.
+    - Si el valor no tiene '/', se reemplaza completo por migrated_name.
+    - Idempotente: tras correr una vez, no quedan hits LEGACY que reescribir.
+
+    Returns: lista de Path realmente modificados (deduplicada).
+    """
+    # Import tardio para evitar dependencia circular en tiempo de import.
+    from capamedia_cli.core.checklist_rules import (
+        FieldUsage,
+        _build_const_def_re,
+        _find_field_usages,
+        _is_legacy_service_value,
+    )
+
+    src_java = project_root / "src" / "main" / "java"
+    if not src_java.exists():
+        return []
+
+    # Cache de contenido de archivos. Se actualiza en memoria con las
+    # ediciones y se vuelca a disco al final (atomico por archivo).
+    content_cache: dict[Path, str] = {}
+
+    def _get_content(p: Path) -> str:
+        if p in content_cache:
+            return content_cache[p]
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        content_cache[p] = text
+        return text
+
+    def _set_content(p: Path, text: str) -> None:
+        content_cache[p] = text
+
+    def _new_value(old_value: str) -> str:
+        if "/" in old_value:
+            _prefix, _, suffix = old_value.partition("/")
+            return f"{migrated_name}/{suffix}"
+        return migrated_name
+
+    def _legacy_matches_this_service(legacy_value: str) -> bool:
+        # Extraer el prefijo legacy (antes del '/') y compararlo con el short
+        # del migrado (case-insensitive). Solo aplicar si es el mismo servicio.
+        legacy_prefix = legacy_value.split("/", 1)[0].lower()
+        return legacy_prefix == migrated_short
+
+    modified: list[Path] = []
+
+    for field_name in ("recurso", "componente"):
+        for usage in _find_field_usages(src_java, field_name):
+            if usage.resolved_value is None:
+                continue
+            if not _is_legacy_service_value(usage.resolved_value):
+                continue
+            if not _legacy_matches_this_service(usage.resolved_value):
+                continue
+            new_val = _new_value(usage.resolved_value)
+            if new_val == usage.resolved_value:
+                continue
+
+            target_file: Path | None = None
+            if usage.arg_kind == "LITERAL":
+                # El literal vive en el archivo del usage. Reemplazar la
+                # 1a ocurrencia exacta del string entre comillas (preserva
+                # comillas simples vs dobles).
+                content = _get_content(usage.file)
+                for quote in ('"', "'"):
+                    old_lit = f"{quote}{usage.resolved_value}{quote}"
+                    new_lit = f"{quote}{new_val}{quote}"
+                    if old_lit in content:
+                        _set_content(usage.file, content.replace(old_lit, new_lit, 1))
+                        target_file = usage.file
+                        break
+            elif usage.arg_kind in ("CONST_LOCAL", "CONST_CLASS"):
+                # El literal vive en la DEFINICION de la constante. Buscar el
+                # archivo y la linea donde se asigna y editar solo el literal.
+                if usage.arg_kind == "CONST_LOCAL":
+                    candidates = [usage.file]
+                    const_name = usage.arg_raw
+                else:  # CONST_CLASS
+                    class_name, _, const_name = usage.arg_raw.partition(".")
+                    if not class_name or not const_name:
+                        continue
+                    candidates = [
+                        c for c in src_java.rglob(f"{class_name}.java")
+                        if ".git" not in c.parts and "build" not in c.parts
+                    ]
+                pattern = _build_const_def_re(const_name)
+                for cand in candidates:
+                    content = _get_content(cand)
+                    m = pattern.search(content)
+                    if not m or m.group(1) != usage.resolved_value:
+                        continue
+                    # Reemplazo conservador: en el match completo, swap del
+                    # literal capturado por el nuevo. Soporta comilla simple/doble.
+                    old_lit_d = f'"{usage.resolved_value}"'
+                    new_lit_d = f'"{new_val}"'
+                    old_lit_s = f"'{usage.resolved_value}'"
+                    new_lit_s = f"'{new_val}'"
+                    new_match = m.group(0).replace(old_lit_d, new_lit_d).replace(old_lit_s, new_lit_s)
+                    if new_match == m.group(0):
+                        continue  # nada para reemplazar (no deberia pasar)
+                    _set_content(cand, content.replace(m.group(0), new_match, 1))
+                    target_file = cand
+                    break
+
+            if target_file is not None and target_file not in modified:
+                modified.append(target_file)
+
+    # Volcar las ediciones a disco (solo archivos que realmente cambiaron).
+    for path in modified:
+        try:
+            old_text = path.read_text(encoding="utf-8", errors="replace")
+            new_text = content_cache.get(path, old_text)
+            if old_text != new_text:
+                path.write_text(new_text, encoding="utf-8")
+        except OSError:
+            continue
+
+    return modified
 
 
 # ---------------------------------------------------------------------------

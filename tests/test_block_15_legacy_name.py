@@ -372,3 +372,138 @@ def test_autofix_idempotent(tmp_path: Path) -> None:
     # File sigue correcto
     text = (root / "src/main/java/com/pichincha/sp/infrastructure/ErrorMapper.java").read_text(encoding="utf-8")
     assert 'setComponente("csg-msa-sp-wsclientes0011")' in text
+
+
+# ---------------------------------------------------------------------------
+# Etapa 5 — Pass 2 del autofix: cubre patrones que la Pass 1 (regex setter
+# + literal directo) no veia. Verificado empiricamente en 0010 y 0022.
+# ---------------------------------------------------------------------------
+
+
+def _write_java_subdir(root: Path, rel_path: str, body: str) -> Path:
+    """Escribe un .java bajo infrastructure/, creando subdirs si hacen falta.
+
+    A diferencia de _write_java (que solo escribe en infrastructure/ raiz),
+    este helper acepta rel_path con '/' para tests que necesitan multiples
+    archivos en distintos paquetes (caso CONST_CLASS donde la constante vive
+    en infrastructure/exception/ y el setter en infrastructure/soap/).
+    """
+    src_java = root / "src" / "main" / "java" / "com" / "pichincha" / "sp" / "infrastructure"
+    f = src_java / rel_path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body, encoding="utf-8")
+    return f
+
+
+def test_autofix_pass2_replaces_legacy_in_const_local_same_file(tmp_path: Path) -> None:
+    """Patron 0010: constante LOCAL en el mismo archivo donde se usa
+    en builder ingles .resource(RESOURCE). Pass 1 no lo veia."""
+    root = _make_migrated_with_catalog(tmp_path, "tnd-msa-sp-wsclientes0010")
+    _write_java(root, "QueryService.java",
+        'public class QueryService {\n'
+        '    private static final String RESOURCE = "WSClientes0010/consultarGrupoClaveDigital01";\n'
+        '    public ServiceError build() {\n'
+        '        return ServiceError.builder().resource(RESOURCE).build();\n'
+        '    }\n'
+        '}\n')
+    result = fix_legacy_name_in_error_payload(root)
+    assert result.applied is True
+    text = (root / "src/main/java/com/pichincha/sp/infrastructure/QueryService.java").read_text(encoding="utf-8")
+    # El literal en la def de la constante quedo reescrito
+    assert 'private static final String RESOURCE = "tnd-msa-sp-wsclientes0010/consultarGrupoClaveDigital01";' in text
+    # El .resource(RESOURCE) sigue igual (es una referencia, no el literal)
+    assert '.resource(RESOURCE)' in text
+
+
+def test_autofix_pass2_replaces_legacy_in_const_class_other_file(tmp_path: Path) -> None:
+    """Patron 0013/0022: CONST_CLASS — la constante vive en otra clase utility.
+    El autofix encuentra el archivo y edita el literal alli."""
+    root = _make_migrated_with_catalog(tmp_path, "tnd-msa-sp-wsclientes0011")
+    # Catalogo de constantes (otro archivo)
+    _write_java_subdir(root, "exception/CatalogExceptionConstants.java",
+        'public class CatalogExceptionConstants {\n'
+        '    public static final String WS_RECURSO = "WSClientes0011/ConsultarDatosIdentificacion";\n'
+        '    public static final String WS_COMPONENTE = "WSClientes0011";\n'
+        '}\n')
+    # Setter que lo usa
+    _write_java_subdir(root, "soap/Mapper.java",
+        'public class Mapper {\n'
+        '    public GenericError map() {\n'
+        '        GenericError error = new GenericError();\n'
+        '        error.setRecurso(CatalogExceptionConstants.WS_RECURSO);\n'
+        '        error.setComponente(CatalogExceptionConstants.WS_COMPONENTE);\n'
+        '        return error;\n'
+        '    }\n'
+        '}\n')
+    result = fix_legacy_name_in_error_payload(root)
+    assert result.applied is True
+    cat = (root / "src/main/java/com/pichincha/sp/infrastructure/exception/CatalogExceptionConstants.java").read_text(encoding="utf-8")
+    assert 'WS_RECURSO = "tnd-msa-sp-wsclientes0011/ConsultarDatosIdentificacion"' in cat
+    assert 'WS_COMPONENTE = "tnd-msa-sp-wsclientes0011"' in cat
+    # El Mapper sigue igual (referencia a la constante, no toca)
+    mapper = (root / "src/main/java/com/pichincha/sp/infrastructure/soap/Mapper.java").read_text(encoding="utf-8")
+    assert 'error.setRecurso(CatalogExceptionConstants.WS_RECURSO);' in mapper
+
+
+def test_autofix_pass2_replaces_legacy_in_builder_with_literal(tmp_path: Path) -> None:
+    """Builder fluent espanol .recurso("literal") — Pass 1 solo cubre setRecurso/setComponente."""
+    root = _make_migrated_with_catalog(tmp_path, "tnd-msa-sp-orqclientes0022")
+    _write_java(root, "Impl.java",
+        'public class Impl {\n'
+        '    public ServiceError build() {\n'
+        '        return ServiceError.builder()\n'
+        '                .recurso("ORQClientes0022/ConsultarInformacionClienteVirtual01")\n'
+        '                .build();\n'
+        '    }\n'
+        '}\n')
+    result = fix_legacy_name_in_error_payload(root)
+    assert result.applied is True
+    text = (root / "src/main/java/com/pichincha/sp/infrastructure/Impl.java").read_text(encoding="utf-8")
+    assert '.recurso("tnd-msa-sp-orqclientes0022/ConsultarInformacionClienteVirtual01")' in text
+
+
+def test_autofix_pass2_idempotent_no_changes_on_second_run(tmp_path: Path) -> None:
+    """Idempotencia Pass 2: tras correr 1 vez, la 2a no encuentra mas hits legacy."""
+    root = _make_migrated_with_catalog(tmp_path, "tnd-msa-sp-wsclientes0010")
+    _write_java(root, "QueryService.java",
+        'public class QueryService {\n'
+        '    private static final String RESOURCE = "WSClientes0010/Op";\n'
+        '    public void m() { ServiceError.builder().resource(RESOURCE).build(); }\n'
+        '}\n')
+    first = fix_legacy_name_in_error_payload(root)
+    second = fix_legacy_name_in_error_payload(root)
+    assert first.applied is True
+    assert second.applied is False
+    # File quedo en el estado migrado correcto
+    text = (root / "src/main/java/com/pichincha/sp/infrastructure/QueryService.java").read_text(encoding="utf-8")
+    assert 'private static final String RESOURCE = "tnd-msa-sp-wsclientes0010/Op";' in text
+
+
+def test_autofix_pass2_skips_legacy_of_other_service(tmp_path: Path) -> None:
+    """Si la constante referencia OTRO servicio legitimo (downstream/log), no tocar.
+
+    Caso real: 0022 puede tener DOWNSTREAM_COMPONENT = "WSClientes0046/Op" como
+    componente legitimo en error propagado del downstream. NO debe reescribirse
+    como si fuera del propio 0022."""
+    root = _make_migrated_with_catalog(tmp_path, "tnd-msa-sp-orqclientes0022")
+    _write_java_subdir(root, "exception/ErrorCatalogConstants.java",
+        'public class ErrorCatalogConstants {\n'
+        '    public static final String RESOURCE_NAME = "ORQClientes0022/Op";\n'
+        '    public static final String DOWNSTREAM = "WSClientes0046/DownstreamOp";\n'
+        '}\n')
+    _write_java(root, "Impl.java",
+        'public class Impl {\n'
+        '    public void m() {\n'
+        '        ServiceError.builder()\n'
+        '            .recurso(ErrorCatalogConstants.RESOURCE_NAME)\n'
+        '            .componente(ErrorCatalogConstants.DOWNSTREAM)\n'
+        '            .build();\n'
+        '    }\n'
+        '}\n')
+    result = fix_legacy_name_in_error_payload(root)
+    assert result.applied is True
+    cat = (root / "src/main/java/com/pichincha/sp/infrastructure/exception/ErrorCatalogConstants.java").read_text(encoding="utf-8")
+    # El RESOURCE_NAME (del propio 0022) SI se reescribio
+    assert 'RESOURCE_NAME = "tnd-msa-sp-orqclientes0022/Op"' in cat
+    # El DOWNSTREAM (otro servicio) NO se tocó
+    assert 'DOWNSTREAM = "WSClientes0046/DownstreamOp"' in cat
