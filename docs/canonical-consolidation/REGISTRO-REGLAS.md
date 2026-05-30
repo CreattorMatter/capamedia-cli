@@ -81,21 +81,41 @@ El PDF citado por el home como autoridad (`BPTPSRE-Estructura de error-...pdf`)
 
 ---
 
+## Regla #2 — phantoms dominio error + drift versión ✅ (commit 7a81b55)
+
+- Tabla de backend codes (00045 BANCS / 00638 IIB / 00000 no-oficial) trasladada
+  a su hogar natural `bank-error-codes.md` (antes solo en log-transaccional-orq.md).
+  Verificado vs código real del 0077 (`BackendCodesProperties.java`: iib=00638, bancsApp=00045).
+- `reference_error_types.md` (phantom, 4 refs) → `bank-error-structure.md`.
+- `reference_codigos_backend.md` (phantom, 3 refs) → `bank-error-codes.md`.
+  Incluía instrucción ROTA en `self_correction.py` (apuntaba a archivo inexistente).
+- `documentacion.py`: `"3.5.13"` hardcoded → `SPRING_BOOT_BASELINE_VERSION`.
+
+## Regla #3 — phantom feedback_bancs_header_out_no_echo.md ✅ (commit a41a3fb)
+
+- 2 refs, código no lo usa. El gap `<bancs>`-no-echo ya vivía completo inline en
+  `bank-error-structure.md`. Se quitó la muleta + se reapuntó la ref de
+  log-transaccional-orq.md al hogar real. Sin pérdida de info.
+
 ## Pendientes mapeados (NO tocados)
 
-### Phantom `reference_error_types.md` — referenciado, no existe
-Refs en `bank-error-structure.md` + `log-transaccional-orq.md`. El código NO lo usa.
-La tabla de tipos ya vive inline en `bank-error-structure.md` → repuntar las refs. SAFE.
+### #4 Nombres `01-`/`03-` en SKILL.md / prompts — NO es bug, BAJA prioridad
+**Hallazgo del árbitro:** `commands/canonical.py:47-56` tiene un MAPA de alias
+INTENCIONAL que resuelve `pre-migracion/01-analisis-servicio.md` →
+`prompts/analisis-servicio.md` (y similares). Los nombres viejos en los SKILL.md
+NO están rotos: el código los traduce. Tocarlos a ciegas rompería el mapa. Es deuda
+cosmética que el código ya maneja → dejar como está salvo decisión explícita.
 
-### Drift de versión — `documentacion.py:1033`
-`doc.spring_boot_version or "3.5.13"` → debería ser `SPRING_BOOT_BASELINE_VERSION`
-(3.5.14). SAFE.
+### #5 `agents/` vs `context/` — NO es duplicado, es INTENCIONAL ✅ (descartado)
+**Hallazgo del árbitro:** `canonical.py:104-107` carga `agents/` como kind=`agent`
+(subagente ejecutable) y `context/` como kind=`context` (conocimiento inyectable).
+El diff confirma que NO son copias: el de context tiene `name: <x>-context`, kind
+distinto, y una nota *"Para el subagente ejecutable ver agents/..."*. Se referencian
+a propósito. Tests dependen de ambos (`test_canonical.py:122/125`,
+`test_adapters.py:129`). Borrar uno rompe la dualidad agente↔contexto (justo el
+patrón neutro que se busca). **NO tocar.**
 
-### Duplicados `agents/` vs `context/` (DIFIEREN)
-`analista-legacy.md` (31/32), `migrador.md` (40/40), `validador-hex.md` (81/85).
-`qe-migration.md` solo en agents/. Decidir home único por cada uno (diff fino).
-
-### Monolito `bank-official-rules.md`
+### #6 Monolito `bank-official-rules.md`
 1148 líneas, 69 headers (`## Regla N`), gate de PR (`validate_hexagonal.py`). Bien
 estructurado. Consolidar valores que repite (versiones → policy, etc.).
 
