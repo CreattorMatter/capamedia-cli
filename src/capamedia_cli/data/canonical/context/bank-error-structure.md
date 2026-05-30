@@ -7,8 +7,11 @@ summary: Estructura oficial del bloque <error> de Banco Pichincha - 7 campos can
 
 # Estructura oficial del bloque `<error>` — Banco Pichincha
 
-**Fuente autoritativa** (según indicación de Julian 2026-04-20):
-`prompts/documentacion/BPTPSRE-Estructura de error-200426-212629.pdf`.
+**Fuente autoritativa**: el contrato `GenericError` del XSD generado en los
+servicios migrados — verificado **idéntico** en WSClientes0077 y WSClientes0013
+(`src/main/resources/legacy/GenericSOAP.xsd`). Referencia histórica del banco:
+`prompts/documentacion/BPTPSRE-Estructura de error-200426-212629.pdf` (PDF no
+versionado en este repo; el contrato XSD es la verdad ejecutable y prevalece).
 
 Este canonical es la **única fuente de verdad** para el formato del bloque
 `<error>` en las respuestas SOAP/REST del banco. Cualquier prompt, check o
@@ -17,20 +20,29 @@ copiar ni reformular la tabla** en otro lado.
 
 ## Los 7 campos canónicos del `<error>`
 
+Orden y nombres **EXACTOS** del contrato XSD `GenericError` (todos `minOccurs=1`,
+obligatorios). Verificado contra el código desplegado de WSClientes0077 y 0013:
+
 | # | Campo | Tipo | Origen del valor | Quién lo setea |
 |---|---|---|---|---|
-| 1 | `codigo` | String numérico | Catálogo `errores.xml` del banco | **Servicio** (ver `bank-error-codes.md`) |
-| 2 | `tipo` | `INFO` \| `ERROR` \| `FATAL` | Clasificación por tipo de falla | **Servicio** |
-| 3 | `mensajeCliente` | Texto corto, user-facing | Mensaje del catálogo `errores.xml` | **Servicio** |
-| 4 | `mensajeNegocio` | Texto business | **Gestionado por DataPower** — el servicio solo emite `null`, tag vacio o ausencia segun contrato | **DataPower** (NUNCA un valor real del servicio) |
-| 5 | `mensajeAplicacion` | Texto técnico / stacktrace resumido | Exception.getMessage() o detalle técnico | **Servicio** |
-| 6 | `backend` | String | Catálogo oficial `sqb-cfg-codigosBackend-config/codigosBackend.xml` | **Servicio** |
-| 7 | `momentoError` | ISO-8601 timestamp | `Instant.now().toString()` al momento del throw | **Servicio** |
+| 1 | `codigo` | String numérico | Catálogo `errores.xml`; `"0"` en éxito | **Servicio** (ver `bank-error-codes.md`) |
+| 2 | `mensaje` | Texto user-facing | Mensaje del catálogo; `"OK"` en éxito (ej. `"CUENTA NO EXISTE"`) | **Servicio** |
+| 3 | `mensajeNegocio` | String (slot vacío) | **Gestionado por DataPower** — el servicio emite `""`/null/ausencia | **DataPower** (NUNCA un valor real del servicio) |
+| 4 | `tipo` | `INFO` \| `ERROR` \| `FATAL` | `ErrorType` enum, por severidad de la falla | **Servicio** |
+| 5 | `recurso` | String `<servicio-migrado>/<método>` | Nombre MIGRADO **+ `/método`** (ej. `tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01`). El check 15.2 exige el `/` y RECHAZA el nombre legacy `WSClientes0077` | **Servicio** |
+| 6 | `componente` | String (sin `/`) | Nombre MIGRADO del servicio (`tnd-msa-sp-wsclientes0077`) o, en error propagado de backend, `TX<NNNNNN>` / `ApiClient`. El check 15.3 RECHAZA el nombre legacy | **Servicio** |
+| 7 | `backend` | String (long. 5) | Catálogo `sqb-cfg-codigosBackend-config/codigosBackend.xml`; ej. `00045` (Bancs) | **Servicio** |
 
-> **Nota del PDF**: históricamente algunos checklists mencionan 8 campos
-> separando `codigoBackend` de `backend`. En la estructura vigente de
-> Banco Pichincha son **7 campos** — `codigoBackend` está fusionado dentro
-> de `backend` (ej. `"00045"`). No agregar un 8º campo ad-hoc.
+> **Campos que NO pertenecen al bloque `<error>`**: `mensajeCliente`,
+> `mensajeAplicacion`, `momentoError` y `severidad` **no existen** en el contrato
+> XSD del banco (aparecen en 0 archivos Java de los servicios reales). Versiones
+> previas de este canonical los listaban por error — **NO usarlos**. El campo
+> user-facing es `mensaje` (no `mensajeCliente`); la severidad se expresa vía
+> `tipo` (no un campo aparte).
+>
+> **Conteo histórico**: algunos checklists viejos mencionaban "8 campos"
+> separando `codigoBackend` de `backend`. Son **7** — `codigoBackend` está
+> fusionado dentro de `backend` (ej. `"00045"`). No agregar un 8º campo ad-hoc.
 
 ## Regla maestra — `mensajeNegocio`
 
@@ -60,20 +72,22 @@ legacy disponible para verificar → **LOW** (revisar manual).
 // ✘ NO — no inventar valor si el legacy no lo poblaba (vaciar, NO borrar el tag)
 error.setMensajeNegocio("Transacción exitosa");
 
-// ✔ OK — null/ausente; DataPower lo completa si aplica
-Error error = Error.builder()
-    .codigo("0")
-    .tipo("INFO")
-    .mensajeCliente("OK")
-    .mensajeNegocio(null)
-    .mensajeAplicacion(null)
-    .backend("00045")
-    .momentoError(Instant.now().toString())
-    .build();
-
-// ✔ OK — SOAP/DataPower slot requerido por contrato
-error.setMensajeNegocio("");
+// ✔ OK — patrón real (infrastructure/soap/helper/SoapResponseHelper.java de
+//        WSClientes0077): mensajeNegocio vacío; DataPower lo completa si aplica.
+GenericError error = new GenericError();
+error.setCodigo(codigo);                                              // "0" en éxito
+error.setMensaje(mensaje);                                            // "OK" en éxito
+error.setMensajeNegocio(EMPTY_MENSAJE_NEGOCIO);                       // constante = "" — DataPower lo gestiona
+error.setTipo(tipo);                                                  // ERROR_TYPE_INFO/ERROR/FATAL
+error.setRecurso("tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01"); // LITERAL <servicio-migrado>/<método>
+error.setComponente("tnd-msa-sp-wsclientes0077");                     // LITERAL nombre MIGRADO (en error BANCS: TX067050 / ApiClient)
+error.setBackend(backend);                                           // catálogo codigosBackend.xml (00045 BANCS / 00638 IIB)
 ```
+
+> **Por qué `recurso`/`componente` van como string LITERAL** (no constante ni
+> variable): el análisis estático del banco (checklist 15.2/15.3) los detecta con
+> grep sobre el fuente. Si se pasan vía constante/variable, el check no los ve.
+> El código real del 0077 los inlinea por esta razón.
 
 ## Tipos canónicos (`error.tipo`)
 
@@ -129,12 +143,12 @@ externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
 </clientes>
 <error>
   <codigo>0</codigo>
-  <tipo>INFO</tipo>
-  <mensajeCliente>OK</mensajeCliente>
+  <mensaje>OK</mensaje>
   <mensajeNegocio/>                       <!-- tag vacio permitido; valor real NUNCA -->
-  <mensajeAplicacion xsi:nil="true"/>
+  <tipo>INFO</tipo>
+  <recurso>tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01</recurso>
+  <componente>tnd-msa-sp-wsclientes0077</componente>
   <backend>00045</backend>
-  <momentoError>2026-04-23T21:10:16.123Z</momentoError>
 </error>
 ```
 
@@ -143,12 +157,12 @@ externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
 ```xml
 <error>
   <codigo>9929</codigo>
-  <tipo>ERROR</tipo>
-  <mensajeCliente>Error al invocar transaccion Bancs</mensajeCliente>
+  <mensaje>Error al invocar transaccion Bancs</mensaje>
   <mensajeNegocio/>
-  <mensajeAplicacion>Timeout after 30000ms calling ws-tx067010</mensajeAplicacion>
+  <tipo>ERROR</tipo>
+  <recurso>tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01</recurso>
+  <componente>ApiClient</componente>
   <backend>00045</backend>
-  <momentoError>2026-04-23T21:10:16.123Z</momentoError>
 </error>
 ```
 
@@ -179,11 +193,13 @@ En servicios nuevos: no replicar el bloque
 
 1. **Antes de generar código de error mapping**, leer este canonical y
    `bank-error-codes.md`.
-2. **Usar un builder o record** con los 7 campos — nunca mezclar orden.
+2. **Poblar `GenericError`** con los 7 campos en el orden del contrato XSD
+   (`codigo, mensaje, mensajeNegocio, tipo, recurso, componente, backend`) —
+   nunca mezclar orden ni inventar campos.
 3. **`mensajeNegocio` siempre sin valor real**: `null`/ausente o `""` cuando el contrato SOAP exige tag vacio.
 4. **`backend`** resuelto desde el catálogo `codigosBackend.xml` (ver
    `reference_codigos_backend.md`: `bancs_app=00045`, `iib=00638`).
-5. **`momentoError`** generado al momento del throw con `Instant.now()`, no
-   al momento del wrapping en el error handler.
+5. **`recurso`** = `<SERVICIO>/<MÉTODO>` y **`componente`** = método o componente
+   backend (ej. `TXNNNNNN`) — ambos del recurso donde ocurre el fallo.
 6. Si el PR reviewer señala el formato, **citar este canonical** — no
    reformular la tabla.

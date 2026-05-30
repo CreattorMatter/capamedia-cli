@@ -2835,10 +2835,11 @@ def run_block_13(ctx: CheckContext) -> list[CheckResult]:
 
 
 def run_block_15(ctx: CheckContext) -> list[CheckResult]:
-    """Valida la estructura del bloque <error> del PDF oficial BPTPSRE.
+    """Valida la estructura del bloque <error> del contrato XSD GenericError.
 
-    8 campos contractuales: codigo, mensaje, mensajeNegocio, tipo, recurso,
-    componente, backend, severidad. Reglas:
+    7 campos contractuales (orden del XSD, verificado en WSClientes0077/0013):
+    codigo, mensaje, mensajeNegocio, tipo, recurso, componente, backend.
+    (NO existen mensajeCliente/mensajeAplicacion/momentoError/severidad.) Reglas:
     - mensajeNegocio: tag SIEMPRE presente, slot vacio por defecto. El micro no
       inventa valor (lo pone DataPower) SALVO que el legacy ya lo poblara
     - recurso: formato <NOMBRE_SERVICIO>/<METODO>

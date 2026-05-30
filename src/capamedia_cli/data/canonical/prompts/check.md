@@ -100,7 +100,7 @@ textual y debe ser espejo de `ALL_BLOCKS` — si discrepa, gana el codigo.
 | 7  | Config externa (`application.yml` sin defaults inline, `${CCC_*}` en 3 Helms, HPA `100m`, catalog/pipeline namespace) |
 | 8  | Versiones y dependencias (Spring Boot baseline, Undertow prohibido, webflux/web-services segun stack, Peer Review score >= 7) |
 | 13 | Persistence (HikariCP+JPA solo cuando hay DB; `connection-test-query` SQL Server=`SELECT 1` / Oracle=`SELECT 1 from dual`; ddl-auto validate; open-in-view false) |
-| 15 | Estructura de error oficial (8 campos del PDF BPTPSRE) + librerias opcionales (Audit Log Reactive, Stratio Connector) |
+| 15 | Estructura de error oficial (7 campos del contrato XSD `GenericError`) + librerias opcionales (Audit Log Reactive, Stratio Connector) |
 | 16 | SonarCloud custom rule: test classes con anotacion (`@SpringBootTest` / `@WebMvcTest` / `@ExtendWith`) |
 | 17 | Log transaccional ORQ obligatorio (`lib-event-logs-webflux`, `spring.kafka`, `@EventAudit`) |
 | 18 | Log transaccional indebido en no-ORQ (WAS/BUS/UMP no deben tener `lib-event-logs-*` ni `@EventAudit`) |

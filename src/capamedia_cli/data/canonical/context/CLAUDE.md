@@ -24,7 +24,7 @@ Migracion de servicios legacy a Java 21 + Spring Boot + arquitectura hexagonal O
 
 **Higiene de `.gitignore`:** el repo que se sube a Azure DevOps NO debe versionar artefactos locales de CapaMedia/IA (`.capamedia/`, `.codex/`, `.claude/`, `.cursor/`, `.windsurf/`, `.opencode/`, `.github/prompts/`, `.vscode/`, `.idea/`, `.mcp.json`, `FABRICS_PROMPT_*.md`, `QA_STATUS.md`, `TRAMAS.txt`). Estos deben estar ignorados en el `.gitignore` del proyecto migrado.
 
-**Estructura de error oficial (PDF BPTPSRE):** el bloque `<error>` tiene 8 campos. `mensajeNegocio` lo setea DataPower: el servicio NUNCA envia valor real; usar `null`/ausente o `""` solo si el contrato SOAP exige tag vacio. `recurso` = `<artifactId>/<método>`. `componente` tiene reglas diferentes para IIB (`<SERVICIO>` / `ApiClient` / `TX\d{6}`) vs WAS (`<SERVICIO>` / `<MÉTODO>` / `<VALOR_ARCHIVO_CONFIG>`). Validado por checklist BLOQUE 15.
+**Estructura de error oficial (contrato XSD `GenericError`):** el bloque `<error>` tiene **7 campos** en orden — `codigo, mensaje, mensajeNegocio, tipo, recurso, componente, backend` (ver `bank-error-structure.md`, fuente única). `mensajeNegocio` lo setea DataPower: el servicio NUNCA envia valor real; usar `null`/ausente o `""` solo si el contrato SOAP exige tag vacio. `recurso` = `<artifactId>/<método>`. `componente` tiene reglas diferentes para IIB (`<SERVICIO>` / `ApiClient` / `TX\d{6}`) vs WAS (`<SERVICIO>` / `<MÉTODO>` / `<VALOR_ARCHIVO_CONFIG>`). NO usar `mensajeCliente`/`mensajeAplicacion`/`momentoError` (no existen en el contrato). Validado por checklist BLOQUE 15.
 
 **Librerías internas opcionales (solo WebFlux/REST):**
 - `mdw-dm-lib-audit-log-reactive` — auditoría vía Kafka; anotaciones `@LogAudit` (controller) y `@LogAuditStep` (service/adapter).
