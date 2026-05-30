@@ -710,6 +710,7 @@ def start_command(
     shallow: Annotated[bool, typer.Option("--shallow", help="Clone superficial")] = False,
     skip_tx: Annotated[bool, typer.Option("--skip-tx", help="No clonar repos de TX")] = False,
     skip_check: Annotated[bool, typer.Option("--skip-check", help="No ejecutar checklist post-migracion")] = False,
+    skip_doublecheck: Annotated[bool, typer.Option("--skip-doublecheck", help="No correr el doble check AI tras la migracion")] = False,
     unsafe: Annotated[bool, typer.Option("--unsafe", help="Permisos full para el engine")] = False,
     resume: Annotated[bool, typer.Option("--resume", help="Reanuda saltando etapas ya exitosas")] = False,
     yes: Annotated[
