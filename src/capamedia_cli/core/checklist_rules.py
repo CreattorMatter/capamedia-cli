@@ -359,13 +359,19 @@ class FieldUsage:
 # Regex por-campo: limitan la deteccion a setRecurso/.recurso/.resource o
 # setComponente/.componente/.component segun corresponda. Necesarias para que
 # _find_field_usages(field="recurso") NO incluya hits de componente y viceversa.
+# re.DOTALL: el argumento del setter puede cruzar saltos de linea (caso real
+# 0077: `error.setRecurso(\n    "literal");`). Sin DOTALL la regex no detecta
+# nada en el codigo formateado del banco — bug encontrado en la prueba
+# empirica de la Etapa 3.
 _RECURSO_CALL_RE = re.compile(
     r'(?:setRecurso|\.(?:recurso|resource))'
     r'\s*\(\s*(?P<arg>(?:[^()]+|\([^()]*\))+?)\s*\)',
+    re.DOTALL,
 )
 _COMPONENTE_CALL_RE = re.compile(
     r'(?:setComponente|\.(?:componente|component))'
     r'\s*\(\s*(?P<arg>(?:[^()]+|\([^()]*\))+?)\s*\)',
+    re.DOTALL,
 )
 
 # Pre-scan: marcadores que un archivo Java debe contener para ser considerado
@@ -424,22 +430,29 @@ def _find_field_usages(src_java: Path, field: str) -> list[FieldUsage]:
             continue
         file_cache[f] = content
 
-        for i, line in enumerate(content.splitlines(), 1):
-            for m in regex.finditer(line):
-                arg_raw = m.group("arg").strip()
-                kind, value = _classify_arg(arg_raw)
-                if kind == "LITERAL":
-                    resolved = value
-                else:
-                    resolved = _resolve_const(src_java, kind, arg_raw, content, file_cache)
-                usages.append(FieldUsage(
-                    file=f,
-                    line_no=i,
-                    line=line.rstrip(),
-                    arg_raw=arg_raw,
-                    arg_kind=kind,
-                    resolved_value=resolved,
-                ))
+        # Iterar sobre TEXTO COMPLETO (no linea-a-linea) para capturar matches
+        # multilinea tipo `setRecurso(\n  "literal");`. El line_no se calcula
+        # contando saltos de linea antes del start del match. `line` es la
+        # primera linea del match (la del setter).
+        lines = content.splitlines()
+        for m in regex.finditer(content):
+            arg_raw = m.group("arg").strip()
+            kind, value = _classify_arg(arg_raw)
+            if kind == "LITERAL":
+                resolved = value
+            else:
+                resolved = _resolve_const(src_java, kind, arg_raw, content, file_cache)
+            # +1 porque enumerate desde 1 (igual que enumerate(lines, 1))
+            line_no = content.count("\n", 0, m.start()) + 1
+            line_text = lines[line_no - 1].rstrip() if line_no - 1 < len(lines) else ""
+            usages.append(FieldUsage(
+                file=f,
+                line_no=line_no,
+                line=line_text,
+                arg_raw=arg_raw,
+                arg_kind=kind,
+                resolved_value=resolved,
+            ))
 
     return usages
 

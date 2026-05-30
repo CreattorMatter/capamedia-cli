@@ -329,6 +329,26 @@ def test_find_field_usages_skips_build_and_git(tmp_path: Path) -> None:
     assert [h.resolved_value for h in hits] == ["Y"]
 
 
+def test_find_field_usages_detects_multiline_setter(tmp_path: Path) -> None:
+    """Patron 0077 REAL: el setter cruza saltos de linea. Bug encontrado en
+    prueba empirica contra el codigo real del banco (Etapa 3 daba 0 hits)."""
+    _write_java(tmp_path, "SoapResponseHelper.java",
+        'public class SoapResponseHelper {\n'
+        '    private GenericError build() {\n'
+        '        GenericError error = new GenericError();\n'
+        '        error.setRecurso(\n'
+        '            "tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01");\n'
+        '        return error;\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "LITERAL"
+    assert hits[0].resolved_value == "tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01"
+    # line_no debe ser la linea del setter (4), no la del literal (5).
+    assert hits[0].line_no == 4
+
+
 def test_find_field_usages_returns_FieldUsage_dataclass(tmp_path: Path) -> None:
     """Smoke test del tipo devuelto."""
     _write_java(tmp_path, "F.java",
