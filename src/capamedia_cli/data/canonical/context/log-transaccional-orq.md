@@ -432,7 +432,7 @@ del evento (PDF 1, ejemplo de `<NS1:evento>`):
 
 **MUST**: todo campo del `<headerIn>` del request entrante al ORQ **se copia
 tal cual** en el `<headerIn>` del evento (incluido `<bancs>` si existe — ver
-gap conocido en `feedback_bancs_header_out_no_echo.md`).
+gap conocido en `bank-error-structure.md`).
 
 Campos obligatorios que debe contener `headerIn` del evento (PDF 1):
 

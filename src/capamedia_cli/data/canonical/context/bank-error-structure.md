@@ -171,9 +171,7 @@ externo sigue siendo SOAP XML salvo evidencia explicita de JSON.
 
 ## Gap conocido — `<bancs>` no se replica en HeaderOut
 
-Documentado en `feedback_bancs_header_out_no_echo.md` (memoria del equipo):
-
-> La response **NUNCA** devuelve `<bancs>` aunque venga en el request.
+> La response **NUNCA** devuelve `<bancs>` aunque venga en el request (gap conocido del equipo).
 
 El validador del banco lo considera gap conocido en servicios antiguos.
 En servicios nuevos: no replicar el bloque
