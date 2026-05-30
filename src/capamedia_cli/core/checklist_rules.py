@@ -258,6 +258,73 @@ def _setter_string_value(line: str, setter_name: str) -> str:
     return values[0] if values else ""
 
 
+# -- Block 15 NEW: detectar setter/builder en multiples patrones --------------
+# Auditoria empirica sobre 4 servicios reales (0077, 0013, 0010, 0022) mostro
+# 4 patrones distintos para poblar error.recurso / error.componente:
+#   0077: error.setRecurso("literal")              -> LITERAL
+#   0013: error.setRecurso(Catalog.WS_RECURSO)     -> CONST_CLASS en setter
+#   0010: error.builder().resource(RESOURCE)       -> CONST_LOCAL en builder ingles
+#   0022: errorBuilder.recurso(Const.RESOURCE_NAME) -> CONST_CLASS en builder espanol
+#
+# El check viejo (_setter_string_args, regex "setRecurso\\s*\\(\\s*[\"']") solo
+# detecta el patron LITERAL — invisible para los otros 3. Estas funciones puras
+# son la base del check ampliado (Etapas 2-4 resuelven constantes y reintegran).
+
+# Permite UN nivel de parentesis anidados en el argumento (suficiente para
+# llamadas tipo setRecurso(error.resource())). No usamos un parser completo
+# porque los casos reales del banco no llegan a multinivel.
+_CALL_ARG_RE = re.compile(
+    r'(?:set(?:Recurso|Componente)|\.(?:recurso|componente|resource|component))'
+    r'\s*\(\s*(?P<arg>(?:[^()]+|\([^()]*\))+?)\s*\)',
+)
+
+
+def _extract_call_arg(line: str) -> str | None:
+    """Extrae el primer argumento crudo de un setter o builder de recurso/componente.
+
+    Reconoce 8 nombres de metodo:
+      - setRecurso, setComponente (setter Java clasico, ambos servicios)
+      - .recurso, .componente (builder fluent espanol)
+      - .resource, .component (builder fluent ingles)
+
+    Retorna el texto del argumento del primer call que matchee (los builders
+    fluent usan single-arg en estos campos), o None si la linea no contiene
+    ninguno de esos calls.
+    """
+    m = _CALL_ARG_RE.search(line)
+    return m.group("arg").strip() if m else None
+
+
+_LITERAL_RE = re.compile(r'^["\']([^"\']*)["\']$')
+# CONST_CLASS: ClassName.CONST_NAME (ej. CatalogExceptionConstants.WS_RECURSO).
+# Class debe empezar con mayuscula; constante debe ser TODO_MAYUSCULAS con guion bajo.
+_CONST_CLASS_RE = re.compile(r'^[A-Z]\w*\.[A-Z_][A-Z0-9_]*$')
+# CONST_LOCAL: solo el nombre de la constante en TODO_MAYUSCULAS (ej. RESOURCE).
+# Al menos 2 caracteres para reducir colision con loops Java (no hay constantes de 1 char).
+_CONST_LOCAL_RE = re.compile(r'^[A-Z_][A-Z0-9_]+$')
+
+
+def _classify_arg(arg: str) -> tuple[str, str | None]:
+    """Clasifica un argumento crudo y resuelve si es LITERAL.
+
+    Returns una tupla (kind, value_or_ref):
+      - ("LITERAL", "valor sin comillas")  ya resuelto en sitio
+      - ("CONST_CLASS", "ClassName.CONST_NAME")  pendiente de resolver
+      - ("CONST_LOCAL", "CONST_NAME")  pendiente de resolver
+      - ("EXPRESSION", None)  no se puede resolver con regex (variable,
+        llamada a metodo, concatenacion, etc.)
+    """
+    arg = arg.strip()
+    m = _LITERAL_RE.match(arg)
+    if m:
+        return ("LITERAL", m.group(1))
+    if _CONST_CLASS_RE.match(arg):
+        return ("CONST_CLASS", arg)
+    if _CONST_LOCAL_RE.match(arg):
+        return ("CONST_LOCAL", arg)
+    return ("EXPRESSION", None)
+
+
 def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     return sorted(
         f
