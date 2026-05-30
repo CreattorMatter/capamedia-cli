@@ -6,6 +6,37 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### En progreso — Wizard "un click" `capamedia start` (rama `feature/wizard-start`)
+
+Implementacion por fases (blueprint `docs/BLUEPRINT_WIZARD_GO.md`). Todo en
+`src/capamedia_cli/commands/start.py`, **solo agrega** — no toca comandos ni
+prompts existentes. Siempre Opus (`engine_model('opus', engine.name)`). Sin bump
+hasta cerrar la ultima fase. Detalle completo por fase en los commits de la rama.
+
+- **Fases 0-5**: backup/branch; esqueleto fachada sobre `_process_pipeline_service`;
+  bienvenida + preflight no-bloqueante + menu numerado; sub-wizard de inputs
+  (servicio/OLA/namespace/Azure/harnesses) con gate `Confirm`; flujo "ambos"
+  (detecta destino migrado -> retomar con picker de rama, o nuevo -> Fabrics);
+  clone guiado + resumen visual del analisis (badge LOW/MED/HIGH + EffortProfile).
+- **Fase 6** — doublecheck AI encadenado con gate humano:
+  - Tras el pipeline (que ya corre migrate + `check` determinista), el wizard
+    corre el **doble check AI** reusando `ai._process_doublecheck_workspace`
+    (modelo del engine activo, tier opus).
+  - **Gate critico de banca**: si el verdict es `BLOCKED_BY_HIGH` o hay findings
+    HIGH, el wizard **FRENA** con `Exit(2)` y aviso de revision humana — **NO
+    hay auto-push ni PR**. Se retoma con `--resume` tras corregir.
+  - `--skip-doublecheck` para saltarlo. No rompe el wizard si el doublecheck no
+    puede correr (best-effort).
+  - Nota: el "gate de migracion" del blueprint ya lo cubre el `Confirm("Ejecutar?")`
+    de la Fase 3; el fan-out de subagentes "en la nube" sigue siendo v0.29 (Agent SDK).
+  - +3 tests (doublecheck OK completa; BLOCKED_BY_HIGH frena con Exit 2;
+    `--skip-doublecheck` no lo invoca). Suite: 942 passed.
+
+### Merge
+
+- Se integro `main` (v0.28.5) a la rama del wizard: trae los fixes de Netty
+  arbol completo (8.8), Helm capacity 100Mi/400Mi y mensajeNegocio vaciar-no-borrar.
+
 ## [0.28.5] - 2026-05-29
 
 ### Changed — `mensajeNegocio`: no eliminar el tag (vaciar) + respetar el legacy

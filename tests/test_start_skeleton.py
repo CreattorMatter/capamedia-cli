@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+import capamedia_cli.commands.ai as ai_mod
 import capamedia_cli.commands.batch as batch_mod
 import capamedia_cli.commands.clone as clone_mod
 import capamedia_cli.commands.start as start_mod
@@ -47,6 +48,11 @@ def captured(monkeypatch, tmp_path):
     monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
     # Clone explicito (Fase 5) mockeado: no toca red.
     monkeypatch.setattr(clone_mod, "clone_service", lambda *a, **k: None)
+    # Doublecheck (Fase 6) mockeado OK por default: no invoca engine real.
+    monkeypatch.setattr(
+        ai_mod, "_process_doublecheck_workspace",
+        lambda *a, **k: BatchRow("x", "ok", "doublecheck ok (mock)", {"verdict": "PR_READY", "high": "0"}),
+    )
     return grabbed
 
 
@@ -111,6 +117,10 @@ def test_start_model_matches_engine_not_hardcoded_claude(monkeypatch, tmp_path):
     monkeypatch.setattr(start_mod, "engine_from_env", lambda: None)
     monkeypatch.setattr(clone_mod, "_clone_migrated_repos", lambda *a, **k: [])
     monkeypatch.setattr(clone_mod, "clone_service", lambda *a, **k: None)
+    monkeypatch.setattr(
+        ai_mod, "_process_doublecheck_workspace",
+        lambda *a, **k: BatchRow("x", "ok", "dc ok", {"verdict": "PR_READY", "high": "0"}),
+    )
 
     start_command(service="wsclientes0076", namespace="tnd", engine_name="codex", root=tmp_path)
     assert grabbed["model"] == "gpt-5.5"  # tier opus traducido a codex, no claude
@@ -364,3 +374,40 @@ def test_resolve_branch_ambiguous_create_new(monkeypatch, tmp_path):
     assert branch == "feature/migracion-wsclientes0076"
     assert mode == "created"
     assert "checkout" in ran["cmd"] and "-B" in ran["cmd"]
+
+
+# ── Fase 6: doublecheck encadenado con gate BLOCKED_BY_HIGH ──────────────────
+
+
+def test_doublecheck_ok_completes(captured, tmp_path):
+    """Pipeline OK + doublecheck PR_READY -> el wizard completa sin Exit."""
+    # captured ya mockea pipeline OK y doublecheck OK.
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+    assert captured["service"] == "wsclientes0076"
+
+
+def test_doublecheck_blocked_high_stops_with_gate(captured, tmp_path, monkeypatch):
+    """verdict BLOCKED_BY_HIGH -> Exit(2), gate humano, sin avanzar."""
+    monkeypatch.setattr(
+        ai_mod, "_process_doublecheck_workspace",
+        lambda *a, **k: BatchRow(
+            "x", "fail", "5 HIGH findings",
+            {"verdict": "BLOCKED_BY_HIGH (5 HIGH)", "high": "5"},
+        ),
+    )
+    import typer
+
+    with pytest.raises(typer.Exit) as exc:
+        start_command(service="wsclientes0076", namespace="tnd", root=tmp_path)
+    assert exc.value.exit_code == 2
+
+
+def test_skip_doublecheck_does_not_run_it(captured, tmp_path, monkeypatch):
+    """--skip-doublecheck -> no se invoca el doublecheck."""
+    called = {"dc": False}
+    monkeypatch.setattr(
+        ai_mod, "_process_doublecheck_workspace",
+        lambda *a, **k: called.__setitem__("dc", True) or BatchRow("x", "ok", "", {}),
+    )
+    start_command(service="wsclientes0076", namespace="tnd", root=tmp_path, skip_doublecheck=True)
+    assert called["dc"] is False

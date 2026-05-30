@@ -475,6 +475,70 @@ def _collect_inputs_interactive(
 # ── Fachada Fase 1 (reusable desde flags y desde el menu) ────────────────────
 
 
+def _run_doublecheck_with_gate(
+    *,
+    service: str,
+    ws: Path,
+    engine,
+    model: str | None,
+    timeout_minutes: int,
+    unsafe: bool,
+    resume: bool,
+) -> None:
+    """Fase 6: corre el doublecheck AI tras el pipeline y aplica el GATE humano.
+
+    Reusa `ai._process_doublecheck_workspace` (no reimplementa). Si el verdict es
+    BLOCKED_BY_HIGH o hay findings HIGH, FRENA con aviso de revision humana — NO
+    hay auto-push ni PR (gate critico de banca). El modelo es el del engine activo
+    (tier opus). No rompe el wizard si el doublecheck no puede correr.
+    """
+    from capamedia_cli.commands.ai import _process_doublecheck_workspace
+    from capamedia_cli.commands.batch import _ensure_migrate_schema
+
+    console.print("\n[cyan]Doble check AI (post-migracion)...[/cyan]")
+    workspace = ws / service
+    schema_path = _ensure_migrate_schema(ws)
+    try:
+        row = _process_doublecheck_workspace(
+            service,
+            workspace,
+            schema_path,
+            engine=engine,
+            model=model,
+            prompt_file=None,
+            timeout_minutes=timeout_minutes,
+            unsafe=unsafe,
+            resume=resume,
+        )
+    except Exception as exc:  # best-effort: el wizard no muere por el doublecheck
+        console.print(
+            f"[yellow]El doble check no pudo completarse ({type(exc).__name__}). "
+            "Corre `capamedia ai doublecheck` manualmente.[/yellow]"
+        )
+        return
+
+    verdict = str(row.fields.get("verdict", "?"))
+    high = str(row.fields.get("high", "?"))
+    blocked = row.status != "ok" or verdict.startswith("BLOCKED_BY_HIGH")
+
+    if blocked:
+        console.print(
+            Panel.fit(
+                f"[bold yellow]GATE: revision humana requerida[/bold yellow]\n"
+                f"Verdict: [red]{verdict}[/red] · HIGH: {high}\n"
+                f"{row.detail}\n\n"
+                "[dim]El wizard NO hace push ni abre PR. Revisa los findings HIGH, "
+                "corregilos (o corre `capamedia ai doublecheck`) y vuelve a "
+                "ejecutar con --resume.[/dim]",
+                title="Doble check — BLOQUEADO",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(2)
+
+    console.print(f"[green]Doble check OK[/green] · verdict: {verdict}")
+
+
 def _run_pipeline_facade(
     *,
     service: str,
@@ -493,10 +557,12 @@ def _run_pipeline_facade(
     skip_check: bool,
     unsafe: bool,
     resume: bool,
+    skip_doublecheck: bool = False,
 ) -> None:
     """Orquesta el pipeline existente para UN servicio, forzando Opus 4.8.
 
     No reimplementa logica: importa y llama `batch._process_pipeline_service`.
+    Tras el pipeline encadena el doublecheck con gate BLOCKED_BY_HIGH (Fase 6).
     """
     from capamedia_cli.adapters import resolve_harnesses
     from capamedia_cli.commands.batch import (
@@ -590,9 +656,21 @@ def _run_pipeline_facade(
     )
 
     status_color = "green" if row.status == "ok" else "red"
-    console.print(f"\n[bold {status_color}]start {row.status}[/bold {status_color}]: {row.detail}")
+    console.print(f"\n[bold {status_color}]pipeline {row.status}[/bold {status_color}]: {row.detail}")
     if row.status != "ok":
         raise typer.Exit(1)
+
+    # Fase 6: doublecheck encadenado con gate BLOCKED_BY_HIGH (sin auto-push).
+    if not skip_doublecheck:
+        _run_doublecheck_with_gate(
+            service=service,
+            ws=ws,
+            engine=engine,
+            model=model,
+            timeout_minutes=timeout_minutes,
+            unsafe=unsafe,
+            resume=resume,
+        )
 
 
 def start_command(
@@ -661,6 +739,7 @@ def start_command(
         "shallow": shallow,
         "skip_tx": skip_tx,
         "skip_check": skip_check,
+        "skip_doublecheck": skip_doublecheck,
         "unsafe": unsafe,
     }
 
