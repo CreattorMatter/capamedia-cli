@@ -3181,13 +3181,15 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
         )
 
     # 15.2 - recurso con formato <componente-migrado>/<method>
-    # El nombre antes del '/' debe ser el spring.application.name
-    # (<namespace>-msa-sp-<svc>), NUNCA el metadata.name del catalog-info ni el legacy
-    # IIB/WAS/ORQ como 'WSClientes0011' o 'ORQTransferencias0003'.
-    # QA reporta como bug HIGH cuando el response trae el nombre legacy.
-    recurso_matches = _grep_files(src_java, r"setRecurso\s*\(\s*[\"']")
+    # USA _find_field_usages (Etapa 1-3.5) que cubre los 4 patrones reales:
+    #   LITERAL en setter (0077), CONST_CLASS en setter (0013),
+    #   CONST_LOCAL en builder ingles (0010), CONST_CLASS en builder espanol (0022).
+    # El check viejo (regex grep) solo detectaba LITERAL en setter -> 3 de 4 patrones
+    # eran invisibles. La nueva version resuelve constantes via _resolve_const y
+    # marca MEDIUM cuando no puede resolver (en vez de no ver nada).
+    recurso_hits = _find_field_usages(src_java, "recurso")
     component_name = _migrated_component_name(ctx.migrated_path)
-    if not recurso_matches:
+    if not recurso_hits:
         results.append(
             CheckResult(
                 "15.2",
@@ -3195,7 +3197,10 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                 "recurso populado en algun mapper/resolver",
                 "fail",
                 severity="medium",
-                detail="No se encontro setRecurso(...) en ningun archivo",
+                detail=(
+                    "No se encontro setRecurso/.recurso/.resource en ningun archivo "
+                    "del proyecto migrado."
+                ),
                 suggested_fix=(
                     "El mapper del error debe setear recurso = "
                     "'<componente-migrado>/<metodo>' donde <componente-migrado> "
@@ -3204,14 +3209,14 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
             )
         )
     else:
-        legacy_hits = []
-        no_slash_hits = []
-        for f, ln, line in recurso_matches:
-            for value in _setter_string_args(line, "setRecurso"):
-                if _is_legacy_service_value(value):
-                    legacy_hits.append((f, ln, line, value))
-                elif "/" not in value:
-                    no_slash_hits.append((f, ln, line, value))
+        legacy_hits = [h for h in recurso_hits if h.resolved_value and _is_legacy_service_value(h.resolved_value)]
+        valid_resolved = [
+            h for h in recurso_hits
+            if h.resolved_value and not _is_legacy_service_value(h.resolved_value)
+        ]
+        no_slash_hits = [h for h in valid_resolved if "/" not in (h.resolved_value or "")]
+        unresolved_hits = [h for h in recurso_hits if h.resolved_value is None]
+
         if legacy_hits:
             sample = legacy_hits[0]
             results.append(
@@ -3222,16 +3227,20 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     "fail",
                     severity="high",
                     detail=(
-                        f"{len(legacy_hits)} hit(s) con nombre legacy en setRecurso. "
-                        f"Ejemplo: {_relative_display(sample[0], ctx.migrated_path)}:"
-                        f"{sample[1]} -> setRecurso(\"{sample[3]}\")"
+                        f"{len(legacy_hits)} hit(s) con nombre legacy en recurso "
+                        f"(detectados con resolucion de constantes). Ejemplo: "
+                        f"{_relative_display(sample.file, ctx.migrated_path)}:"
+                        f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
+                        f"\"{sample.resolved_value}\""
                     ),
                     suggested_fix=(
                         "Reemplazar el nombre legacy (WS*/ORQ*/UMP*) por el "
                         "spring.application.name del componente migrado "
                         f"({component_name or '<namespace>-msa-sp-<svc>'}). "
                         "QA del banco rechaza el response cuando recurso/componente "
-                        "trae el nombre legacy IIB/WAS."
+                        "trae el nombre legacy IIB/WAS. Si el valor viene de una "
+                        "constante (CatalogExceptionConstants.WS_RECURSO o similar), "
+                        "editar el literal en esa constante."
                     ),
                 )
             )
@@ -3243,21 +3252,48 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     "recurso con formato componente/method",
                     "fail",
                     severity="medium",
-                    detail="setRecurso encontrado pero ninguno tiene '/' en el valor",
+                    detail=(
+                        f"{len(no_slash_hits)} hit(s) resueltos sin '/' en el valor"
+                    ),
                     suggested_fix=(
                         "Formato esperado: "
                         f"'{component_name or '<namespace>-msa-sp-<svc>'}/<metodo>'"
                     ),
                 )
             )
+        elif unresolved_hits and not valid_resolved:
+            # Caso 0010-style: TODOS los hits son pass-through (error.resource()) o
+            # constante no encontrada. No podemos garantizar que el valor sea valido.
+            results.append(
+                CheckResult(
+                    "15.2",
+                    "Block 15",
+                    "recurso resoluble desde el codigo",
+                    "fail",
+                    severity="medium",
+                    detail=(
+                        f"{len(unresolved_hits)} hit(s) de recurso no resoluble "
+                        "(variable, llamada a metodo, o constante no encontrada en "
+                        "el proyecto). Auditar manualmente que el valor sea "
+                        f"'{component_name or '<namespace>-msa-sp-<svc>'}/<metodo>'."
+                    ),
+                    suggested_fix=(
+                        "Preferir constante centralizada (ej. CatalogExceptionConstants.WS_RECURSO) "
+                        "con literal alineado al spring.application.name + metodo."
+                    ),
+                )
+            )
         else:
+            detail = f"{len(valid_resolved)} hit(s) resueltos sin nombre legacy"
+            if unresolved_hits:
+                detail += f"; {len(unresolved_hits)} hit(s) no resolubles (auditar manual)"
             results.append(
                 CheckResult(
                     "15.2",
                     "Block 15",
                     "recurso con formato componente-migrado/method",
                     "pass",
-                    detail=f"{len(recurso_matches)} hit(s) sin nombre legacy",
+                    detail=detail,
                 )
             )
 
@@ -3267,23 +3303,31 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
     #   3) 'TX<6-digitos>' -> error de negocio desde Core Adapter
     # El nombre legacy IIB/WAS/ORQ (WSClientes0011, ORQTransferencias0003) NO
     # es valido como componente del response.
-    comp_matches = _grep_files(src_java, r"setComponente\s*\(\s*[\"']")
-    if comp_matches:
-        # Valores canonicos aceptados como componente:
-        # (a) spring.application.name del componente migrado: <ns>-msa-sp-<svc>
-        # (b) 'ApiClient' (error propagado desde libreria)
-        # (c) 'TX<NNNNNN>' (6 digitos, error de negocio desde Core Adapter)
-        valid_value_re = re.compile(
-            r"^(?:[a-z]{3}-msa-sp-[a-z0-9_-]+|ApiClient|TX\d{6})$",
-            re.IGNORECASE,
+    # Usa _find_field_usages (cobertura ampliada 4 patrones reales del banco).
+    valid_value_re = re.compile(
+        r"^(?:[a-z]{3}-msa-sp-[a-z0-9_-]+|ApiClient|TX\d{6})$",
+        re.IGNORECASE,
+    )
+    componente_hits = _find_field_usages(src_java, "componente")
+    if not componente_hits:
+        results.append(
+            CheckResult(
+                "15.3",
+                "Block 15",
+                "componente populado en algun mapper",
+                "fail",
+                severity="medium",
+                detail="No se encontro setComponente/.componente/.component en ningun archivo",
+            )
         )
-        legacy_hits = []
-        all_values: list[tuple[Path, int, str, str]] = []
-        for f, ln, line in comp_matches:
-            for value in _setter_string_args(line, "setComponente"):
-                all_values.append((f, ln, line, value))
-                if _is_legacy_service_value(value):
-                    legacy_hits.append((f, ln, line, value))
+    else:
+        legacy_hits = [h for h in componente_hits if h.resolved_value and _is_legacy_service_value(h.resolved_value)]
+        valid_resolved = [
+            h for h in componente_hits
+            if h.resolved_value and not _is_legacy_service_value(h.resolved_value)
+        ]
+        unresolved_hits = [h for h in componente_hits if h.resolved_value is None]
+
         if legacy_hits:
             sample = legacy_hits[0]
             results.append(
@@ -3294,9 +3338,11 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     "fail",
                     severity="high",
                     detail=(
-                        f"{len(legacy_hits)} hit(s) con nombre legacy en setComponente. "
-                        f"Ejemplo: {_relative_display(sample[0], ctx.migrated_path)}:"
-                        f"{sample[1]} -> setComponente(\"{sample[3]}\")"
+                        f"{len(legacy_hits)} hit(s) con nombre legacy en componente "
+                        f"(detectados con resolucion de constantes). Ejemplo: "
+                        f"{_relative_display(sample.file, ctx.migrated_path)}:"
+                        f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
+                        f"\"{sample.resolved_value}\""
                     ),
                     suggested_fix=(
                         "Reemplazar el nombre legacy por uno de: "
@@ -3309,17 +3355,25 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                 )
             )
         else:
-            has_valid = any(valid_value_re.match(value) for _f, _ln, _line, value in all_values)
-            if has_valid:
+            has_canonical = any(valid_value_re.match(h.resolved_value or "") for h in valid_resolved)
+            if has_canonical:
+                detail = f"{len(valid_resolved)} hit(s) resueltos; al menos uno canonico"
+                if unresolved_hits:
+                    detail += f"; {len(unresolved_hits)} no resolubles (auditar manual)"
                 results.append(
                     CheckResult(
                         "15.3",
                         "Block 15",
                         "componente con valor reconocido (componente-migrado/ApiClient/TX)",
                         "pass",
+                        detail=detail,
                     )
                 )
-            else:
+            elif valid_resolved:
+                # Hay valores resueltos pero NINGUNO es canonico (ni legacy ni
+                # ApiClient/TX<6>/<ns>-msa-sp). Ejemplo real 0022: COMPONENT_NAME =
+                # "ConsultarInformacionClienteVirtual01" (nombre de operacion).
+                sample = valid_resolved[0]
                 results.append(
                     CheckResult(
                         "15.3",
@@ -3327,24 +3381,32 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                         "componente con valor reconocido (componente-migrado/ApiClient/TX)",
                         "fail",
                         severity="medium",
-                        detail="setComponente encontrado pero sin valor canonico reconocido",
+                        detail=(
+                            f"{len(valid_resolved)} hit(s) resueltos pero sin valor canonico. "
+                            f"Ejemplo: {_relative_display(sample.file, ctx.migrated_path)}:"
+                            f"{sample.line_no} -> \"{sample.resolved_value}\""
+                        ),
                         suggested_fix=(
                             "Usar uno de: '<namespace>-msa-sp-<svc>' (spring.application.name), "
                             "'ApiClient', 'TX<6-digitos>'."
                         ),
                     )
                 )
-    else:
-        results.append(
-            CheckResult(
-                "15.3",
-                "Block 15",
-                "componente populado en algun mapper",
-                "fail",
-                severity="medium",
-                detail="No se encontro setComponente(...) en ningun archivo",
-            )
-        )
+            else:
+                # Solo unresolved (pass-through, variables, constantes faltantes).
+                results.append(
+                    CheckResult(
+                        "15.3",
+                        "Block 15",
+                        "componente resoluble desde el codigo",
+                        "fail",
+                        severity="medium",
+                        detail=(
+                            f"{len(unresolved_hits)} hit(s) de componente no resoluble. "
+                            "Auditar manual que el valor sea componente-migrado / ApiClient / TX<6>."
+                        ),
+                    )
+                )
 
     # 15.4 - backend no hardcoded arbitrario (debe venir del catalogo, codigos tipicos de 5 digitos)
     backend_matches = _grep_files(src_java, r"setBackend\s*\(\s*[\"']([0-9]+)[\"']")
