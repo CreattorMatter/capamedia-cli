@@ -23,6 +23,29 @@ SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 # v0.27.2 (codigo y canonical desincronizados).
 NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
 
+# Arbol core de Netty que debe quedar pineado a NETTY_WEBFLUX_ALLOWED_VERSION en
+# proyectos WebFlux (el BOM de Spring Boot 3.5.x trae io.netty 4.1.121.Final
+# vulnerable). Pinear solo `netty-codec*` deja transitivos cercanos
+# (netty-handler-proxy, etc.) en version vulnerable — Snyk reporto 9 CVEs en
+# WSClientes0013 (2026-05-29). Excluye intencionalmente los binarios nativos
+# (`netty-transport-native-*`, se versionan por SO) y los SSL bindings opcionales
+# (`netty-tcnative-*`). Se pinean con doble mecanismo: dependencyManagement
+# `dependency` + resolutionStrategy `force`.
+NETTY_CORE_MODULES: tuple[str, ...] = (
+    "netty-common",
+    "netty-buffer",
+    "netty-transport",
+    "netty-resolver",
+    "netty-resolver-dns",
+    "netty-codec",
+    "netty-codec-dns",
+    "netty-codec-http",
+    "netty-codec-http2",
+    "netty-codec-socks",
+    "netty-handler",
+    "netty-handler-proxy",
+)
+
 
 def parse_numeric_version(version: str) -> tuple[int, ...]:
     """Return numeric version parts, ignoring suffixes such as -SNAPSHOT."""

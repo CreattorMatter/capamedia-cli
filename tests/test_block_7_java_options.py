@@ -40,8 +40,8 @@ def _make_minimal_project(tmp_path: Path) -> Path:
 def _baseline_helm_with_java_opts() -> str:
     return f"""\
 resources:
-  requests: {{ cpu: 50m, memory: 350Mi }}
-  limits: {{ cpu: 200m, memory: 500Mi }}
+  requests: {{ cpu: 50m, memory: 100Mi }}
+  limits: {{ cpu: 200m, memory: 400Mi }}
 
 hpa:
   minReplicas: 1
@@ -91,8 +91,8 @@ def test_7_5f_missing_java_options_is_high(tmp_path: Path) -> None:
         "prod",
         """\
 resources:
-  requests: { cpu: 50m, memory: 350Mi }
-  limits: { cpu: 200m, memory: 500Mi }
+  requests: { cpu: 50m, memory: 100Mi }
+  limits: { cpu: 200m, memory: 400Mi }
 hpa:
   minReplicas: 1
   maxReplicas: 1

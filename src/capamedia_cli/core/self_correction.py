@@ -54,7 +54,7 @@ _CHECK_HINTS: dict[str, str] = {
     "5.10": "Inyectar jakarta.validation.Validator en el controlador y validar los DTOs de entrada usando validator.validate(dto) o agregando la anotación @Valid en la firma del método.",
     "5.11": "Agregar restricciones sintácticas a los campos del DTO (como @Pattern(regexp = '^[0-9]{10,13}$') para identificación) y anotaciones de no-nulo.",
     "5.12": "Agregar validación de lista de valores permitidos (allowlist) para campos opcionales / codificados (como tipoIdentificacion que debe ser uno de C, R, P, O).",
-    "15.1": "Remover el setter de mensajeNegocio en el response mapper. Los errores se emiten solo via ServiceLogHelper.",
+    "15.1": "Vaciar el setter de mensajeNegocio (setMensajeNegocio(\"\")), NO eliminar el tag: el slot debe existir para que DataPower lo complete. Solo se permite valor real si el legacy del servicio ya lo poblaba.",
     "15.2": "Normalizar el formato de <recurso>: usar slash-prefix tipo '/servicio/operacion'. Ver PDF BPTPSRE.",
     "15.3": "setComponente debe recibir exactamente uno de: nombre-servicio, 'ApiClient', o el valor canonico del PDF BPTPSRE. No inventar valores.",
     "15.4": "setBackend debe usar un codigo del catalogo oficial (ej 00638 para IIB, 00045 para BANCS app). Consultar reference_codigos_backend.md.",

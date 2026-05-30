@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _ERROR_STRUCTURE_RULES: tuple[str, ...] = (
     "codigo: exactamente igual al legacy (mirar ESQL et_bancs/et_soap o properties).",
     "mensaje: para migrados, solo la descripcion. Si legacy decia `NODO-OK`, queda `OK`.",
-    "mensajeNegocio: vacio (\"\" o null). Lo gestiona DataPower, NO el microservicio.",
+    "mensajeNegocio: vacio (\"\" o null) por defecto; el tag NO se elimina (lo completa DataPower). Excepcion: si el legacy ya lo poblaba, se respeta el valor.",
     "tipo: exactamente igual al legacy: INFO=success, ERROR=negocio recoverable, "
     "FATAL=headers/bancs/unexpected.",
     "recurso: `<NOMBRE_SERVICIO>/<metodoCamelCase>` (ej: `tnd-msa-sp-wsclientes0024/getDatosBasicos`). "

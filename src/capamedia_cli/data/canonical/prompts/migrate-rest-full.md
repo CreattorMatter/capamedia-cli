@@ -375,8 +375,8 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 ```yaml
 resources:
-  requests: { cpu: 50m,  memory: 350Mi }
-  limits:   { cpu: 200m, memory: 500Mi }
+  requests: { cpu: 50m,  memory: 100Mi }
+  limits:   { cpu: 200m, memory: 400Mi }
 
 hpa:
   minReplicas: 1
@@ -862,7 +862,7 @@ Parameters:
 1. **Spring Boot version:** Use `3.5.14` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
 2. **Peer Review plugin:** Update to `1.1.0`
 3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** Do NOT add `dependencyManagement { dependency 'io.netty:*:VERSION' }` blocks to "patch a CVE" — with **one official exception**: in **WebFlux** projects (`spring-boot-starter-webflux` present) the pin `io.netty:*:4.1.133.Final` IS allowed and IS the approved fix for the Snyk 2026-05 CVEs. Any other version (`4.1.132.Final`, `4.1.999.Final`, etc.) is still blocked by Check 8.7. MVC/SOAP projects: no manual pin permitted, any version.
+4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.133.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -3024,7 +3024,7 @@ for env in dev test prod; do
   echo "--- helm/$env.yml ---"
   grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
 done
-# EXPECTED: requests cpu=50m memory=350Mi; limits cpu=200m memory=500Mi;
+# EXPECTED: requests cpu=50m memory=100Mi; limits cpu=200m memory=400Mi;
 #           hpa min=1 max=1; averageValue=100m
 
 # CHECK 3: Probes are configured

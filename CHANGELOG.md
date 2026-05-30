@@ -6,79 +6,103 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
-### En progreso — Wizard "un click" `capamedia start` (rama `feature/wizard-start`)
+## [0.28.5] - 2026-05-29
 
-Implementacion por fases del blueprint [`docs/BLUEPRINT_WIZARD_GO.md`](docs/BLUEPRINT_WIZARD_GO.md).
-Sin bump de version hasta completar las 8 fases (Fase 7 cierra con tag estable).
+### Changed — `mensajeNegocio`: no eliminar el tag (vaciar) + respetar el legacy
 
-- **Fase 0** — backup (`v0.28.0` + rama `backup/v0.28.0-stable`), rama de trabajo
-  `feature/wizard-start`, baseline 907 tests verde.
-- **Fase 1** — esqueleto `capamedia start` (alias `go`/`wizard`): fachada
-  NO-interactiva sobre `batch._process_pipeline_service` (clone→init→fabrics→
-  migrate, con resume idempotente). Fuerza Opus 4.8 (`model_policy.anthropic_model('opus')`);
-  el wizard nunca pregunta modelo. Persiste decisiones en
-  `<ws>/<svc>/.capamedia/wizard.json`. NO reimplementa logica — solo importa y
-  llama. `--branch` se registra pero su integracion real es una fase posterior.
-  `src/capamedia_cli/commands/start.py` (nuevo) + `tests/test_start_skeleton.py`.
-- **Fase 2** — capa de entrada interactiva (solo agrega, no toca nada existente):
-  Panel "Bienvenido a Capa Media" (LOGO + version + "Modelo: Opus 4.8");
-  preflight verde/rojo NO-bloqueante (PAT via `probe_azure_devops_pat` +
-  engines via `available_engines`); menu raiz numerado estilo Claude Code
-  (`rich.Prompt.ask(choices=...)`, SIN deps nuevas); deteccion de `wizard.json`
-  para reanudar. `--service`/`--namespace` pasan a opcionales: con ambos (o
-  `--yes`, o sin TTY) corre el flujo no-interactivo; sin ellos en TTY abre el
-  menu. Fallback no-TTY/CI: error claro pidiendo flags en vez de colgarse. El
-  sub-wizard de inputs (pedir servicio/OLA/rama) y la edicion de configuracion
-  llegan en la Fase 3 (hoy las opciones de config son read-only). +5 tests.
-- **Revision Fases 1-2**: fix — el modelo se deriva del engine activo
-  (`engine_model('opus', engine.name)`: claude→claude-opus-4-8, codex→gpt-5.5),
-  ya no se hardcodea Claude (rompia con `--engine codex`). +1 test de regresion.
-  Caso borde: no reanudar otro servicio si el usuario dio `--service` por flag.
-- **Fase 3** — sub-wizard de inputs (recolecta SIN tocar red): servicio
-  (`normalize_service_name`, auto-padding en vivo), OLA derivada y mostrada
-  (`ola_label` + `lib_bnc_api_client_version` del catalogo oficial, no se
-  pregunta), namespace (`Prompt.ask(choices=NAMESPACE_OPTIONS)`), Azure destino
-  derivado (`tpl-middleware/<ns>-msa-sp-<svc>`) + confirmacion, harnesses
-  (default claude, picker opcional, fuerza claude). Resumen pre-ejecucion
-  (Table) + gate `Confirm("Ejecutar?", default=False)`. Persiste `config.yaml`
-  (via `init._save_config`) + `wizard.json`. La opcion 1 del menu ahora abre el
-  sub-wizard cuando faltan inputs. +2 tests. Suite: 919 passed.
-- **Revision Fase 3**: fix — `_ask_service` valida no-vacio (re-pregunta en
-  vez de continuar con `""` y romper el pipeline luego). +1 test de regresion.
-- **Fase 4 (parcial)** — rama interactiva. Piezas entregadas y testeadas:
-  - `_ask_branch_optional`: en el sub-wizard, registra la rama deseada (sin
-    tocar red; None = auto-detectar al clonar).
-  - `_resolve_branch_interactive(repo_path, requested_branch, service)`: reusa
-    `clone._auto_checkout_migrated_branch` y convierte el caso `ambiguous` (hoy
-    error duro) en un PICKER numerado de ramas remotas + opcion de crear
-    `feature/migracion-<svc>` (toca git sobre un repo YA clonado). +3 tests.
-  Suite: 923 passed.
-- **Fase 4 (completa)** — flujo "ambos" cableado (decision owner): el wizard
-  DETECTA si el servicio ya tiene destino migrado en `tpl-middleware` y rutea.
-  - `_detect_and_prepare_flow(service, namespace, ws, branch)`: reusa
-    `clone._clone_migrated_repos` con el namespace elegido (1 intento de red).
-    Si el destino existe -> modo **retomar**: queda clonado y se posiciona la
-    rama con `_resolve_branch_interactive` (picker en `ambiguous`). Si no ->
-    modo **nuevo**: Fabrics genera el destino en el pipeline. Nunca lanza: ante
-    error de red asume "nuevo". El modo queda en `wizard.json` (`flow_mode`).
-  - +2 tests de ruteo (retomar dispara picker; nuevo no). Suite: 925 passed.
-  - Nota: en modo retomar el pipeline corre con resume (clone legacy + el
-    destino ya clonado). La convergencia retomar->migrate sobre destino
-    pre-existente (sin re-generar Fabrics) se valida en un smoke real con
-    credenciales — pendiente de la siguiente iteracion.
-- **Fase 5** — clone guiado + resumen visual del analisis (cumple la vision
-  "trae legacy -> resumen -> correr fabrics"):
-  - `_run_clone_with_progress`: trae el legacy (`clone_service`) con feedback;
-    idempotente (detecta legacy local); no rompe el wizard si falla (el pipeline
-    reintenta).
-  - `_render_analysis_summary`: **cierra el gap "el COMPLEXITY_<svc>.md se escribe
-    pero no se muestra"**. Lee el reporte y lo presenta con badge de complejidad
-    (LOW verde / MEDIUM amarillo / HIGH rojo) + `EffortProfile` (modelo Opus +
-    retries extra) + aviso de revision humana si HIGH (`needs_human_gate`). PURA
-    lectura. Se muestra ANTES del pipeline (init/fabrics/migrate).
-  - El pipeline luego corre y re-detecta el legacy local (clone idempotente).
-  - +2 tests (`_render_analysis_summary` lee el md y dispara gate en HIGH; sin
-    reporte no rompe). Suite: 927 passed.
+Regla refinada del banco sobre el campo `mensajeNegocio` del bloque `<error>`:
+el tag **nunca se elimina**; por defecto **vacío** (`<mensajeNegocio/>`). El
+microservicio no inventa valor de negocio (lo completa DataPower), **salvo que el
+legacy del servicio (BUS/WAS/ORQ) ya lo poblara**, en cuyo caso se respeta.
+
+- **Check 15.1** ahora cross-chequea el legacy (`_legacy_populates_mensaje_negocio`
+  en [`checklist_rules.py`](src/capamedia_cli/core/checklist_rules.py)):
+  - valor real en migrado + el legacy **NO** lo poblaba → **FAIL HIGH**.
+  - valor real + el legacy **SÍ** lo poblaba → **PASS** (se respeta).
+  - valor real + **sin legacy** para verificar → **FAIL LOW** (revisión manual).
+- **Autofix** renombrado `fix_remove_mensajeNegocio_setter` →
+  `fix_empty_mensajeNegocio_setter`: ahora **vacía** el setter
+  (`setMensajeNegocio("")`) en vez de **borrar la línea**, preservando el slot
+  que DataPower completa. Solo corre cuando 15.1 falla HIGH (legacy no lo poblaba).
+- Canónico [`bank-error-structure.md`](src/capamedia_cli/data/canonical/context/bank-error-structure.md)
+  (Regla maestra), `self_correction.py` y `catalog_injector.py` alineados.
+- Tests: +3 (legacy pobló / no pobló / sin legacy) + autofix vacía-no-borra.
+  Suite **919 verde**.
+
+## [0.28.4] - 2026-05-29
+
+### Changed — Helm capacity baseline: memory `350Mi/500Mi` → `100Mi/400Mi`
+
+Ajuste oficial de capacity del banco (kevin armas, 2026-05-29: "se ha realizado
+un ajuste en los recursos"). Reemplaza los valores del mail previo de Dario
+Simbaña. **Solo cambia la memoria** (cpu y hpa sin cambios):
+
+- `resources.requests.memory`: `350Mi` → **`100Mi`**
+- `resources.limits.memory`: `500Mi` → **`400Mi`**
+- `resources.requests.cpu` (`50m`), `resources.limits.cpu` (`200m`) y el bloque
+  `hpa` (minReplicas/maxReplicas=1, CPU averageValue=100m) **se mantienen**.
+
+Actualizado en la fuente única (`HELM_CAPACITY_BASELINE` en
+[`checklist_rules.py`](src/capamedia_cli/core/checklist_rules.py) y
+`HELM_CAPACITY_BASELINE_FIX` en
+[`bank_autofix.py`](src/capamedia_cli/core/bank_autofix.py)) — Check 7.5e y
+autofix `fix_helm_capacity_baseline` ahora exigen/reescriben los nuevos valores.
+Canónicos y prompts sincronizados (`bank-official-rules.md`, `validador-hex.md`,
+`migrate-rest-full.md`, `migrate-soap-full.md`).
+
+## [0.28.3] - 2026-05-29
+
+### Added — Check 8.8 + autofix `fix_netty_full_tree_pin`: árbol Netty completo en WebFlux
+
+El BOM de Spring Boot 3.5.14 trae `io.netty` en versión vulnerable
+(`4.1.121.Final`). Pinear solo `netty-codec*` (4 módulos) deja transitivos
+cercanos como `netty-handler-proxy` vulnerables: Snyk reportó 9 CVEs HIGH/MEDIUM
+en WSClientes0013 (2026-05-29). El fix correcto pinea el **árbol core de Netty
+(12 módulos)** a `4.1.133.Final` con **doble mecanismo** (`dependencyManagement`
++ `resolutionStrategy.force`), porque `dependencyManagement` no siempre gana
+sobre transitivas (lib-bnc, el propio BOM).
+
+- **`NETTY_CORE_MODULES`** (12 módulos) en
+  [`version_policy.py`](src/capamedia_cli/core/version_policy.py): netty-common,
+  netty-buffer, netty-transport, netty-resolver, netty-resolver-dns, netty-codec,
+  netty-codec-dns, netty-codec-http, netty-codec-http2, netty-codec-socks,
+  netty-handler, netty-handler-proxy. Excluye binarios nativos y `netty-tcnative-*`.
+- **Check 8.8** (HIGH): en WebFlux con pin Netty en la versión permitida, exige
+  los 12 módulos en `dependencyManagement` **y** en `resolutionStrategy.force`.
+- **Autofix `fix_netty_full_tree_pin`**: completa los módulos faltantes
+  (dependency + force) y crea el bloque `resolutionStrategy` si no existe.
+  Idempotente; solo agrega faltantes; no actúa si la versión base no es la
+  permitida (eso lo gobierna 8.7).
+- **Check 8.7** mejorado: el mensaje recuerda que 4.2.x rompe Reactor Netty
+  (`StacklessClosedChannelException`) — **NO bumpear a 4.2.x**.
+- Canónicos sincronizados (`bank-official-rules.md`, `checklist-rules.md`,
+  `migrate-rest-full.md`). +10 tests (suite 917 verde).
+
+> Contexto: este release reemplaza el v0.28.3 descartado que alineaba a
+> `4.2.13.Final` (revertido antes de pushear — 4.2.x rompe Reactor Netty). La
+> versión permitida sigue siendo `4.1.133.Final`; lo nuevo es exigir el árbol
+> **completo** con doble mecanismo.
+
+## [0.28.2] - 2026-05-29
+
+### Fixed — `doublecheck` no debe quitar el pin de Netty en WebFlux
+
+El prompt canonico [`doublecheck.md`](src/capamedia_cli/data/canonical/prompts/doublecheck.md)
+no documentaba la excepcion oficial del Check 8.7: su regla 11 solo hablaba de
+Netty como servidor embebido (vs Undertow), pero no protegia el pin
+`io.netty:*:4.1.133.Final` del `dependencyManagement`. El comportamiento ya
+estaba bien en el codigo (`fix_remove_netty_pin` preserva el pin en WebFlux
+desde v0.27.0) y en los demas canonicales (`bank-official-rules.md`,
+`checklist-rules.md`, `migrate-rest-full.md`), pero un agente ejecutando
+`capamedia ai doublecheck` solo leia el prompt y podia eliminar el pin —
+rompiendo el CVE-fix Snyk 2026-05 aprobado.
+
+- Regla 11 de `doublecheck.md` ampliada: deja explicito que el doublecheck
+  **NO** debe eliminar `io.netty:*:4.1.133.Final` en proyectos WebFlux
+  (`spring-boot-starter-webflux` presente). MVC/SOAP siguen sin pin manual de
+  ninguna version; cualquier otra version en WebFlux sigue bloqueada por 8.7.
+- Cierra el drift codigo↔canonical: ahora los 4 canonicales que mencionan el
+  pin de Netty coinciden con el autofix.
 
 ## [0.28.1] - 2026-05-28
 

@@ -42,10 +42,10 @@ def _baseline_helm() -> str:
 resources:
   requests:
     cpu: 50m
-    memory: 350Mi
+    memory: 100Mi
   limits:
     cpu: 200m
-    memory: 500Mi
+    memory: 400Mi
 
 hpa:
   minReplicas: 1
@@ -117,8 +117,8 @@ def test_7_5d_hpa_block_missing_min_max_is_high(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
     body = """\
 resources:
-  requests: { cpu: 50m, memory: 350Mi }
-  limits: { cpu: 200m, memory: 500Mi }
+  requests: { cpu: 50m, memory: 100Mi }
+  limits: { cpu: 200m, memory: 400Mi }
 
 hpa:
   metrics:
@@ -179,7 +179,7 @@ def test_7_5e_memory_limit_wrong_is_high(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
     _write_helm(root, "dev", _baseline_helm())
     _write_helm(root, "test", _baseline_helm())
-    bad = _baseline_helm().replace("memory: 500Mi", "memory: 1Gi")
+    bad = _baseline_helm().replace("memory: 400Mi", "memory: 1Gi")
     _write_helm(root, "prod", bad)
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
@@ -252,16 +252,16 @@ def test_autofix_replaces_cpu_request(tmp_path: Path) -> None:
 def test_autofix_replaces_memory_limit(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
     f = _write_helm(
-        root, "prod", _baseline_helm().replace("memory: 500Mi", "memory: 1Gi")
+        root, "prod", _baseline_helm().replace("memory: 400Mi", "memory: 1Gi")
     )
 
     result = fix_helm_capacity_baseline(root)
     assert result.applied is True
     text = f.read_text(encoding="utf-8")
-    assert "memory: 500Mi" in text
+    assert "memory: 400Mi" in text
     assert "memory: 1Gi" not in text
-    # El memory del request debe quedar en 350Mi
-    assert "memory: 350Mi" in text
+    # El memory del request debe quedar en 100Mi
+    assert "memory: 100Mi" in text
 
 
 def test_autofix_idempotent(tmp_path: Path) -> None:

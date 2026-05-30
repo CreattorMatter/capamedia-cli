@@ -483,6 +483,23 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.5 — mensajeNegocio: no borrar el tag (vaciar) + respetar legacy
+
+- [x] v0.28.5 - **`mensajeNegocio` regla refinada**: el tag NUNCA se elimina; vacío por defecto (`<mensajeNegocio/>`). El micro no inventa valor (lo pone DataPower) **salvo que el legacy lo poblara**. Check 15.1 cross-chequea el legacy (`_legacy_populates_mensaje_negocio`): no poblaba→HIGH, poblaba→PASS, sin legacy→LOW. Autofix `fix_remove_mensajeNegocio_setter`→`fix_empty_mensajeNegocio_setter`: **vacía** en vez de borrar. Canónico `bank-error-structure.md` + self_correction + catalog_injector alineados. +3 tests
+
+### Release 0.28.4 — Helm capacity: memory 100Mi/400Mi (ajuste banco)
+
+- [x] v0.28.4 - **Ajuste de capacity (kevin armas, 2026-05-29)**: `resources.requests.memory` `350Mi`→`100Mi` y `resources.limits.memory` `500Mi`→`400Mi`. CPU (`50m`/`200m`) y `hpa` (min/max=1, CPU avg 100m) sin cambios. Fuente única `HELM_CAPACITY_BASELINE` (Check 7.5e + autofix `fix_helm_capacity_baseline`); canónicos/prompts sincronizados
+
+### Release 0.28.3 — Arbol Netty completo en WebFlux (Check 8.8 + autofix)
+
+- [x] v0.28.3 - **Check 8.8 + `fix_netty_full_tree_pin`**: el BOM de Spring Boot 3.5.14 trae `io.netty` 4.1.121.Final vulnerable; pinear solo `netty-codec*` dejaba transitivos como `netty-handler-proxy` vulnerables (WSClientes0013: 9 CVEs). Ahora se exige/autofixea el **árbol core de 12 módulos** a `4.1.133.Final` con **doble mecanismo** (`dependencyManagement` + `resolutionStrategy.force`). Constante `NETTY_CORE_MODULES` en `version_policy.py`. NO 4.2.x (rompe Reactor Netty). +10 tests
+- [x] v0.28.3 - (descartado el intento previo de alinear a `4.2.13.Final`: 4.2.x rompe Reactor Netty del Spring Boot 3.5.x → `StacklessClosedChannelException`; revertido antes de pushear)
+
+### Release 0.28.2 — `doublecheck` no quita el pin Netty en WebFlux
+
+- [x] v0.28.2 - **`doublecheck.md` regla 11 ampliada**: documentaba Netty solo como servidor embebido; ahora deja explícito que el doublecheck NO debe eliminar el pin oficial en WebFlux. Cierra el drift codigo↔canonical
+
 ### Release 0.28.1 — Orquestacion por complejidad (`--auto-effort`)
 
 - [x] v0.28.1 - **`core/effort_policy.py`**: complejidad del servicio → perfil de esfuerzo. Decision owner: **siempre Opus 4.8**; la complejidad modula reasoning effort (Codex), retries-extra (LOW+0/MEDIUM+1/HIGH+2) y gate humano (solo HIGH)

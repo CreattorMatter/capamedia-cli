@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from capamedia_cli.core.version_policy import (
+    NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
     is_version_lower,
@@ -268,14 +269,15 @@ def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     )
 
 
-# Baseline oficial Helm — mail Dario Simbaña, capacity Banco Pichincha 2026-05.
-# Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores referenciales
-# hasta que las pruebas de rendimiento definan los definitivos.
+# Baseline oficial Helm capacity (Banco Pichincha). Ajuste 2026-05-29 (kevin
+# armas): requests.memory 350Mi->100Mi, limits.memory 500Mi->400Mi (cpu y hpa
+# sin cambios). Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores
+# referenciales hasta que las pruebas de rendimiento definan los definitivos.
 HELM_CAPACITY_BASELINE: dict[str, str] = {
     "requests.cpu": "50m",
-    "requests.memory": "350Mi",
+    "requests.memory": "100Mi",
     "limits.cpu": "200m",
-    "limits.memory": "500Mi",
+    "limits.memory": "400Mi",
 }
 
 _REPLICAS_LINE_RE = re.compile(
@@ -589,6 +591,32 @@ def _allowed_mensaje_negocio_slot(line: str) -> bool:
     )
 
 
+def _legacy_populates_mensaje_negocio(legacy_path: Path | None) -> bool | None:
+    """Heuristica: ¿el legacy del servicio poblaba `mensajeNegocio` con valor real?
+
+    - True  → hay una asignacion a mensajeNegocio con RHS no vacio en el legacy
+              (.esql/.java/.msgflow/.subflow): la migracion debe respetarlo.
+    - False → solo asignaciones vacias/null, o ninguna.
+    - None  → no hay legacy disponible para verificar.
+
+    Conservadora: ante una asignacion con valor (literal o variable) asume
+    poblado. Getters (`getMensajeNegocio()`) y vacios/null no cuentan.
+    """
+    if legacy_path is None or not legacy_path.exists():
+        return None
+    assign_re = re.compile(r"(?i)mensajeNegocio\s*(?:=|\()")
+    empty_re = re.compile(
+        r"(?i)mensajeNegocio\s*(?:=|\()\s*"
+        r"(?:''|\"\"|null|StringUtils\.EMPTY|EMPTY|\)|;|$)"
+    )
+    for glob in ("**/*.esql", "**/*.java", "**/*.msgflow", "**/*.subflow"):
+        for _f, _ln, line in _grep_files(legacy_path, r"(?i)mensajeNegocio", glob):
+            if not assign_re.search(line) or empty_re.search(line):
+                continue  # mencion sin asignacion, getter, o asignacion vacia/null
+            return True
+    return False
+
+
 def _collect_tx_codes_from_yaml(text: str) -> set[str]:
     return set(re.findall(r"\bws-tx(\d{6})\b", text, flags=re.IGNORECASE))
 
@@ -697,6 +725,29 @@ def _netty_dependency_management_pins(
                 continue
             pins.append(f"{rel}:{line_no} -> {stripped[:120]}")
     return pins
+
+
+# Detección de módulos del árbol Netty para el Check 8.8 (completitud del pin).
+_NETTY_DEPENDENCY_LINE_RE = re.compile(r"^\s*dependency\s+['\"]io\.netty:")
+_NETTY_FORCE_PIN_RE = re.compile(r"^\s*force\s+['\"]io\.netty:")
+_NETTY_MODULE_VER_RE = re.compile(
+    r"io\.netty:(?P<mod>[A-Za-z0-9._\-]+):(?P<ver>[A-Za-z0-9._\-]+)"
+)
+
+
+def _netty_modules_pinned_cl(text: str, line_re: re.Pattern[str]) -> dict[str, str]:
+    """Mapa {modulo: version} de lineas io.netty `dependency '...'`/`force '...'`
+    que matchean `line_re`, ignorando comentarios."""
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        if raw.strip().startswith(("//", "/*", "*")):
+            continue
+        if not line_re.match(raw):
+            continue
+        m = _NETTY_MODULE_VER_RE.search(raw)
+        if m:
+            found.setdefault(m.group("mod"), m.group("ver"))
+    return found
 
 
 def _datasource_flavor(gradle_text: str, yml_text: str) -> str:
@@ -2398,8 +2449,8 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         detail="; ".join(resources_issues[:8]),
                         suggested_fix=(
                             "Baseline oficial del banco (Dario Simbaña, 2026-05): "
-                            "resources.requests cpu=50m memory=350Mi; "
-                            "resources.limits cpu=200m memory=500Mi. "
+                            "resources.requests cpu=50m memory=100Mi; "
+                            "resources.limits cpu=200m memory=400Mi. "
                             "Aplica a los 3 helms. Si performance tests definieron "
                             "otros valores, documentar en MIGRATION_REPORT.md."
                         ),
@@ -2602,9 +2653,11 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
         if allow_webflux_pin:
             suggested_fix = (
                 f"En proyectos WebFlux solo esta permitido el pin "
-                f"`io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}` (cierra los "
-                f"CVEs 2026-05). Cualquier otra version manual debe eliminarse "
-                f"del bloque dependencyManagement."
+                f"`io.netty:*:{NETTY_WEBFLUX_ALLOWED_VERSION}`. NO usar 4.2.x: "
+                f"rompe Reactor Netty del Spring Boot 3.5.x "
+                f"(StacklessClosedChannelException en "
+                f"AbstractChannel$AbstractUnsafe.ensureOpen). Cualquier otra "
+                f"version manual debe eliminarse del bloque dependencyManagement."
             )
         results.append(
             CheckResult(
@@ -2636,6 +2689,63 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 detail=detail,
             )
         )
+
+    # 8.8 - Arbol Netty completo (12 modulos core) en WebFlux con doble mecanismo
+    # (dependencyManagement.dependency + resolutionStrategy.force). Solo aplica
+    # cuando ya hay un pin io.netty en la version permitida: el BOM de Spring Boot
+    # 3.5.x trae 4.1.121.Final vulnerable, y pinear solo `netty-codec*` deja
+    # transitivos cercanos (netty-handler-proxy...) en version vulnerable
+    # (WSClientes0013, 9 CVEs). NO 4.2.x: rompe Reactor Netty.
+    if allow_webflux_pin:
+        combined = "\n".join(_read_or_empty(gf) for gf in gradle_files)
+        dep_mods = _netty_modules_pinned_cl(combined, _NETTY_DEPENDENCY_LINE_RE)
+        if NETTY_WEBFLUX_ALLOWED_VERSION in dep_mods.values():
+            force_mods = _netty_modules_pinned_cl(combined, _NETTY_FORCE_PIN_RE)
+            missing_dep = [m for m in NETTY_CORE_MODULES if m not in dep_mods]
+            missing_force = [m for m in NETTY_CORE_MODULES if m not in force_mods]
+            if missing_dep or missing_force:
+                parts: list[str] = []
+                if missing_dep:
+                    parts.append(
+                        f"dependencyManagement faltan {len(missing_dep)}: "
+                        + ", ".join(missing_dep)
+                    )
+                if missing_force:
+                    parts.append(
+                        f"resolutionStrategy.force faltan {len(missing_force)}: "
+                        + ", ".join(missing_force)
+                    )
+                results.append(
+                    CheckResult(
+                        "8.8",
+                        "Block 8",
+                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(parts),
+                        suggested_fix=(
+                            f"Pinear los 12 modulos core de Netty a "
+                            f"{NETTY_WEBFLUX_ALLOWED_VERSION} con doble mecanismo "
+                            f"(dependencyManagement.dependency + "
+                            f"resolutionStrategy.force). Autofix: "
+                            f"fix_netty_full_tree_pin. NO usar 4.2.x (rompe "
+                            f"Reactor Netty)."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "8.8",
+                        "Block 8",
+                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        "pass",
+                        detail=(
+                            f"12 modulos core pineados a "
+                            f"{NETTY_WEBFLUX_ALLOWED_VERSION} (dependency + force)"
+                        ),
+                    )
+                )
     return results
 
 
@@ -2729,7 +2839,8 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
 
     8 campos contractuales: codigo, mensaje, mensajeNegocio, tipo, recurso,
     componente, backend, severidad. Reglas:
-    - mensajeNegocio: NUNCA lo setea el microservicio (lo pone DataPower)
+    - mensajeNegocio: tag SIEMPRE presente, slot vacio por defecto. El micro no
+      inventa valor (lo pone DataPower) SALVO que el legacy ya lo poblara
     - recurso: formato <NOMBRE_SERVICIO>/<METODO>
     - componente IIB: <NOMBRE_SERVICIO> / ApiClient / TX<NNNNNN>
     - componente WAS: <NOMBRE_SERVICIO>, <METODO>, <VALOR_ARCHIVO_CONFIG>
@@ -2740,30 +2851,67 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
     if not src_java.exists():
         return results
 
-    # 15.1 - mensajeNegocio no debe tener valor real desde el codigo.
-    # Empty/null is allowed to preserve the SOAP/DataPower slot when JAXB would
-    # otherwise omit the element.
+    # 15.1 - mensajeNegocio: el tag NO se elimina (slot vacio por defecto). El
+    # micro no inventa valor de negocio (lo pone DataPower) SALVO que el legacy
+    # del servicio ya lo poblara, en cuyo caso se respeta. Empty/null preservan
+    # el slot SOAP que JAXB omitiria.
+    title_151 = "mensajeNegocio sin valor real desde el codigo"
     hits = _grep_files(src_java, r"setMensajeNegocio\s*\(")
     bad = [(f, ln, line) for f, ln, line in hits if not _allowed_mensaje_negocio_slot(line)]
     empty_slots = [(f, ln, line) for f, ln, line in hits if _allowed_mensaje_negocio_slot(line)]
     if bad:
-        results.append(
-            CheckResult(
-                "15.1",
-                "Block 15",
-                "mensajeNegocio sin valor real desde el codigo",
-                "fail",
-                severity="high",
-                detail=(
-                    f"{len(bad)} hit(s) con valor real: DataPower gestiona "
-                    "mensajeNegocio; el servicio solo puede emitir null/vacio."
-                ),
-                suggested_fix=(
-                    "No poblar mensajeNegocio con texto de negocio. Usar null o "
-                    '"" solo cuando el contrato SOAP requiere que el tag exista.'
-                ),
+        legacy_has = _legacy_populates_mensaje_negocio(ctx.legacy_path)
+        if legacy_has is True:
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "pass",
+                    detail=(
+                        f"{len(bad)} setter(s) con valor real RESPETADO(s): el "
+                        "legacy del servicio ya poblaba mensajeNegocio."
+                    ),
+                )
             )
-        )
+        elif legacy_has is None:
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "fail",
+                    severity="low",
+                    detail=(
+                        f"{len(bad)} setter(s) con valor real, sin legacy "
+                        "disponible para verificar si lo poblaba. Revisar manual."
+                    ),
+                    suggested_fix=(
+                        "Si el legacy NO poblaba mensajeNegocio, vaciar el slot "
+                        '(setMensajeNegocio("")) sin eliminar el tag; DataPower lo '
+                        "completa. Si lo poblaba, el valor es valido."
+                    ),
+                )
+            )
+        else:  # False — el legacy no lo poblaba
+            results.append(
+                CheckResult(
+                    "15.1",
+                    "Block 15",
+                    title_151,
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"{len(bad)} hit(s) con valor real que el legacy NO "
+                        "poblaba: DataPower gestiona mensajeNegocio; el servicio "
+                        "debe emitir el slot vacio (sin eliminar el tag)."
+                    ),
+                    suggested_fix=(
+                        'Vaciar el setter (setMensajeNegocio("")), NO eliminar el '
+                        "tag. Solo se permite valor si el legacy ya lo poblaba."
+                    ),
+                )
+            )
     else:
         detail = (
             f"{len(empty_slots)} setter(s) null/vacio aceptado(s) para preservar el slot SOAP"
@@ -2774,7 +2922,7 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
             CheckResult(
                 "15.1",
                 "Block 15",
-                "mensajeNegocio sin valor real desde el codigo",
+                title_151,
                 "pass",
                 detail=detail,
             )
