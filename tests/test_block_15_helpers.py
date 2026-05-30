@@ -16,10 +16,21 @@ import pytest
 from pathlib import Path
 
 from capamedia_cli.core.checklist_rules import (
+    FieldUsage,
     _classify_arg,
     _extract_call_arg,
+    _file_has_error_context,
+    _find_field_usages,
     _resolve_const,
 )
+
+
+# Helper para escribir un .java en tmp y devolver su Path
+def _write_java(root: Path, rel: str, body: str) -> Path:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +192,171 @@ def test_resolve_const_uses_cache(tmp_path: Path) -> None:
     cache[f] = 'public static final String A = "valB";\n'
     v2 = _resolve_const(tmp_path, "CONST_CLASS", "Cat.A", "", file_cache=cache)
     assert v2 == "valB"  # uso el cache, no reabrio el archivo
+
+
+# ---------------------------------------------------------------------------
+# _find_field_usages (Etapa 3) — integra extract+classify+resolve sobre arbol
+# ---------------------------------------------------------------------------
+
+
+def test_find_field_usages_invalid_field_raises(tmp_path: Path) -> None:
+    import pytest as _pytest  # local
+    with _pytest.raises(ValueError):
+        _find_field_usages(tmp_path, "otroCampo")
+
+
+def test_find_field_usages_pre_scan_filters_unrelated_files(tmp_path: Path) -> None:
+    """Archivo sin marcadores de bloque error (HttpService con .resource(template)) -> 0 hits."""
+    _write_java(tmp_path, "HttpService.java",
+        'public class HttpService {\n'
+        '    public void call() { webClient.get().uri("/x").resource(template).send(); }\n'
+        '}\n')
+    assert _find_field_usages(tmp_path, "recurso") == []
+
+
+def test_find_field_usages_0077_literal(tmp_path: Path) -> None:
+    """Patron 0077: setter clasico con literal directo en SoapResponseHelper."""
+    _write_java(tmp_path, "SoapResponseHelper.java",
+        'public class SoapResponseHelper {\n'
+        '    private GenericError build() {\n'
+        '        GenericError error = new GenericError();\n'
+        '        error.setRecurso("tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01");\n'
+        '        return error;\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "LITERAL"
+    assert hits[0].resolved_value == "tnd-msa-sp-wsclientes0077/ConsultarDatoBasicoCliente01"
+
+
+def test_find_field_usages_0013_const_class(tmp_path: Path) -> None:
+    """Patron 0013: setter clasico con CONST_CLASS + clase utility en otro archivo."""
+    _write_java(tmp_path, "infrastructure/exception/CatalogExceptionConstants.java",
+        'public class CatalogExceptionConstants {\n'
+        '    public static final String WS_RECURSO =\n'
+        '        "tnd-msa-sp-wsclientes0013/ConsultarDatosLocalizacionCliente01";\n'
+        '}\n')
+    _write_java(tmp_path, "infrastructure/soap/mapper/Mapper.java",
+        'public class Mapper {\n'
+        '    public GenericError map() {\n'
+        '        GenericError error = new GenericError();\n'
+        '        error.setRecurso(CatalogExceptionConstants.WS_RECURSO);\n'
+        '        return error;\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "CONST_CLASS"
+    assert hits[0].resolved_value == "tnd-msa-sp-wsclientes0013/ConsultarDatosLocalizacionCliente01"
+
+
+def test_find_field_usages_0010_const_local_in_builder(tmp_path: Path) -> None:
+    """Patron 0010: builder ingles .resource(RESOURCE) con constante LOCAL en mismo archivo."""
+    _write_java(tmp_path, "QueryService.java",
+        'public class QueryService {\n'
+        '    private static final String RESOURCE = "tnd-msa-sp-wsclientes0010/consultarGrupoClaveDigital01";\n'
+        '    public ServiceError build() {\n'
+        '        return ServiceError.builder().resource(RESOURCE).build();\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "CONST_LOCAL"
+    assert hits[0].resolved_value == "tnd-msa-sp-wsclientes0010/consultarGrupoClaveDigital01"
+
+
+def test_find_field_usages_0022_const_class_in_spanish_builder(tmp_path: Path) -> None:
+    """Patron 0022: builder espanol .recurso(Const.RESOURCE_NAME) con clase utility."""
+    _write_java(tmp_path, "domain/constants/ErrorCatalogConstants.java",
+        'public class ErrorCatalogConstants {\n'
+        '    public static final String RESOURCE_NAME = "ORQClientes0022/ConsultarInformacionClienteVirtual01";\n'
+        '}\n')
+    _write_java(tmp_path, "service/Impl.java",
+        'public class Impl {\n'
+        '    public void m() {\n'
+        '        ServiceError.builder().recurso(ErrorCatalogConstants.RESOURCE_NAME).build();\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "CONST_CLASS"
+    # Valor LEGACY a proposito: el subagente F confirmo que 0022 usa nombre legacy.
+    assert hits[0].resolved_value == "ORQClientes0022/ConsultarInformacionClienteVirtual01"
+
+
+def test_find_field_usages_expression_not_resolved(tmp_path: Path) -> None:
+    """Argumento que es una llamada a metodo (error.resource()) -> EXPRESSION sin resolver."""
+    _write_java(tmp_path, "PassThroughMapper.java",
+        'public class PassThroughMapper {\n'
+        '    public void map(ServiceError error) {\n'
+        '        soapError.setRecurso(error.resource());\n'
+        '    }\n'
+        '}\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert hits[0].arg_kind == "EXPRESSION"
+    assert hits[0].resolved_value is None
+
+
+def test_find_field_usages_field_filter_separates_recurso_from_componente(tmp_path: Path) -> None:
+    """field='recurso' NO incluye hits de .componente()/.component() y viceversa."""
+    _write_java(tmp_path, "Both.java",
+        'public class Both {\n'
+        '    public void m() {\n'
+        '        ServiceError.builder()\n'
+        '            .recurso("R")\n'
+        '            .componente("C")\n'
+        '            .resource("R2")\n'
+        '            .component("C2")\n'
+        '            .build();\n'
+        '    }\n'
+        '}\n')
+    recurso_hits = _find_field_usages(tmp_path, "recurso")
+    comp_hits = _find_field_usages(tmp_path, "componente")
+    # .recurso("R") + .resource("R2") = 2; .componente("C") + .component("C2") = 2
+    assert {h.resolved_value for h in recurso_hits} == {"R", "R2"}
+    assert {h.resolved_value for h in comp_hits} == {"C", "C2"}
+
+
+def test_find_field_usages_skips_build_and_git(tmp_path: Path) -> None:
+    """Archivos bajo build/ o .git/ se ignoran."""
+    _write_java(tmp_path, "build/generated/Generated.java",
+        'public class Generated { public void m() { error.setRecurso("X"); } }\n')
+    _write_java(tmp_path, "Real.java",
+        'public class Real { public void m() { error.setRecurso("Y"); } }\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert [h.resolved_value for h in hits] == ["Y"]
+
+
+def test_find_field_usages_returns_FieldUsage_dataclass(tmp_path: Path) -> None:
+    """Smoke test del tipo devuelto."""
+    _write_java(tmp_path, "F.java",
+        'public class F { public void m() { error.setRecurso("X"); } }\n')
+    hits = _find_field_usages(tmp_path, "recurso")
+    assert len(hits) == 1
+    assert isinstance(hits[0], FieldUsage)
+    assert hits[0].line_no == 1
+    assert hits[0].file.name == "F.java"
+
+
+# ---------------------------------------------------------------------------
+# _file_has_error_context (helper del pre-scan)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        ("class X { void m() { GenericError e; } }", True),  # marcador GenericError
+        ("class X { ServiceError.builder().build(); }", True),  # marcador ServiceError
+        ("class X { error.setRecurso(\"x\"); }", True),  # marcador setRecurso
+        ("class HttpService { webClient.uri().resource(template); }", False),  # SIN marcador
+        ("// comentario", False),
+    ],
+)
+def test_file_has_error_context(content: str, expected: bool) -> None:
+    assert _file_has_error_context(content) is expected
 
 
 def test_extract_then_classify_for_each_real_pattern() -> None:

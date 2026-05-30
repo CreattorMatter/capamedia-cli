@@ -340,6 +340,110 @@ def _build_const_def_re(const_name: str) -> re.Pattern[str]:
     )
 
 
+@dataclass
+class FieldUsage:
+    """Un uso de error.recurso o error.componente en codigo Java, ya clasificado.
+
+    Producido por _find_field_usages. Lo consume run_block_15 (Etapa 4) para
+    decidir severidad: HIGH si resolved_value es legacy o invalido, MEDIUM si
+    no se pudo resolver (constante faltante o expresion opaca), PASS si vale.
+    """
+    file: Path
+    line_no: int
+    line: str
+    arg_raw: str
+    arg_kind: str  # LITERAL / CONST_CLASS / CONST_LOCAL / EXPRESSION
+    resolved_value: str | None
+
+
+# Regex por-campo: limitan la deteccion a setRecurso/.recurso/.resource o
+# setComponente/.componente/.component segun corresponda. Necesarias para que
+# _find_field_usages(field="recurso") NO incluya hits de componente y viceversa.
+_RECURSO_CALL_RE = re.compile(
+    r'(?:setRecurso|\.(?:recurso|resource))'
+    r'\s*\(\s*(?P<arg>(?:[^()]+|\([^()]*\))+?)\s*\)',
+)
+_COMPONENTE_CALL_RE = re.compile(
+    r'(?:setComponente|\.(?:componente|component))'
+    r'\s*\(\s*(?P<arg>(?:[^()]+|\([^()]*\))+?)\s*\)',
+)
+
+# Pre-scan: marcadores que un archivo Java debe contener para ser considerado
+# relacionado al bloque error. Filtra falsos positivos de .resource()/.component()
+# en contextos HTTP, RestTemplate, builders no-error, etc.
+_ERROR_CONTEXT_MARKERS = (
+    "ServiceError",
+    "GenericError",
+    "SoapError",
+    "errorBuilder",
+    "Error.builder",
+    "setRecurso",
+    "setComponente",
+    "error.recurso",
+    "error.componente",
+    "error.resource",
+    "error.component",
+)
+
+
+def _file_has_error_context(content: str) -> bool:
+    """True si el archivo menciona alguno de los marcadores de bloque error."""
+    return any(marker in content for marker in _ERROR_CONTEXT_MARKERS)
+
+
+def _find_field_usages(src_java: Path, field: str) -> list[FieldUsage]:
+    """Recorre todos los .java bajo src_java y devuelve los usos del campo error.
+
+    `field` es "recurso" o "componente". Para cada uso detectado:
+      1. Extrae argumento crudo (Etapa 1: _extract_call_arg via regex por-campo).
+      2. Clasifica (Etapa 1: _classify_arg).
+      3. Resuelve si es CONST_* (Etapa 2: _resolve_const, con cache compartido).
+
+    Pre-scan: archivos sin marcadores de bloque error se descartan completos.
+    Esto evita falsos positivos de .resource()/.component() en RestTemplate y
+    similares, sin perder ningun caso real verificado en 0077/0013/0010/0022.
+    """
+    if field == "recurso":
+        regex = _RECURSO_CALL_RE
+    elif field == "componente":
+        regex = _COMPONENTE_CALL_RE
+    else:
+        raise ValueError(f"field debe ser 'recurso' o 'componente', no '{field}'")
+
+    usages: list[FieldUsage] = []
+    file_cache: dict[Path, str] = {}
+
+    for f in src_java.rglob("*.java"):
+        if ".git" in f.parts or "build" in f.parts:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not _file_has_error_context(content):
+            continue
+        file_cache[f] = content
+
+        for i, line in enumerate(content.splitlines(), 1):
+            for m in regex.finditer(line):
+                arg_raw = m.group("arg").strip()
+                kind, value = _classify_arg(arg_raw)
+                if kind == "LITERAL":
+                    resolved = value
+                else:
+                    resolved = _resolve_const(src_java, kind, arg_raw, content, file_cache)
+                usages.append(FieldUsage(
+                    file=f,
+                    line_no=i,
+                    line=line.rstrip(),
+                    arg_raw=arg_raw,
+                    arg_kind=kind,
+                    resolved_value=resolved,
+                ))
+
+    return usages
+
+
 def _resolve_const(
     src_java: Path,
     arg_kind: str,
