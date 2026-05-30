@@ -393,9 +393,9 @@ servicio**:
 | OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
 
 ```gradle
-// servicio OLA 1
+// servicio OLA 1 — valor: LIB_BNC_API_CLIENT_OLA1 (core/ola_policy.py)
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
-// servicio OLA 2
+// servicio OLA 2 — valor: LIB_BNC_API_CLIENT_OLA2 (core/ola_policy.py); pertenencia a OLA 2 segun OLA2_SERVICES
 implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'
 ```
 
@@ -471,7 +471,7 @@ siguen prohibidos porque se quedan atras al proximo CVE.
 
 ```gradle
 plugins {
-    id 'org.springframework.boot' version '3.5.14'
+    id 'org.springframework.boot' version '3.5.14'   // valor: SPRING_BOOT_BASELINE_VERSION (core/version_policy.py)
 }
 ```
 
@@ -526,10 +526,13 @@ Los 12 modulos core: `netty-common`, `netty-buffer`, `netty-transport`,
 `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`,
 `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`,
 `netty-handler-proxy`. Se excluyen los binarios nativos
-(`netty-transport-native-*`) y `netty-tcnative-*`.
+(`netty-transport-native-*`) y `netty-tcnative-*`. Lista oficial:
+`NETTY_CORE_MODULES` en `core/version_policy.py` (el .md ilustra; el policy manda).
 
 ```gradle
 // ✔ SI — WebFlux: arbol Netty completo, doble pin (dependency + force)
+// Valores: NETTY_WEBFLUX_ALLOWED_VERSION + NETTY_CORE_MODULES (core/version_policy.py).
+// El autofix fix_netty_full_tree_pin lee el policy, no el .md.
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 }
