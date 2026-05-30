@@ -13,7 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from capamedia_cli.core.checklist_rules import _classify_arg, _extract_call_arg
+from pathlib import Path
+
+from capamedia_cli.core.checklist_rules import (
+    _classify_arg,
+    _extract_call_arg,
+    _resolve_const,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +99,88 @@ def test_classify_arg(arg: str, expected: tuple[str, str | None]) -> None:
 # ---------------------------------------------------------------------------
 # Composicion: extract + classify (smoke test integrado)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _resolve_const (Etapa 2) — resuelve CONST_LOCAL y CONST_CLASS con I/O
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_const_literal_returns_none(tmp_path: Path) -> None:
+    """LITERAL ya viene resuelto desde _classify_arg; _resolve_const no aplica."""
+    assert _resolve_const(tmp_path, "LITERAL", '"x"', "") is None
+
+
+def test_resolve_const_expression_returns_none(tmp_path: Path) -> None:
+    """EXPRESSION nunca se puede resolver por regex."""
+    assert _resolve_const(tmp_path, "EXPRESSION", "", "") is None
+
+
+def test_resolve_const_local_found_in_current_file(tmp_path: Path) -> None:
+    """Patron 0010: RESOURCE definida en el mismo archivo del service."""
+    content = (
+        'package com.pichincha.sp.application.service;\n'
+        '\n'
+        'public class QueryGroupDigitalKeyServiceImpl {\n'
+        '    private static final String RESOURCE = "tnd-msa-sp-wsclientes0010/consultarGrupoClaveDigital01";\n'
+        '    // ... resto\n'
+        '}\n'
+    )
+    assert _resolve_const(tmp_path, "CONST_LOCAL", "RESOURCE", content) == \
+        "tnd-msa-sp-wsclientes0010/consultarGrupoClaveDigital01"
+
+
+def test_resolve_const_local_not_found(tmp_path: Path) -> None:
+    """CONST_LOCAL referenciada pero sin definicion -> None (MEDIUM despues)."""
+    assert _resolve_const(tmp_path, "CONST_LOCAL", "MISSING", "// nothing here\n") is None
+
+
+def test_resolve_const_class_found_in_utility(tmp_path: Path) -> None:
+    """Patron 0013: setRecurso(Catalog.WS_RECURSO) — la clase Catalog vive en otro archivo."""
+    catalog = tmp_path / "infrastructure" / "exception" / "CatalogExceptionConstants.java"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(
+        'package com.pichincha.sp.infrastructure.exception;\n'
+        '\n'
+        'public class CatalogExceptionConstants {\n'
+        '    public static final String WS_RECURSO =\n'
+        '        "tnd-msa-sp-wsclientes0013/ConsultarDatosLocalizacionCliente01";\n'
+        '    public static final String WS_COMPONENTE = "tnd-msa-sp-wsclientes0013";\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    assert _resolve_const(tmp_path, "CONST_CLASS", "CatalogExceptionConstants.WS_RECURSO", "") == \
+        "tnd-msa-sp-wsclientes0013/ConsultarDatosLocalizacionCliente01"
+    assert _resolve_const(tmp_path, "CONST_CLASS", "CatalogExceptionConstants.WS_COMPONENTE", "") == \
+        "tnd-msa-sp-wsclientes0013"
+
+
+def test_resolve_const_class_missing_class(tmp_path: Path) -> None:
+    """Constante referenciada sobre clase inexistente -> None."""
+    assert _resolve_const(tmp_path, "CONST_CLASS", "GhostConstants.X", "") is None
+
+
+def test_resolve_const_class_missing_constant(tmp_path: Path) -> None:
+    """Clase existe pero la constante no -> None."""
+    (tmp_path / "Cat.java").write_text(
+        'public class Cat { public static final String OTHER = "x"; }\n',
+        encoding="utf-8",
+    )
+    assert _resolve_const(tmp_path, "CONST_CLASS", "Cat.MISSING", "") is None
+
+
+def test_resolve_const_uses_cache(tmp_path: Path) -> None:
+    """El cache evita re-leer el mismo archivo."""
+    f = tmp_path / "Cat.java"
+    f.write_text('public static final String A = "valA";\n', encoding="utf-8")
+    cache: dict[Path, str] = {}
+    v1 = _resolve_const(tmp_path, "CONST_CLASS", "Cat.A", "", file_cache=cache)
+    assert v1 == "valA"
+    assert f in cache  # se cacheo en la 1a llamada
+    # Mutar el cache para simular: si se vuelve a leer el archivo, fallaria.
+    cache[f] = 'public static final String A = "valB";\n'
+    v2 = _resolve_const(tmp_path, "CONST_CLASS", "Cat.A", "", file_cache=cache)
+    assert v2 == "valB"  # uso el cache, no reabrio el archivo
 
 
 def test_extract_then_classify_for_each_real_pattern() -> None:

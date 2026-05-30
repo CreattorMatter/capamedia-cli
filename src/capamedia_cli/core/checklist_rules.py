@@ -325,6 +325,73 @@ def _classify_arg(arg: str) -> tuple[str, str | None]:
     return ("EXPRESSION", None)
 
 
+def _build_const_def_re(const_name: str) -> re.Pattern[str]:
+    """Construye una regex que matchea la definicion de una constante String.
+
+    Captura `[public/private/protected] [static] [final] String <NAME> = "<valor>"`
+    con `re.DOTALL` para tolerar saltos de linea entre `=` y la comilla
+    (multiline definitions raras pero existentes en codigo del banco).
+    """
+    return re.compile(
+        r'(?:public\s+|private\s+|protected\s+)?'
+        r'(?:static\s+)?(?:final\s+)?'
+        r'String\s+' + re.escape(const_name) + r'\s*=\s*["\']([^"\']*)["\']',
+        re.DOTALL,
+    )
+
+
+def _resolve_const(
+    src_java: Path,
+    arg_kind: str,
+    arg_ref: str,
+    current_file_content: str,
+    file_cache: dict[Path, str] | None = None,
+) -> str | None:
+    """Resuelve el valor concreto de una constante Java declarada como String.
+
+    - LITERAL: el caller ya tiene el valor; aqui retorna None (no aplica).
+    - CONST_LOCAL ("RESOURCE"): busca la definicion en `current_file_content`.
+    - CONST_CLASS ("Catalog.WS_RECURSO"): busca el archivo `Catalog.java` en
+      cualquier subdir de `src_java`, lee su contenido (cachea si se pasa
+      `file_cache`) y busca la constante `WS_RECURSO`.
+    - EXPRESSION: retorna None (no resoluble por regex).
+
+    Retorna el string sin comillas si lo encuentra, o None si no.
+    """
+    if arg_kind == "LITERAL":
+        return None
+    if arg_kind == "EXPRESSION":
+        return None
+
+    if arg_kind == "CONST_LOCAL":
+        m = _build_const_def_re(arg_ref).search(current_file_content)
+        return m.group(1) if m else None
+
+    if arg_kind == "CONST_CLASS":
+        class_name, _, const_name = arg_ref.partition(".")
+        if not class_name or not const_name:
+            return None
+        # Buscar todos los archivos {class_name}.java en el arbol.
+        for candidate in src_java.rglob(f"{class_name}.java"):
+            if ".git" in candidate.parts or "build" in candidate.parts:
+                continue
+            if file_cache is not None and candidate in file_cache:
+                content = file_cache[candidate]
+            else:
+                try:
+                    content = candidate.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if file_cache is not None:
+                    file_cache[candidate] = content
+            m = _build_const_def_re(const_name).search(content)
+            if m:
+                return m.group(1)
+        return None
+
+    return None
+
+
 def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     return sorted(
         f
