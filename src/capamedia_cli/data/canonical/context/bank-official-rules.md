@@ -13,6 +13,12 @@ summary: Reglas oficiales del banco - las 9 validaciones de validate_hexagonal.p
 
 El conocimiento de como resolver cada una vive aqui. No se copia de un servicio de referencia: se aplica la regla.
 
+> **Scope por patron**: algunas reglas aplican universal (a los 3 patrones reales:
+> BUS-WebFlux-BANCS, WAS-SOAP-JPA, ORQ-WebFlux); otras solo a uno o dos.
+> Ver [`pattern-scope.md`](pattern-scope.md) (matriz empirica basada en 38
+> servicios reales del banco, auditoria 2026-05-31) para el detalle de que
+> regla aplica a que patron y como el CLI lo filtra via `ctx.source_type`.
+
 ---
 
 ## Regla 1 - Capas hexagonales puras

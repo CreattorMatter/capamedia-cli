@@ -79,7 +79,12 @@ infrastructure/
 - application/ no importa infrastructure/
 - CERO @Autowired — solo @RequiredArgsConstructor
 - Metodos max 20 lineas, lineas max 100 columnas
-- **Logging:** usar `ServiceLogHelper log` inyectado + `@BpLogger` / `@BpTraceable` del banco. `@Slf4j` y `import org.slf4j.*` PROHIBIDOS (duplican log y rompen tracing corporativo — checklist Block 2.5 / 8.4).
+- **Logging por patron** (auditoria empirica 2026-05-31, 38 servicios reales):
+  - **BUS + `invocaBancs=true`** → `@BpLogger` / `@BpTraceable` corporativo + `ServiceLogHelper`. `@Slf4j` y `import org.slf4j.*` PROHIBIDOS (checklist Block 2.5 HIGH).
+  - **BUS sin BANCS** → `@BpLogger` preferido; `@Slf4j` tolerado (batch viejo `lote-20260421`) — checklist MEDIUM.
+  - **WAS migrado** → `@Slf4j` ACEPTADO (patron de facto: 8/8 servicios reales) — checklist MEDIUM, no HIGH.
+  - **ORQ migrado** → mezcla observada (8/12 `@Slf4j` + 2/12 `@BpLogger`) — checklist MEDIUM.
+  - Detalle empirico y matriz de reglas × patrones: ver [`pattern-scope.md`](pattern-scope.md).
 - HTTP 200 para errores de negocio (compatibilidad IIB)
 - HTTP 500 solo para SOAP Faults inesperados (los atrapa `ErrorResolverHandler`)
 - Todo el codigo en INGLES
