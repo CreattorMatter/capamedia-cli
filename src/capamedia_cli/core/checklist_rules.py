@@ -1886,12 +1886,19 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("2.1", "Block 2", "@BpTraceable en controllers", "pass", detail=f"{len(controllers)} controller(s)"))
 
-    # 2.5 - org.slf4j: severidad por patron (auditoria empirica 2026-05-31).
-    # Antes era HIGH universal. Pero 8/8 WAS migrados reales del banco usan
-    # @Slf4j; 10/12 ORQ usan @Slf4j; el batch viejo de BUS sin BANCS tambien.
-    # Solo BUS+invocaBancs=true es uniformemente @BpLogger en el banco.
-    # Ver pattern-scope.md para la matriz empirica completa.
-    slf4j = _grep_files(src_java, r"import org\.slf4j\.")
+    # 2.5 - slf4j (3 patrones): severidad por patron (auditoria 2026-05-31).
+    # Regex ampliada para detectar los 3 patrones que el autofix ya cubre
+    # (fix_slf4j_to_bplogger + fix_lombok_slf4j_removal):
+    #   - import org.slf4j.*           (legacy original)
+    #   - import lombok.extern.slf4j.Slf4j  (lombok annotation import)
+    #   - @Slf4j                       (lombok annotation, sin import explicito)
+    # Antes solo detectaba el primero — gap que dejaba a 8/8 WAS reales (que
+    # usan @Slf4j lombok) invisibles para el check. Severidad por patron via
+    # ctx.source_type + ctx.has_bancs (ver pattern-scope.md).
+    slf4j = _grep_files(
+        src_java,
+        r"(?:import\s+org\.slf4j\.|import\s+lombok\.extern\.slf4j\.Slf4j|@Slf4j\b)",
+    )
     if not slf4j:
         results.append(CheckResult("2.5", "Block 2", "Sin imports org.slf4j", "pass"))
     else:

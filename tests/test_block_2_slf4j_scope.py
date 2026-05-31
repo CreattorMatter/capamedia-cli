@@ -141,34 +141,25 @@ def test_check_25_high_for_unknown_source(tmp_path: Path, source_type: str) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_check_25_real_was_0010_documents_actual_behavior() -> None:
-    """Smoke E2E sobre WSClientes0010 real (WAS) — documenta el GAP REAL.
+def test_check_25_real_was_0010_now_detects_lombok() -> None:
+    """Smoke E2E sobre WSClientes0010 real (WAS) — DETECTA @Slf4j lombok.
 
-    HALLAZGO de la sesion Lote D: el check 2.5 actual solo detecta
-    'import org.slf4j.' (regex original). PERO los WAS reales usan @Slf4j
-    de lombok (que importa 'lombok.extern.slf4j.Slf4j', NO 'org.slf4j.').
-    Por eso 0010 pasa el check con status=pass, sin necesidad del guard.
-
-    Esto significa que la prohibicion '@Slf4j prohibido' del canonical
-    historico NUNCA se aplico de facto en WAS — el gap esta en la
-    implementacion del check, no en el scope. El guard que agregamos en la
-    Etapa C SIGUE VALIENDO para casos donde alguien usa `import org.slf4j`
-    directo (sin lombok), pero la cobertura real de '@Slf4j lombok' es 0.
-
-    Documentado en pattern-scope.md como 'gap conocido'. Si en el futuro se
-    decide ampliar el check para detectar @Slf4j lombok, este test debe
-    actualizarse a assert severity=='medium' (porque source_type='was').
+    HISTORIA:
+    - Inicialmente el check 2.5 solo detectaba `import org.slf4j.` directo.
+      Los WAS reales usan `@Slf4j` lombok (que importa
+      `lombok.extern.slf4j.Slf4j`) — invisible para el regex viejo.
+    - El gap fue descubierto via test smoke en el Lote D. El autofix
+      (fix_slf4j_to_bplogger) ya cubria los 3 patrones, pero el detector no.
+    - Resuelto: regex ampliada para los 3 patrones (org.slf4j, lombok import,
+      @Slf4j annotation). Combinado con el guard por source_type, los WAS
+      ahora se detectan correctamente con severity=MEDIUM (no HIGH).
     """
     real = Path("/Users/juliocesarsoriadiaz/Documentos/SmartSolutions/Banco Pichincha/Capa Media/lote-20260421/WSClientes0010/destino/tnd-msa-sp-wsclientes0010")
     if not real.is_dir():
         pytest.skip("0010 real no disponible (CI o no clonado)")
     ctx = CheckContext(migrated_path=real, legacy_path=None, source_type="was")
     r = _find_check_25(run_block_2(ctx))
-    # GAP CONOCIDO: 0010 usa @Slf4j lombok (import lombok.extern.slf4j.Slf4j)
-    # que NO matchea el regex actual del check (r"import org\.slf4j\."). El
-    # check da PASS — no detecta nada que prohibir.
+    # Esperado: detecta @Slf4j lombok, devuelve MEDIUM (no HIGH) por source_type=was.
     assert r is not None
-    assert r.status == "pass", (
-        f"Si el check ahora detecta @Slf4j lombok, este test debe actualizarse "
-        f"a esperar fail/medium. Detalle: {r.detail}"
-    )
+    assert r.status == "fail", f"Esperado detectar @Slf4j en WAS 0010, obtuvo {r.status}: {r.detail}"
+    assert r.severity == "medium", f"Esperado MEDIUM (WAS tolera @Slf4j), obtuvo {r.severity}: {r.detail}"
