@@ -534,6 +534,63 @@ def _resolve_const(
     return None
 
 
+# pdb (PodDisruptionBudget) — Regla 9h: SOAP services must declare it in
+# values-dev.yml with minAvailable: 1. Detecta el bloque YAML completo
+# (`pdb:\n  minAvailable: <N>`) y compara contra el valor esperado (1).
+_HELM_PDB_BLOCK_RE = re.compile(
+    r"^(?P<indent>\s*)pdb\s*:\s*$\n"
+    r"(?P<body>(?:(?P=indent)\s+.*\n)*)",
+    re.MULTILINE,
+)
+_PDB_MIN_AVAILABLE_RE = re.compile(
+    r"^\s*minAvailable\s*:\s*['\"]?(?P<value>\d+)",
+    re.MULTILINE,
+)
+
+
+def _pdb_min_available_value(yaml_text: str) -> str | None:
+    """Devuelve el valor de pdb.minAvailable si esta presente, None si no."""
+    block = _HELM_PDB_BLOCK_RE.search(yaml_text)
+    if not block:
+        return None
+    m = _PDB_MIN_AVAILABLE_RE.search(block.group("body"))
+    return m.group("value") if m else None
+
+
+def _helm_pdb_issues_for_soap(
+    helm_dir: Path, project_root: Path,
+) -> list[str]:
+    """Para SOAP: helm/values-dev.yml DEBE tener pdb.minAvailable=1.
+
+    Verifica SOLO values-dev.yml (la regla 9h aplica especificamente al
+    archivo de dev segun el commit 9b670da del banco). Devuelve lista de
+    issues humanos para concatenar al detail del check.
+    """
+    issues: list[str] = []
+    expected = "1"
+    # Buscar SOLO values-dev.yml / values-dev.yaml (la regla 9h aplica al
+    # values del entorno dev, no test/prod).
+    dev_files = [
+        f for f in helm_dir.iterdir()
+        if f.is_file() and f.name.lower() in {"values-dev.yml", "values-dev.yaml"}
+    ] if helm_dir.is_dir() else []
+    if not dev_files:
+        issues.append("helm/values-dev.yml no encontrado (Regla 9h requiere pdb ahi)")
+        return issues
+    for f in dev_files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = f.relative_to(project_root) if f.is_relative_to(project_root) else f
+        value = _pdb_min_available_value(text)
+        if value is None:
+            issues.append(f"{rel} - falta bloque `pdb:\\n  minAvailable: 1`")
+        elif value != expected:
+            issues.append(f"{rel} - pdb.minAvailable={value} (esperado {expected})")
+    return issues
+
+
 def _helm_yaml_files(helm_dir: Path) -> list[Path]:
     return sorted(
         f
@@ -2809,6 +2866,42 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         "pass",
                     )
                 )
+
+            # 7.5h - Regla 9h: SOAP requiere pdb.minAvailable=1 en values-dev.yml
+            # Aplica SOLO a project_type='soap'. REST (WebFlux y MVC) no necesitan
+            # pdb explicito — el scaffold MCP lo maneja cuando aplica.
+            # Origen: commit 9b670da del PromptCapaMedia (banco), 2026-04-23.
+            if (ctx.project_type or "").lower() == "soap":
+                pdb_issues = _helm_pdb_issues_for_soap(helm_dir, ctx.migrated_path)
+                if pdb_issues:
+                    results.append(
+                        CheckResult(
+                            "7.5h",
+                            "Block 7",
+                            "Helm values-dev.yml SOAP requiere pdb.minAvailable=1 (Regla 9h)",
+                            "fail",
+                            severity="high",
+                            detail="; ".join(pdb_issues[:6]),
+                            suggested_fix=(
+                                "Agregar al `helm/values-dev.yml` el bloque:\n"
+                                "  pdb:\n"
+                                "    minAvailable: 1\n"
+                                "Requerido por la infra del banco (PodDisruptionBudget). "
+                                "Sin esto, un rolling update puede tirar todos los pods "
+                                "simultaneamente. NO aplica a REST WebFlux (el scaffold MCP "
+                                "lo maneja). Ver bank-official-rules.md Regla 9h."
+                            ),
+                        )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            "7.5h",
+                            "Block 7",
+                            "Helm values-dev.yml SOAP con pdb.minAvailable=1",
+                            "pass",
+                        )
+                    )
 
     return results
 
