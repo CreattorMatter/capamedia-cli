@@ -46,6 +46,16 @@ stop and report a blocker instead of changing the archetype.
 7. **No historical reference projects.** Work only from the service workspace:
    `legacy/`, `umps/`, `tx/`, `destino/`, `.capamedia/fabrics.json`, and the
    canonical prompts/context.
+8. **Header validation: NONE.** Per BPTPSRE policy 2026-05-26 (see
+   `checklist-rules.md` BLOQUE 4): NO `HeaderRequestValidator.java`, NO
+   `Pattern.compile()` on `<headerIn>` fields, NO `.length() > N` checks, NO
+   `HeaderValidationProperties`. SOAP/MVC services in this prompt do NOT
+   invoke BANCS (rule 2 above), so the `<bancs>` null-check from the REST
+   prompt §4.6 also does NOT apply. DataPower handles header sizes/patterns
+   at the edge. Headers reach the `@Endpoint` and are propagated to the
+   response (`GenericHeaderOut`) without validation. If you see header
+   validation code copied from a legacy template, delete it — its presence
+   is a regression flagged HIGH by `run_block_4` checks 4.1, 4.2, 4.3 and 4.4.
 
 ## Expected Structure
 
