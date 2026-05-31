@@ -17,20 +17,14 @@ El conocimiento de como resolver cada una vive aqui. No se copia de un servicio 
 
 ## Regla 1 - Capas hexagonales puras
 
-**MUST**: proyecto tiene SOLO 3 dirs bajo `src/main/java/com/pichincha/sp/`:
-- `application/`
-- `domain/`
-- `infrastructure/`
+**MUST**: SOLO 3 dirs bajo `src/main/java/com/pichincha/sp/` —
+`application/`, `domain/`, `infrastructure/`.
 
-**NEVER**: agregar `service/`, `util/`, `helper/`, `config/`, `exception/` como directorios hermanos de las 3 capas. Si son utiles, van **dentro** de la capa correspondiente (`infrastructure/util/`, `application/service/`, etc).
+**NEVER**: agregar `service/`, `util/`, `helper/`, `config/`, `exception/`
+como hermanos de las 3 capas (van DENTRO de la capa correspondiente).
 
-```
-src/main/java/com/pichincha/sp/
-├── application/              ✔ OK
-├── domain/                   ✔ OK
-├── infrastructure/           ✔ OK
-└── util/                     ✘ NO - ilegal sibling
-```
+> **Layout completo + diagrama + reglas internas por capa** viven en
+> [`hexagonal.md`](hexagonal.md) §"Estructura de paquete raiz" — fuente unica.
 
 ---
 
@@ -39,13 +33,9 @@ src/main/java/com/pichincha/sp/
 **Fuente única**: [`bank-mcp-matrix.md`](bank-mcp-matrix.md) — espejo del PDF
 `BPTPSRE-Modos de uso`. Esta regla **no redefine** la matriz; la **aplica**.
 
-**Resumen operativo** (detalle, tabla de 8 casos y explicación en el canonical):
-
-| # | Trigger | Framework generado |
-|---|---|---|
-| **1** | `invocaBancs: true` | `webflux + rest` (override total) |
-| **2** | `deploymentType: orquestador` + `invocaBancs: false` | `webflux + rest` + `lib-event-logs` |
-| **3** | `projectType: soap` + `microservicio` + `invocaBancs: false` | `mvc + soap` + `spring-web-service` |
+**Resumen operativo**: las 3 reglas de override + tabla de 8 casos canonicos
++ logica de override viven en [`bank-mcp-matrix.md`](bank-mcp-matrix.md) — fuente unica.
+Esta seccion solo documenta la **implicacion en gradle** (que starter usar).
 
 **MUST**: antes de migrar, resolver la regla aplicable leyendo el canonical.
 **NEVER**: mezclar starters — `spring-boot-starter-webflux` **y**

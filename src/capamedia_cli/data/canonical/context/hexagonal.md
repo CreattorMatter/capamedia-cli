@@ -6,6 +6,25 @@ paths:
 
 # Reglas de Arquitectura Hexagonal OLA1
 
+## Estructura de paquete raiz
+
+**MUST**: proyecto tiene SOLO 3 dirs bajo `src/main/java/com/pichincha/sp/`:
+- `application/`
+- `domain/`
+- `infrastructure/`
+
+**NEVER**: agregar `service/`, `util/`, `helper/`, `config/`, `exception/` como
+directorios hermanos de las 3 capas. Si son utiles, van **dentro** de la capa
+correspondiente (`infrastructure/util/`, `application/service/`, etc).
+
+```
+src/main/java/com/pichincha/sp/
+├── application/              ✔ OK
+├── domain/                   ✔ OK
+├── infrastructure/           ✔ OK
+└── util/                     ✘ NO - ilegal sibling
+```
+
 ## domain/
 - CERO imports de org.springframework.* (excepcion: HttpStatus en GlobalErrorException si referencia lo usa)
 - CERO imports de jakarta.xml.*, jakarta.persistence.*
