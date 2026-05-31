@@ -70,7 +70,8 @@ DOC_WITHOUT_CHECK_BASELINE = {
     "8.3", "8.4", "8.5", "8.6",
     # nota: 0.2 y 7.5 NO van aca — tienen check via sub-checks (0.2a-g, 7.5c-f)
     # (b) gap de enforcement conocido — candidatos a check futuro
-    "4.1", "4.2", "4.3", "4.4", "4.5",  # Block 4 headerIn (reescrito v0.27.0)
+    # 4.1-4.5 (Block 4 headerIn): IMPLEMENTADOS en v0.29 (politica 2026-05-26).
+    # Removidos del baseline porque run_block_4 ya existe en checklist_rules.py.
     "14.1",  # Spring Boot Validation starter (drift detectado, sin check)
     "19.1",  # ver 19.0 arriba
 }

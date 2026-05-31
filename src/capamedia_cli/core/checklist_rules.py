@@ -4502,11 +4502,266 @@ def run_block_22(ctx: CheckContext) -> list[CheckResult]:
     return results
 
 
+# -- Block 4: Validacion de <headerIn> (politica 2026-05-26) ---------------
+# Politica BPTPSRE: la clase HeaderRequestValidator con regex + maxLength se
+# elimina del proyecto. La validacion de tamanos/patrones del header queda
+# delegada a DataPower (capa de borde). En el microservicio solo se permite
+# null-check del bloque <bancs>, y unicamente en servicios que invocan BANCS
+# Core Adapter (BUS/IIB con invocaBancs=true).
+#
+# Auditoria empirica 2026-05-31: 16/42 servicios reales tienen
+# HeaderRequestValidator.java (violan la politica). Este block lo detecta.
+#
+# Espejo textual de BLOQUE 4 en `checklist-rules.md` (canonical de checks).
+
+# Campos del <headerIn> que NO se deben validar por regex/length en el controller.
+_HEADER_FIELDS = (
+    "dispositivo", "empresa", "canal", "medio", "aplicacion", "agencia",
+    "tipoTransaccion", "geolocalizacion", "usuario", "unicidad", "guid",
+    "fechaHora", "filler", "idioma", "sesion", "ip", "idCliente",
+    "tipoIdCliente",
+)
+_HEADER_FIELDS_LOWER = tuple(f.lower() for f in _HEADER_FIELDS)
+
+
+def _header_field_in_line(line: str) -> str | None:
+    """Devuelve el nombre del campo header si la linea lo referencia."""
+    low = line.lower()
+    for f in _HEADER_FIELDS_LOWER:
+        # buscar patron .getFoo() o .Foo (case-insensitive)
+        if f".get{f}(" in low or f".{f}(" in low or f'"{f}"' in low:
+            return f
+    return None
+
+
+def run_block_4(ctx: CheckContext) -> list[CheckResult]:
+    """Block 4 (politica 2026-05-26): Validacion de <headerIn>.
+
+    HeaderRequestValidator con regex + maxLength PROHIBIDO. Solo null-check
+    de <bancs> en BUS+BANCS=true. Mirror de BLOQUE 4 en checklist-rules.md.
+
+    Checks:
+      4.1 - NO existe HeaderRequestValidator.java en infrastructure/.
+      4.2 - NO Pattern.compile() ni .length() > N sobre campos del header.
+      4.3 - Null-check de <bancs> SOLO si invocaBancs=true (sin null-check
+            cuando aplica -> HIGH; con null-check cuando NO aplica -> MEDIUM).
+      4.4 - NO HeaderValidationProperties / @ConfigurationProperties con
+            patterns externalizados.
+      4.5 - Codigos 9927/9996 solo para falta de <bancs> (otros usos =
+            residuo del validator viejo).
+    """
+    results: list[CheckResult] = []
+    src_java = ctx.migrated_path / "src" / "main" / "java"
+    if not src_java.is_dir():
+        return results
+
+    # 4.1 - HeaderRequestValidator.java NO debe existir
+    validators = [
+        f for f in src_java.rglob("HeaderRequestValidator*.java")
+        if ".git" not in f.parts and "build" not in f.parts
+    ]
+    if validators:
+        sample = validators[0].relative_to(ctx.migrated_path) if validators[0].is_relative_to(ctx.migrated_path) else validators[0]
+        results.append(CheckResult(
+            "4.1", "Block 4",
+            "NO existe HeaderRequestValidator (politica 2026-05-26)",
+            "fail", severity="high",
+            detail=f"{len(validators)} archivo(s) HeaderRequestValidator*.java encontrados. Ejemplo: {sample}",
+            suggested_fix=(
+                "Eliminar HeaderRequestValidator.java y su test. La validacion "
+                "de tamanos/patrones del header queda en DataPower. En el "
+                "microservicio, solo null-check inline de <bancs> si invocaBancs=true."
+            ),
+        ))
+    else:
+        results.append(CheckResult(
+            "4.1", "Block 4",
+            "NO existe HeaderRequestValidator (politica 2026-05-26)",
+            "pass",
+        ))
+
+    # 4.2 - NO regex/maxLength sobre campos del header en controllers
+    regex_hits: list[tuple[Path, int, str]] = []
+    length_hits: list[tuple[Path, int, str]] = []
+    for controller in list(src_java.rglob("*Controller.java")) + list(src_java.rglob("*Endpoint.java")):
+        if ".git" in controller.parts or "build" in controller.parts: continue
+        try:
+            lines = controller.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            # Pattern.compile aplicado a campo del header
+            if "Pattern.compile" in line:
+                # Mirar tambien las 3 lineas adyacentes para contexto (definicion de constante)
+                ctx_block = "\n".join(lines[max(0, i-2):min(len(lines), i+3)])
+                # Si en el contexto aparece algun campo del header, es una violacion
+                for f in _HEADER_FIELDS_LOWER:
+                    if f in ctx_block.lower():
+                        regex_hits.append((controller, i, line.strip()))
+                        break
+            # .length() > N o .length() >= N sobre un campo header en la misma linea
+            if re.search(r"\.length\s*\(\s*\)\s*[><]=?\s*\d+", line):
+                if _header_field_in_line(line):
+                    length_hits.append((controller, i, line.strip()))
+    if regex_hits or length_hits:
+        sample = (regex_hits + length_hits)[0]
+        rel = sample[0].relative_to(ctx.migrated_path) if sample[0].is_relative_to(ctx.migrated_path) else sample[0]
+        results.append(CheckResult(
+            "4.2", "Block 4",
+            "NO regex/maxLength sobre campos de <headerIn> en controller",
+            "fail", severity="high",
+            detail=f"{len(regex_hits)} Pattern.compile + {len(length_hits)} .length()>N en {sample[0].name}:{sample[1]}",
+            suggested_fix=(
+                "Eliminar Pattern.compile() y comparaciones .length() sobre "
+                "campos del header (dispositivo/canal/medio/etc.). DataPower "
+                "valida tamanos en la capa de borde."
+            ),
+        ))
+    else:
+        results.append(CheckResult(
+            "4.2", "Block 4",
+            "NO regex/maxLength sobre campos de <headerIn> en controller",
+            "pass",
+        ))
+
+    # 4.3 - Null-check de <bancs>: presencia condicional segun invocaBancs
+    bancs_check_re = re.compile(
+        r"(?:headerIn\s*==\s*null|getBancs\s*\(\s*\)\s*==\s*null|"
+        r"headerIn\s*\.\s*getBancs\s*\(\s*\)\s*==\s*null)",
+        re.IGNORECASE,
+    )
+    bancs_check_hits: list[tuple[Path, int, str]] = []
+    for controller in list(src_java.rglob("*Controller.java")):
+        if ".git" in controller.parts or "build" in controller.parts: continue
+        try:
+            content = controller.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for i, line in enumerate(content.splitlines(), 1):
+            if bancs_check_re.search(line):
+                bancs_check_hits.append((controller, i, line.strip()))
+
+    if ctx.has_bancs:
+        # Debe existir el null-check
+        if not bancs_check_hits:
+            results.append(CheckResult(
+                "4.3", "Block 4",
+                "Null-check de <bancs> presente en controller (invocaBancs=true)",
+                "fail", severity="high",
+                detail="invocaBancs=true pero no se encontro `headerIn == null` ni `getBancs() == null` en ningun controller",
+                suggested_fix=(
+                    "Agregar al inicio del controller: "
+                    "if (headerIn == null || headerIn.getBancs() == null) "
+                    "return buildHeaderMissingResponse(...). Sin validator class, sin regex."
+                ),
+            ))
+        else:
+            results.append(CheckResult(
+                "4.3", "Block 4",
+                "Null-check de <bancs> presente en controller (invocaBancs=true)",
+                "pass",
+                detail=f"{len(bancs_check_hits)} null-check(s) encontrado(s)",
+            ))
+    else:
+        # NO debe existir (es residuo del template viejo)
+        if bancs_check_hits:
+            sample = bancs_check_hits[0]
+            rel = sample[0].relative_to(ctx.migrated_path) if sample[0].is_relative_to(ctx.migrated_path) else sample[0]
+            results.append(CheckResult(
+                "4.3", "Block 4",
+                "Null-check de <bancs> NO debe existir (invocaBancs=false)",
+                "fail", severity="medium",
+                detail=f"{len(bancs_check_hits)} null-check(s) en servicio sin BANCS. Ejemplo: {rel}:{sample[1]}",
+                suggested_fix=(
+                    "Eliminar el null-check del <bancs> — el servicio no invoca "
+                    "BANCS, no necesita validar ese bloque. Residuo del template viejo."
+                ),
+            ))
+        else:
+            results.append(CheckResult(
+                "4.3", "Block 4",
+                "Sin null-check de <bancs> (invocaBancs=false)",
+                "pass",
+            ))
+
+    # 4.4 - NO HeaderValidationProperties / @ConfigurationProperties con patterns
+    hv_props_files = [
+        f for f in src_java.rglob("HeaderValidation*.java")
+        if ".git" not in f.parts and "build" not in f.parts
+    ]
+    if hv_props_files:
+        sample = hv_props_files[0].relative_to(ctx.migrated_path) if hv_props_files[0].is_relative_to(ctx.migrated_path) else hv_props_files[0]
+        results.append(CheckResult(
+            "4.4", "Block 4",
+            "NO HeaderValidationProperties (politica 2026-05-26)",
+            "fail", severity="high",
+            detail=f"{len(hv_props_files)} archivo(s) HeaderValidation*.java. Ejemplo: {sample}",
+            suggested_fix=(
+                "Eliminar HeaderValidationProperties y los entries header.* "
+                "del application.yml. Sin patterns externalizados (DataPower valida)."
+            ),
+        ))
+    else:
+        results.append(CheckResult(
+            "4.4", "Block 4",
+            "NO HeaderValidationProperties (politica 2026-05-26)",
+            "pass",
+        ))
+
+    # 4.5 - 9927/9996 solo deben aparecer en contexto de bancs missing.
+    # Heuristica: buscar literales "9927" y "9996" en codigo, filtrar los
+    # que estan cerca de la palabra "bancs" o "header" (validos); el resto
+    # es probable residuo del validator viejo.
+    code_9927_hits: list[tuple[Path, int, str]] = []
+    code_9996_hits: list[tuple[Path, int, str]] = []
+    for java in src_java.rglob("*.java"):
+        if ".git" in java.parts or "build" in java.parts: continue
+        try:
+            text = java.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for i, line in enumerate(lines, 1):
+            for code, hits in (("9927", code_9927_hits), ("9996", code_9996_hits)):
+                if f'"{code}"' not in line:
+                    continue
+                ctx_block = "\n".join(lines[max(0, i-3):min(len(lines), i+4)]).lower()
+                # Valido si el contexto cercano menciona bancs/header
+                if "bancs" in ctx_block or "header" in ctx_block:
+                    continue
+                hits.append((java, i, line.strip()))
+    suspect = code_9927_hits + code_9996_hits
+    if suspect:
+        sample = suspect[0]
+        rel = sample[0].relative_to(ctx.migrated_path) if sample[0].is_relative_to(ctx.migrated_path) else sample[0]
+        results.append(CheckResult(
+            "4.5", "Block 4",
+            "Codigos 9927/9996 fuera de contexto bancs/header (residuo validator viejo)",
+            "fail", severity="medium",
+            detail=f"{len(code_9927_hits)} hit(s) 9927 + {len(code_9996_hits)} 9996 sin contexto bancs/header. Ejemplo: {rel}:{sample[1]}",
+            suggested_fix=(
+                "Revisar: 9927/9996 son codigos del catalogo solo para falta de "
+                "<bancs>. Si aparecen en otra ruta (longitud excedida, pattern "
+                "mismatch, campo nulo que no sea <bancs>), es residuo del "
+                "validator viejo eliminado por la politica 2026-05-26."
+            ),
+        ))
+    else:
+        results.append(CheckResult(
+            "4.5", "Block 4",
+            "Codigos 9927/9996 solo en contexto bancs/header",
+            "pass",
+        ))
+
+    return results
+
+
 ALL_BLOCKS = [
     ("Block 0", run_block_0),
     ("Block 1", run_block_1),
     ("Block 2", run_block_2),
     ("Block 3", run_block_3),  # v0.22.0: naming profesional
+    ("Block 4", run_block_4),  # v0.29: validacion <headerIn> politica 2026-05-26
     ("Block 5", run_block_5),
     ("Block 7", run_block_7),
     ("Block 8", run_block_8),  # v0.23.33: Spring Boot baseline
