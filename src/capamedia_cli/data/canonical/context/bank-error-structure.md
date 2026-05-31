@@ -84,10 +84,14 @@ error.setComponente("tnd-msa-sp-wsclientes0077");                     // LITERAL
 error.setBackend(backend);                                           // catálogo codigosBackend.xml (00045 BANCS / 00638 IIB)
 ```
 
-> **Por qué `recurso`/`componente` van como string LITERAL** (no constante ni
-> variable): el análisis estático del banco (checklist 15.2/15.3) los detecta con
-> grep sobre el fuente. Si se pasan vía constante/variable, el check no los ve.
-> El código real del 0077 los inlinea por esta razón.
+> **Sobre LITERAL vs CONSTANTE en `recurso`/`componente`**: historicamente el
+> ejemplo del 0077 usa string LITERAL porque el check 15.2/15.3 original solo
+> hacia grep de literal. **Actualizado v0.29**: el check ahora resuelve
+> CONST_CLASS y CONST_LOCAL via `_resolve_const`, asi que AMBOS patrones son
+> validos (ver §"recurso y componente — formato detallado" mas abajo para el
+> patron completo con ambos estilos). El analisis estatico del banco sigue
+> prefiriendo literal porque es mas grep-friendly fuera del CLI; el CLI no
+> distingue.
 
 ## Tipos canónicos (`error.tipo`)
 
