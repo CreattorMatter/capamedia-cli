@@ -126,6 +126,85 @@ Block 5.7b (nuevo en v0.27.1).
 diferenciación que hace el legacy con `ERROR` / `INFO`. Validado por checklist
 Block 5.6.5.
 
+## recurso y componente — formato detallado (origen BTHCCC-6826)
+
+**Origen**: PDF `BPTPSRE-Estructura de error` + QA del banco (ticket BTHCCC-6826,
+hallazgo de 2026-05 sobre `WSClientes0011`).
+
+**Aplica a**: WAS, BUS/IIB y ORQ — **los tres tipos**. El estandar de error es
+unico, no varia por source type.
+
+### Formato canonico (tabla OK vs HIGH)
+
+| Campo | Formato | Ejemplo OK | Ejemplo HIGH (rechazado por QA) |
+|---|---|---|---|
+| `recurso` | `<spring.application.name>/<metodo>` | `csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion` | `WSClientes0011/ConsultarDatosIdentificacion` |
+| `componente` | uno de los 3 valores canonicos (ver abajo) | `csg-msa-sp-wsclientes0011`, `ApiClient`, o `TX060480` | `WSClientes0011` |
+
+### Tres valores canonicos para `componente`
+
+1. **`<namespace>-msa-sp-<svc>`** (= `spring.application.name`): error interno
+   del servicio migrado o respuesta exitosa.
+2. **`ApiClient`** (o nombre exacto de libreria): error propagado desde
+   `lib-bnc-api-client` u otra libreria interna.
+3. **`TX<NNNNNN>`** (prefijo `TX` + 6 digitos): error de negocio propagado
+   desde el Core Adapter.
+
+> **Caso downstream**: si el error se propaga desde un servicio downstream
+> migrado (ej. ORQ que invoca a WSClientes0046), el `componente` debe ser
+> `ApiClient`, `TX<NNNNNN>` o el nombre migrado del downstream
+> (`<ns>-msa-sp-<downstream-svc>`), **NUNCA** el nombre legacy
+> (`WSClientes0046`). El autofix 9j conservadoramente NO reescribe nombres
+> de downstream (necesitaria conocer el migrado del otro servicio); el
+> agente migrador debe elegir entre las 3 opciones.
+
+### Patron Java (ambos validos, el check resuelve constantes)
+
+El check 15.2/15.3 (`run_block_15`) detecta el valor en los 4 patrones reales
+del banco: LITERAL directo en setter, CONST_CLASS, CONST_LOCAL en builder
+ingles, CONST_CLASS en builder espanol. Usa `_resolve_const` para leer la
+definicion de la constante. Por lo tanto, **ambos patrones son aceptados**:
+
+```java
+// ✔ OK — LITERAL directo (caso WSClientes0077, mas grep-friendly):
+error.setRecurso("csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion");
+error.setComponente("csg-msa-sp-wsclientes0011");
+
+// ✔ OK — CONSTANTE centralizada (caso WSClientes0013, mas mantenible):
+@UtilityClass
+public class CatalogExceptionConstants {
+    public static final String WS_COMPONENTE = "csg-msa-sp-wsclientes0011";
+    public static final String WS_RECURSO_PREFIX = WS_COMPONENTE + "/";
+}
+// En el helper que construye el <error>:
+error.setRecurso(CatalogExceptionConstants.WS_RECURSO_PREFIX + operationName);
+error.setComponente(CatalogExceptionConstants.WS_COMPONENTE);
+```
+
+**Eleccion**: literal es mas explicito y mas facil de auditar visualmente;
+constante es mas mantenible si cambia el namespace. Para servicios nuevos,
+preferir constante centralizada con el literal alineado a `spring.application.name`.
+
+### Justificacion (CMDB / Backstage)
+
+El nombre legacy IIB/WAS/ORQ es referencia interna (logs, trazabilidad), no
+contrato externo. Lo que el banco audita en produccion es el `recurso` y
+`componente` del response — esos identifican univocamente al microservicio
+MIGRADO en el catalogo Backstage y en CMDB. Un response con
+`<componente>WSClientes0011</componente>` no aparece registrado en CMDB y QA
+lo reporta como bug bloqueante (BTHCCC-6826).
+
+### Validacion en el CLI
+
+- **Check 15.2** (`recurso`) y **Check 15.3** (`componente`) en
+  `core/checklist_rules.py::run_block_15`. Detectan nombre legacy con
+  severity HIGH; diferencian legacy del PROPIO servicio (autofixeable)
+  vs DOWNSTREAM (decision semantica).
+- **Autofix 9j** en `core/bank_autofix.py::fix_legacy_name_in_error_payload`:
+  Pass 1 (regex setter+literal directo) + Pass 2 (`_find_field_usages` con
+  resolucion de constantes; cubre los 4 patrones reales del banco).
+- Test: `tests/test_block_15_legacy_name.py` (21 casos).
+
 ## Formato segun contrato expuesto
 
 El bloque `<error>` conserva los mismos 7 campos canonicos. El formato de

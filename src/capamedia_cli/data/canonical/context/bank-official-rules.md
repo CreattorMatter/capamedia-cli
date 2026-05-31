@@ -991,66 +991,30 @@ agregarla.
 
 ## Regla 9j - `error.recurso` y `error.componente` usan el nombre del componente MIGRADO
 
-**Origen**: PDF `BPTPSRE-Estructura de error` + QA del banco (ticket BTHCCC-6826,
-hallazgo de 2026-05 sobre `WSClientes0011`).
-
-**Aplica a**: WAS, BUS/IIB y ORQ — **los tres tipos**. El estandar de error es
-unico, no varia por source type.
+**Origen**: ticket BTHCCC-6826 (2026-05, sobre `WSClientes0011`).
+**Aplica a**: WAS, BUS/IIB y ORQ — los 3 tipos, estandar unico.
 
 **MUST**: el response del microservicio migrado debe poner el **nombre del
 componente MIGRADO** (`spring.application.name` = `<namespace>-msa-sp-<svc>`)
-en estos dos campos. NUNCA el `metadata.name` fijo `tpl-middleware` ni el
-nombre legacy IIB/WAS/ORQ corto (`WSClientes0011`, `ORQTransferencias0003`,
+en `recurso` y `componente`. NUNCA el `metadata.name` fijo `tpl-middleware`
+ni el nombre legacy IIB/WAS/ORQ (`WSClientes0011`, `ORQTransferencias0003`,
 `UMPClientes0002`, etc.).
 
-### Formato canonico
+> **Formato canonico, 3 valores canonicos del componente, tabla OK/HIGH,
+> patron Java y justificacion CMDB**: viven en
+> [`bank-error-structure.md`](bank-error-structure.md) §"recurso y componente
+> — formato detallado" — fuente unica. Esta regla aplica el contrato.
 
-| Campo | Formato | Ejemplo OK | Ejemplo HIGH (rechazado por QA) |
-|---|---|---|---|
-| `recurso` | `<spring.application.name>/<metodo>` | `csg-msa-sp-wsclientes0011/ConsultarDatosIdentificacion` | `WSClientes0011/ConsultarDatosIdentificacion` |
-| `componente` | uno de los 3 valores canonicos (ver abajo) | `csg-msa-sp-wsclientes0011` o `ApiClient` o `TX060480` | `WSClientes0011` |
-
-### Tres valores canonicos para `componente`
-
-1. **`<namespace>-msa-sp-<svc>`** (= `spring.application.name`): error interno
-   del servicio migrado o respuesta exitosa.
-2. **`ApiClient`** (o nombre exacto de libreria): error propagado desde
-   `lib-bnc-api-client` u otra libreria interna.
-3. **`TX<NNNNNN>`** (prefijo `TX` + 6 digitos): error de negocio propagado
-   desde el Core Adapter.
-
-### Patron recomendado
-
-Preferir inyeccion dinamica via `@Value("${spring.application.name}")` o uso de
-constante centralizada, en lugar de literal:
-
-```java
-@UtilityClass
-public class CatalogExceptionConstants {
-    // Valor canonico — alinea con spring.application.name
-    public static final String WS_COMPONENTE = "csg-msa-sp-wsclientes0011";
-    public static final String WS_RECURSO_PREFIX = WS_COMPONENTE + "/";
-}
-
-// En el helper que construye el <error>:
-error.setRecurso(WS_RECURSO_PREFIX + operationName);
-error.setComponente(WS_COMPONENTE);
-```
-
-### Justificacion
-
-El nombre legacy IIB/WAS/ORQ es referencia interna (logs, trazabilidad), no
-contrato externo. Lo que el banco audita en produccion es el `recurso` y
-`componente` del response — esos identifican univocamente al microservicio
-MIGRADO en el catalogo Backstage y en CMDB. Un response con
-`<componente>WSClientes0011</componente>` no aparece registrado en CMDB y QA
-lo reporta como bug bloqueante.
-
-### Validacion
-
-Checklist `Block 15.2` y `Block 15.3` (codigo en
-`capamedia_cli/core/checklist_rules.py:run_block_15`) detectan el patron legacy
-con severidad HIGH. Test: `tests/test_block_15_legacy_name.py`.
+**Validacion en el gate**:
+- Checks `15.2` y `15.3` (`core/checklist_rules.py::run_block_15`) detectan
+  el patron legacy con severity HIGH. Cobertura ampliada (Etapas 1-7 del fix
+  v0.29): los 4 patrones reales del banco (LITERAL en setter, CONST_CLASS,
+  CONST_LOCAL en builder ingles, CONST_CLASS en builder espanol).
+- Autofix `9j` (`core/bank_autofix.py::fix_legacy_name_in_error_payload`):
+  Pass 1 (regex setter+literal) + Pass 2 (resuelve constantes via
+  `_find_field_usages`). Reescribe legacy del PROPIO servicio; downstream
+  legacy queda para decision semantica del migrador (ver suggested_fix).
+- Test: `tests/test_block_15_legacy_name.py` (21 casos).
 
 ---
 
