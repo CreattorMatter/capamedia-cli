@@ -1886,12 +1886,36 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("2.1", "Block 2", "@BpTraceable en controllers", "pass", detail=f"{len(controllers)} controller(s)"))
 
-    # 2.5 - Sin imports de org.slf4j
+    # 2.5 - org.slf4j: severidad por patron (auditoria empirica 2026-05-31).
+    # Antes era HIGH universal. Pero 8/8 WAS migrados reales del banco usan
+    # @Slf4j; 10/12 ORQ usan @Slf4j; el batch viejo de BUS sin BANCS tambien.
+    # Solo BUS+invocaBancs=true es uniformemente @BpLogger en el banco.
+    # Ver pattern-scope.md para la matriz empirica completa.
     slf4j = _grep_files(src_java, r"import org\.slf4j\.")
-    if slf4j:
-        results.append(CheckResult("2.5", "Block 2", "Sin imports org.slf4j", "fail", severity="high", detail=f"{len(slf4j)} hit(s)", suggested_fix="Usar ServiceLogHelper del banco, nunca import directo ni @Slf4j de Lombok"))
-    else:
+    if not slf4j:
         results.append(CheckResult("2.5", "Block 2", "Sin imports org.slf4j", "pass"))
+    else:
+        src = (ctx.source_type or "").lower()
+        is_bus_bancs = src in {"bus", "iib"} and ctx.has_bancs
+        is_unknown = src in {"", "unknown"}
+        if is_bus_bancs or is_unknown:
+            # HIGH: BUS+BANCS exige @BpLogger corporativo; sin source_type, conservador.
+            severity, fix = "high", (
+                "Usar ServiceLogHelper del banco + @BpLogger/@BpTraceable. "
+                "@Slf4j prohibido para BUS+BANCS (rompe tracing corporativo)."
+            )
+        else:
+            # MEDIUM: WAS, ORQ, BUS sin BANCS aceptan @Slf4j (patron de facto).
+            severity, fix = "medium", (
+                f"En {src.upper() or 'este patron'} el banco acepta @Slf4j de facto, pero @BpLogger "
+                "es preferido si hay trace corporativo disponible. Ver pattern-scope.md."
+            )
+        results.append(CheckResult(
+            "2.5", "Block 2", "Sin imports org.slf4j",
+            "fail", severity=severity,
+            detail=f"{len(slf4j)} hit(s) — patron={src or 'unknown'}, has_bancs={ctx.has_bancs}",
+            suggested_fix=fix,
+        ))
 
     # 2.8 - Log Level Coverage (INFO) en Controllers/Helpers/Clients
     # 2.9 - Log Level Coverage (DEBUG) en Controllers/Helpers/Clients
