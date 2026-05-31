@@ -296,38 +296,15 @@ public final class IdentificationNormalizer {
 
 ## Regla 6.5 — Header estandar en `application.yml`
 
-**MUST**: todo `application.yml` del microservicio incluye el bloque
-`spring.header.*` con valores literales (NO env vars). Son metadata del
-proyecto leidas por los interceptors de Optimus:
+**MUST**: todo `application.yml` del microservicio incluye `spring.header.channel: digital`
+y `spring.header.medium: web` como **literales** (NO env vars). Son metadata
+leidas por los interceptors de Optimus.
 
-```yaml
-spring:
-  application:
-    name: tnd-msa-sp-<service>        # literal, nombre del componente migrado
-  header:
-    channel: digital                  # literal, siempre "digital"
-    medium: web                       # literal, siempre "web"
-```
+**NEVER**: eliminar o convertir a `${CCC_*}`.
 
-**NEVER**: eliminar estos campos. El auto-fix de Regla 7 (`${VAR:default}` →
-`${VAR}`) solo aplica a variables de entorno — NO debe tocar `channel: digital`
-ni `medium: web` que son literales validos. Nuestro `fix_yml_remove_defaults`
-tiene guard explicito para este caso (usa el patron `${VAR:default}`, no
-matchea valores literales).
-
-**Bloque completo de referencia** (patron canonico del banco):
-
-```yaml
-spring:
-  application:
-    name: <namespace>-msa-sp-<svc>     # ej. tnd-msa-sp-wsclientes0007
-  header:
-    channel: digital
-    medium: web
-
-TPL_LOG_INFO: INFO
-TPL_LOG_DEBUG: DEBUG
-```
+> **Detalle completo** (bloque YAML, contexto del scaffold MCP, regla del
+> `lazy-initialization`, guard del autofix `fix_yml_remove_defaults`): ver
+> [Regla 9f](#regla-9f---preservar-el-applicationyml-del-mcp-scaffold-merge-no-replace).
 
 ---
 
@@ -698,6 +675,11 @@ spring:
 Motivo: la infraestructura del banco lee estas dos keys para el tracing y
 routing global. Son literales fijos que no cambian por ambiente.
 
+**Guard del autofix**: el auto-fix de Regla 7 (`fix_yml_remove_defaults`,
+patron `${VAR:default}` -> `${VAR}`) solo aplica a variables de entorno —
+NO debe tocar `channel: digital` ni `medium: web` que son literales validos.
+La regex del autofix matchea `${VAR:default}`, no valores literales sin `$`.
+
 **NEVER**:
 - Reemplazar el `application.yml` entero.
 - Quitar propiedades del scaffold pensando que "no se usan".
@@ -773,23 +755,22 @@ tener su entrada en `application.yml`. Incluye variables de:
     username: ${CCC-ORACLE-OMNI-CATALOGA-USER}
   ```
 
-- **NEVER inline defaults `${CCC_VAR:value}`**. TODO `${CCC_*}` obtiene su
-  valor **exclusivamente desde Helm**. Sin excepciones — ni siquiera para
-  codigos del catalogo oficial del banco.
-
-  **Por que**: permite que el Helm sea la unica fuente de verdad. Inline
-  defaults ocultan valores operativos y dificultan cambios sin redeploy.
+- **NEVER inline defaults `${CCC_VAR:value}`** (principio + excepcion
+  `optimus.web.*` + convencion de naming: ver [Regla 7](#regla-7---applicationyml-sin-valores-por-defecto)).
+  Aplicado a configurables legacy: TODO `${CCC_*}` obtiene su valor desde
+  Helm; codigos del catalogo del banco van como literal (no `${CCC_*}` con
+  default).
 
   ```yaml
-  # ✘ NO — inline default
+  # ✘ NO — inline default (viola Regla 7)
   error-messages:
     backend: ${CCC_BANCS_ERROR_CODE:00633}
 
-  # ✔ OK — si es constante del catalogo, literal
+  # ✔ OK — constante del catalogo, literal directo
   error-messages:
     backend: "00633"
 
-  # ✔ OK — si puede cambiar por ambiente, sin default (helm lo resuelve)
+  # ✔ OK — env-dependent, sin default (helm lo resuelve)
   error-messages:
     backend: ${CCC_BANCS_ERROR_CODE}
   ```
