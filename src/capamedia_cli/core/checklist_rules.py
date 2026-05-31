@@ -241,6 +241,31 @@ def _is_legacy_service_value(value: str) -> bool:
     return bool(_LEGACY_SERVICE_VALUE_RE.match(value))
 
 
+def _is_downstream_legacy(legacy_value: str, migrated_short: str | None) -> bool:
+    """True si el `legacy_value` es de OTRO servicio (downstream), no del propio.
+
+    Util para diferenciar dos casos en 15.2/15.3:
+    - Legacy del PROPIO servicio (autofixeable): el autofix reescribe.
+    - Legacy de DOWNSTREAM (no autofixeable): requiere decision semantica
+      del agente migrador (usar `ApiClient` o el nombre migrado del downstream).
+
+    Si `migrated_short` es None (no se pudo determinar el componente migrado),
+    retorna False — no se puede distinguir downstream sin esa referencia.
+    """
+    if not migrated_short or not legacy_value:
+        return False
+    legacy_prefix = legacy_value.split("/", 1)[0].lower()
+    return legacy_prefix != migrated_short.lower()
+
+
+def _migrated_short_name(component_name: str | None) -> str | None:
+    """Devuelve el sufijo del componente migrado (ej. 'wsclientes0011' desde
+    'tnd-msa-sp-wsclientes0011'). None si no hay component_name resoluble."""
+    if not component_name:
+        return None
+    return component_name.rsplit("-msa-sp-", 1)[-1].lower()
+
+
 def _setter_string_args(line: str, setter_name: str) -> list[str]:
     """Extract ALL string literal first-arguments of `setter_name(...)` in line.
 
@@ -3218,7 +3243,46 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
         unresolved_hits = [h for h in recurso_hits if h.resolved_value is None]
 
         if legacy_hits:
-            sample = legacy_hits[0]
+            migrated_short = _migrated_short_name(component_name)
+            own_legacy = [h for h in legacy_hits if not _is_downstream_legacy(h.resolved_value or "", migrated_short)]
+            downstream_legacy = [h for h in legacy_hits if _is_downstream_legacy(h.resolved_value or "", migrated_short)]
+            sample = (own_legacy or downstream_legacy)[0]
+            detail_parts = []
+            if own_legacy:
+                detail_parts.append(f"{len(own_legacy)} hit(s) legacy del PROPIO servicio (autofixeable)")
+            if downstream_legacy:
+                downstream_names = sorted({(h.resolved_value or "").split("/", 1)[0] for h in downstream_legacy})
+                detail_parts.append(
+                    f"{len(downstream_legacy)} hit(s) legacy de downstream "
+                    f"(decision semantica): {', '.join(downstream_names[:3])}"
+                )
+            detail = (
+                f"{' + '.join(detail_parts)}. Ejemplo: "
+                f"{_relative_display(sample.file, ctx.migrated_path)}:"
+                f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
+                f"\"{sample.resolved_value}\""
+            )
+            if downstream_legacy and not own_legacy:
+                fix = (
+                    "Detectado nombre legacy de servicio DOWNSTREAM (no del propio). "
+                    "El autofix NO lo toca para evitar inventar nombres migrados ajenos. "
+                    "Decision semantica del agente migrador: (a) usar 'ApiClient' (o el "
+                    "nombre exacto de la libreria) si el error se propaga desde una lib; "
+                    "(b) usar 'TX<NNNNNN>' si el error viene del Core Adapter del downstream; "
+                    "(c) si conoces el nombre migrado del downstream, usar "
+                    "'<ns>-msa-sp-<downstream>/<metodo>' explicitamente."
+                )
+            else:
+                fix = (
+                    "Reemplazar el nombre legacy (WS*/ORQ*/UMP*) por el "
+                    "spring.application.name del componente migrado "
+                    f"({component_name or '<namespace>-msa-sp-<svc>'}). "
+                    "QA del banco rechaza el response cuando recurso/componente "
+                    "trae el nombre legacy IIB/WAS. Si el valor viene de una "
+                    "constante (CatalogExceptionConstants.WS_RECURSO o similar), "
+                    "editar el literal en esa constante. El autofix 9j lo hace "
+                    "automaticamente para el propio servicio."
+                )
             results.append(
                 CheckResult(
                     "15.2",
@@ -3226,22 +3290,8 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     "recurso usa el nombre del componente migrado (no el legacy)",
                     "fail",
                     severity="high",
-                    detail=(
-                        f"{len(legacy_hits)} hit(s) con nombre legacy en recurso "
-                        f"(detectados con resolucion de constantes). Ejemplo: "
-                        f"{_relative_display(sample.file, ctx.migrated_path)}:"
-                        f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
-                        f"\"{sample.resolved_value}\""
-                    ),
-                    suggested_fix=(
-                        "Reemplazar el nombre legacy (WS*/ORQ*/UMP*) por el "
-                        "spring.application.name del componente migrado "
-                        f"({component_name or '<namespace>-msa-sp-<svc>'}). "
-                        "QA del banco rechaza el response cuando recurso/componente "
-                        "trae el nombre legacy IIB/WAS. Si el valor viene de una "
-                        "constante (CatalogExceptionConstants.WS_RECURSO o similar), "
-                        "editar el literal en esa constante."
-                    ),
+                    detail=detail,
+                    suggested_fix=fix,
                 )
             )
         elif no_slash_hits:
@@ -3329,7 +3379,47 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
         unresolved_hits = [h for h in componente_hits if h.resolved_value is None]
 
         if legacy_hits:
-            sample = legacy_hits[0]
+            migrated_short = _migrated_short_name(component_name)
+            own_legacy = [h for h in legacy_hits if not _is_downstream_legacy(h.resolved_value or "", migrated_short)]
+            downstream_legacy = [h for h in legacy_hits if _is_downstream_legacy(h.resolved_value or "", migrated_short)]
+            sample = (own_legacy or downstream_legacy)[0]
+            detail_parts = []
+            if own_legacy:
+                detail_parts.append(f"{len(own_legacy)} hit(s) legacy del PROPIO servicio (autofixeable)")
+            if downstream_legacy:
+                downstream_names = sorted({(h.resolved_value or "").split("/", 1)[0] for h in downstream_legacy})
+                detail_parts.append(
+                    f"{len(downstream_legacy)} hit(s) legacy de downstream "
+                    f"(decision semantica): {', '.join(downstream_names[:3])}"
+                )
+            detail = (
+                f"{' + '.join(detail_parts)}. Ejemplo: "
+                f"{_relative_display(sample.file, ctx.migrated_path)}:"
+                f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
+                f"\"{sample.resolved_value}\""
+            )
+            if downstream_legacy and not own_legacy:
+                fix = (
+                    "Detectado nombre legacy de servicio DOWNSTREAM en componente. "
+                    "El autofix NO reescribe valores de downstream (necesitaria conocer "
+                    "el nombre migrado del downstream para no inventar). Decision del "
+                    "agente migrador: (a) usar 'ApiClient' si el error se propaga "
+                    "desde una libreria interna; (b) usar 'TX<NNNNNN>' (6 digitos) si "
+                    "viene del Core Adapter; (c) si conoces el nombre migrado del "
+                    "downstream (<ns>-msa-sp-<svc>), usar ese literal explicitamente. "
+                    "El nombre legacy del downstream NO es valido como componente del "
+                    "response del propio servicio."
+                )
+            else:
+                fix = (
+                    "Reemplazar el nombre legacy por uno de: "
+                    f"(a) {component_name or '<namespace>-msa-sp-<svc>'} para errores "
+                    "internos del servicio migrado y respuestas exitosas, "
+                    "(b) 'ApiClient' para errores propagados desde lib-bnc-api-client, "
+                    "(c) 'TX<NNNNNN>' (6 digitos) para errores de negocio desde "
+                    "el Core Adapter. El autofix 9j lo hace automaticamente para el "
+                    "propio servicio."
+                )
             results.append(
                 CheckResult(
                     "15.3",
@@ -3337,21 +3427,8 @@ def run_block_15(ctx: CheckContext) -> list[CheckResult]:
                     "componente sin nombre legacy del servicio",
                     "fail",
                     severity="high",
-                    detail=(
-                        f"{len(legacy_hits)} hit(s) con nombre legacy en componente "
-                        f"(detectados con resolucion de constantes). Ejemplo: "
-                        f"{_relative_display(sample.file, ctx.migrated_path)}:"
-                        f"{sample.line_no} -> [{sample.arg_kind}] resuelve a "
-                        f"\"{sample.resolved_value}\""
-                    ),
-                    suggested_fix=(
-                        "Reemplazar el nombre legacy por uno de: "
-                        f"(a) {component_name or '<namespace>-msa-sp-<svc>'} para errores "
-                        "internos del servicio migrado y respuestas exitosas, "
-                        "(b) 'ApiClient' para errores propagados desde lib-bnc-api-client, "
-                        "(c) 'TX<NNNNNN>' (6 digitos) para errores de negocio desde "
-                        "el Core Adapter."
-                    ),
+                    detail=detail,
+                    suggested_fix=fix,
                 )
             )
         else:
