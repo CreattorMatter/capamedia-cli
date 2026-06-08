@@ -244,7 +244,11 @@ This prompt produces **two possible stacks** depending on the legacy source:
 **BANCS artifact gate:** only BUS/IIB with `invocaBancs=true` may contain
 `lib-bnc-api-client`, `BancsService`, `BancsClientHelper`, `bancs.webclients`,
 `CCC_BANCS_*`, or `dependsOn: lib-bnc-api-client`. WAS REST/MVC and ORQ REST
-must not add or keep those artifacts.
+must not add or keep those artifacts. Classification is driven by
+`.capamedia/fabrics.json` (`invoca_bancs`), NOT by counting `UMP*` references:
+a `UMP*` in the ESQL does NOT imply BANCS (e.g. `UMPSeguridad*` wraps Cyxtera
+SOAP, not a Core Adapter TX). Only a TX literal `0NNNNN` or a BANCS-prefixed UMP
+(`UMPClientes`, `UMPCuentas`, ...) implies BANCS.
 
 **Rule 5 — NEVER use `@Autowired` — always `@RequiredArgsConstructor`:**
 ```java
@@ -1492,6 +1496,25 @@ public class CustomerServiceImpl implements CustomerServicePort {
 **IMPORTANT:** The service uses ONLY the output port (NOT the adapter directly). The service contains ONLY @Override methods — all validation, normalization, formatting, and transformation logic MUST be in `application/util/` helper classes.
 
 **CONDITIONAL — Strategy pattern:** If the ANALYSIS identifies dual-source (BANCS + OCP/Stratio), also create `CustomerQueryStrategyPort` and strategy implementations. See Block 4.16.
+
+**CONDITIONAL — ORQ short-circuit parity (ORQ-RETURN-PARITY):** for orchestrators (`source_kind = orq`) that fan out to multiple downstreams with `Mono.zip(...)`, inspect the body of **each** legacy `PROCEDURE` before mapping a branch as mandatory. In IIB, `CALL Proc() INTO respuesta; IF NOT respuesta THEN RETURN FALSE;` *looks* mandatory, but if `Proc` has **no `RETURN FALSE`** in its error path (only falls through to the final `RETURN TRUE`), that downstream is **best-effort**: on failure the legacy continues with empty fields, it does NOT abort. Migrating it as a mandatory `Mono.zip` branch makes the service **stricter than legacy** and breaks production (e.g. customer with no advisor → 500 instead of 200 with empty fields).
+
+For each `CALL XXX INTO respuesta` of the ORQ:
+1. Locate `CREATE PROCEDURE XXX() RETURNS BOOLEAN` in the legacy ESQL.
+2. If it has `RETURN FALSE` in its error path → **mandatory** branch (no `.onErrorResume`).
+3. If it only has `RETURN TRUE` → **best-effort** branch: wrap it with `.onErrorResume(t -> Mono.just(EMPTY_RESPONSE))` so `Mono.zip` does not abort.
+4. Document in `MIGRATION_REPORT.md` which branches are mandatory vs best-effort, citing the inspected procedure.
+
+Keep the best-effort fallback OUT of the service (Service Purity): put the `EMPTY_*` constant and the `.onErrorResume` wrapper in an `application/util/` helper; the service only orchestrates. The doublecheck enforces this parity in **Check 5.13**.
+
+```java
+// application/util/CustomerDownstreamHelper.java — best-effort downstream (OP21)
+public static Mono<DownstreamResponse> advisorBestEffort(
+        ConsultarClientePort port, CustomerInfoRequest request) {
+    return port.consultar(request.cif(), ADVISOR, request.header())
+            .onErrorResume(t -> Mono.just(EMPTY_ADVISOR));
+}
+```
 
 #### GATE 3 — Application Verification
 

@@ -19,6 +19,7 @@ Justificacion:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from capamedia_cli.core.bank_autofix import (
@@ -719,3 +720,79 @@ def test_autofix_full_tree_skips_without_base_pin(tmp_path: Path) -> None:
 
     assert result.applied is False
     assert f.read_text(encoding="utf-8") == gradle
+
+
+# ---------------------------------------------------------------------------
+# Check 8.9 — lib-bnc-api-client solo si BUS/IIB + invocaBancs (falso positivo
+# WSReglas0010: el CLI reagregaba la lib que el PR-gate luego rechaza).
+# ---------------------------------------------------------------------------
+
+_GRADLE_WITH_LIBBNC = (
+    "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+    "dependencies {\n"
+    "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+    "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'\n"
+    "}\n"
+)
+_GRADLE_NO_LIBBNC = (
+    "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+    "dependencies {\n"
+    "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+    "}\n"
+)
+
+
+def _write_fabrics(root: Path, *, tecnologia: str = "bus", invoca_bancs: bool) -> None:
+    fj = root / ".capamedia" / "fabrics.json"
+    fj.parent.mkdir(parents=True, exist_ok=True)
+    fj.write_text(
+        json.dumps({"tecnologia": tecnologia, "invoca_bancs": invoca_bancs}),
+        encoding="utf-8",
+    )
+
+
+def test_8_9_lib_present_without_invoca_bancs_fails_high(tmp_path: Path) -> None:
+    """Caso WSReglas0010: lib declarada + fabrics invoca_bancs=false -> FAIL HIGH."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_WITH_LIBBNC)
+    _write_fabrics(root, invoca_bancs=False)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_8_9_lib_present_with_invoca_bancs_passes(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_WITH_LIBBNC)
+    _write_fabrics(root, invoca_bancs=True)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "pass"
+
+
+def test_8_9_lib_absent_without_bancs_passes(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_NO_LIBBNC)
+    _write_fabrics(root, invoca_bancs=False)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "pass"
+
+
+def test_8_9_lib_absent_with_bancs_fails_high(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_NO_LIBBNC)
+    _write_fabrics(root, invoca_bancs=True)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_8_9_no_fabrics_falls_back_to_ctx(tmp_path: Path) -> None:
+    """Sin fabrics.json, cae a la matriz (ctx): lib + ctx no-BANCS -> FAIL HIGH."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_WITH_LIBBNC)
+    ctx = CheckContext(
+        migrated_path=root, legacy_path=None, source_type="bus", has_bancs=False
+    )
+    check = _find(run_block_8(ctx), "8.9")
+    assert check.status == "fail"
+    assert check.severity == "high"

@@ -483,6 +483,11 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.6 — Regla 8 falso positivo BANCS + ORQ-RETURN-PARITY
+
+- [x] v0.28.6 - **Fix detector BANCS (falso positivo Regla 8)**: `detect_bancs_connection` ya no marca BANCS por cualquier `UMP*`; solo UMPs de prefijo BANCS conocido (`BANCS_UMP_PREFIXES`) o TX literal `0NNNNN`. Evita reinsertar `lib-bnc-api-client` en BUS-sin-BANCS (WSReglas0010). + **Check 8.9** (lib solo si BUS+invocaBancs, lee `fabrics.json`, espejo del PR-gate). +8 tests
+- [x] v0.28.6 - **Check 5.13 ORQ-RETURN-PARITY**: cruza ramas `Mono.zip`/`onErrorResume` del migrado vs `RETURN FALSE` de los PROCEDURE legacy; best-effort migrado como mandatorio → HIGH (rompe productivo, caso ORQClientes0022/OP21). + regla en `migrate-rest-full.md`. +6 tests. 6 canónicos sincronizados
+
 ### Release 0.28.5 — mensajeNegocio: no borrar el tag (vaciar) + respetar legacy
 
 - [x] v0.28.5 - **`mensajeNegocio` regla refinada**: el tag NUNCA se elimina; vacío por defecto (`<mensajeNegocio/>`). El micro no inventa valor (lo pone DataPower) **salvo que el legacy lo poblara**. Check 15.1 cross-chequea el legacy (`_legacy_populates_mensaje_negocio`): no poblaba→HIGH, poblaba→PASS, sin legacy→LOW. Autofix `fix_remove_mensajeNegocio_setter`→`fix_empty_mensajeNegocio_setter`: **vacía** en vez de borrar. Canónico `bank-error-structure.md` + self_correction + catalog_injector alineados. +3 tests

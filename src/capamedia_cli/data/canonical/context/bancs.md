@@ -6,6 +6,23 @@ paths:
 
 # Reglas de Integracion BANCS
 
+## Cuando NO va `lib-bnc-api-client`
+
+Antes de aplicar cualquier regla BANCS, verificar si el servicio realmente llama
+a BANCS. **NO** llama a BANCS un servicio que:
+
+- Solo invoca proveedores SOAP externos (Cyxtera/DetectID, motor ODM, autorizadores).
+- Solo consulta XMLs operativos del banco (Catalogo Omnicanal).
+- Solo consume otros servicios `WS*` migrados, no el Core Adapter BANCS.
+- Tiene UMPs `UMPSeguridad*` / `UMPAutorizadores*` / `UMPGenerico*` que envuelven
+  destinos no-BANCS.
+
+En estos casos: **NO** declarar `lib-bnc-api-client` ni las
+`spring.autoconfigure.exclude` BANCS; crear `.capamedia/fabrics.json` con
+`invoca_bancs: false` (fuente del PR-gate). Solo el servicio que invoca el Core
+Adapter via TX literal `0NNNNN` (o UMP de prefijo BANCS) necesita la lib. El CLI
+lo valida en el Check 8.9.
+
 ## Core Adapter
 - NUNCA llamar BANCS TCP directamente desde un MSA consumidor
 - NUNCA agregar frm-lib-ad-bnc-core-adapter como dependencia del MSA consumidor

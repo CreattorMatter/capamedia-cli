@@ -617,6 +617,42 @@ def _legacy_populates_mensaje_negocio(legacy_path: Path | None) -> bool | None:
     return False
 
 
+def _legacy_procedures_return_false(legacy_path: Path | None) -> dict[str, bool]:
+    """Mapa {procedure_downstream: tiene_RETURN_FALSE} del ESQL legacy.
+
+    Vacio si no hay legacy. Para la paridad de short-circuit (Check 5.13): un
+    PROCEDURE downstream (`Invocar*`/`Consultar*`/`Orquestar*`/`Llamar*`/
+    `Ejecutar*`) que RETURNS BOOLEAN y NO tiene `RETURN FALSE` en su cuerpo es
+    best-effort (su falla no corta el flujo legacy). Heuristica robusta sin
+    backtracking: trocea por `CREATE PROCEDURE/FUNCTION` (cada chunk va hasta el
+    siguiente CREATE) y busca `RETURN FALSE` dentro del chunk. Ignora helpers
+    (RETURNS CHARACTER/INTEGER, FUNCTION) y procedures no-downstream.
+    """
+    procs: dict[str, bool] = {}
+    if legacy_path is None or not legacy_path.exists():
+        return procs
+    create_re = re.compile(r"(?im)^\s*CREATE\s+(?:PROCEDURE|FUNCTION)\s+(\w+)")
+    downstream_re = re.compile(r"(?i)^(?:Invocar|Consultar|Orquestar|Llamar|Ejecutar)\w*")
+    for esql in legacy_path.rglob("**/*.esql"):
+        if ".git" in esql.parts or "build" in esql.parts:
+            continue
+        try:
+            text = esql.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        matches = list(create_re.finditer(text))
+        for i, m in enumerate(matches):
+            name = m.group(1)
+            if not downstream_re.match(name):
+                continue
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            chunk = text[m.start() : end]
+            if not re.search(r"(?i)RETURNS\s+BOOLEAN", chunk[:200]):
+                continue  # solo procedures que retornan BOOLEAN (no helpers)
+            procs[name] = bool(re.search(r"(?i)\bRETURN\s+FALSE\b", chunk))
+    return procs
+
+
 def _collect_tx_codes_from_yaml(text: str) -> set[str]:
     return set(re.findall(r"\bws-tx(\d{6})\b", text, flags=re.IGNORECASE))
 
@@ -2105,6 +2141,104 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
+    # 5.13 - Paridad de short-circuit en ORQ (ORQ-RETURN-PARITY). Solo ORQ.
+    # Un downstream cuyo PROCEDURE legacy NO tiene `RETURN FALSE` es best-effort:
+    # su falla no corta el flujo legacy, asi que el migrado debe usar
+    # `.onErrorResume` (no rama mandatoria del `Mono.zip`). Lo inverso (PROCEDURE
+    # con RETURN FALSE migrado con `.onErrorResume`) es mas permisivo que legacy.
+    is_orq = (ctx.source_type or "").lower() == "orq" or _looks_like_orq(ctx)
+    if is_orq:
+        title_513 = "Paridad short-circuit ORQ (ORQ-RETURN-PARITY)"
+        java_dir = ctx.migrated_path / "src" / "main" / "java"
+        svc_files = list(java_dir.rglob("*ServiceImpl.java")) if java_dir.is_dir() else []
+        svc_text = "\n".join(_read_or_empty(f) for f in svc_files)
+        if "Mono.zip" in svc_text:
+            if ctx.legacy_path is None or not ctx.legacy_path.exists():
+                results.append(
+                    CheckResult(
+                        "5.13",
+                        "Block 5",
+                        title_513,
+                        "fail",
+                        severity="low",
+                        detail=(
+                            "ORQ con Mono.zip pero sin legacy para verificar la "
+                            "paridad de short-circuit. Revisar manual."
+                        ),
+                        suggested_fix=(
+                            "Cruzar cada rama del Mono.zip con el RETURN FALSE del "
+                            "PROCEDURE legacy: best-effort -> .onErrorResume; "
+                            "mandatorio -> sin .onErrorResume."
+                        ),
+                    )
+                )
+            else:
+                procs = _legacy_procedures_return_false(ctx.legacy_path)
+                best_effort = sorted(p for p, hf in procs.items() if not hf)
+                mandatory = sorted(p for p, hf in procs.items() if hf)
+                n_onerror = len(re.findall(r"\.onErrorResume\s*\(", svc_text))
+                if not procs:
+                    results.append(
+                        CheckResult(
+                            "5.13",
+                            "Block 5",
+                            title_513,
+                            "pass",
+                            detail="ORQ: sin PROCEDURE downstream BOOLEAN detectables en el legacy para cruzar",
+                        )
+                    )
+                elif best_effort and n_onerror == 0:
+                    results.append(
+                        CheckResult(
+                            "5.13",
+                            "Block 5",
+                            title_513,
+                            "fail",
+                            severity="high",
+                            detail=(
+                                f"ORQ mas ESTRICTO que el legacy: {len(best_effort)} downstream "
+                                f"best-effort (PROCEDURE sin RETURN FALSE: {', '.join(best_effort[:4])}) "
+                                "pero el migrado no usa .onErrorResume en ninguna rama del Mono.zip."
+                            ),
+                            suggested_fix=(
+                                "Aplicar .onErrorResume(t -> Mono.just(EMPTY_RESPONSE)) a las ramas "
+                                "best-effort para no abortar el Mono.zip (paridad con el legacy)."
+                            ),
+                        )
+                    )
+                elif mandatory and not best_effort and n_onerror > 0:
+                    results.append(
+                        CheckResult(
+                            "5.13",
+                            "Block 5",
+                            title_513,
+                            "fail",
+                            severity="high",
+                            detail=(
+                                "ORQ mas PERMISIVO que el legacy: todos los PROCEDURE downstream "
+                                f"tienen RETURN FALSE (mandatorios) pero el migrado usa .onErrorResume "
+                                f"en {n_onerror} rama(s), ignorando errores que el legacy propaga."
+                            ),
+                            suggested_fix=(
+                                "Quitar .onErrorResume de las ramas mandatorias para propagar el "
+                                "error como el legacy."
+                            ),
+                        )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            "5.13",
+                            "Block 5",
+                            title_513,
+                            "pass",
+                            detail=(
+                                f"ORQ: paridad short-circuit coherente ({len(mandatory)} mandatorio(s), "
+                                f"{len(best_effort)} best-effort, {n_onerror} onErrorResume)"
+                            ),
+                        )
+                    )
+
     return results
 
 
@@ -2746,6 +2880,73 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                         ),
                     )
                 )
+
+    # 8.9 - lib-bnc-api-client SOLO si BUS/IIB + invocaBancs=true (espejo del
+    # PR-gate validate_hexagonal). Fuente de verdad: .capamedia/fabrics.json
+    # (cascada migrated/workspace); fallback a la matriz (ctx.source_type +
+    # ctx.has_bancs). Evita el falso positivo de reagregar la lib en BUS no-BANCS.
+    title_89 = "lib-bnc-api-client solo si BUS/IIB + invocaBancs"
+    libbnc_present = any(
+        "com.pichincha.bnc:lib-bnc-api-client" in _read_or_empty(gf) for gf in gradle_files
+    )
+    requires_bancs: bool | None = None
+    for base in (
+        ctx.migrated_path,
+        ctx.migrated_path.parent,
+        ctx.migrated_path.parent.parent,
+    ):
+        fabrics = base / ".capamedia" / "fabrics.json"
+        if fabrics.is_file():
+            try:
+                meta = json.loads(fabrics.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            tec = str(meta.get("tecnologia") or meta.get("source_kind") or "").lower()
+            invoca = meta.get("invoca_bancs")
+            if isinstance(invoca, bool):
+                requires_bancs = tec in {"bus", "iib"} and invoca
+                break
+    if requires_bancs is None:
+        requires_bancs = (ctx.source_type or "").lower() in {"bus", "iib"} and bool(
+            ctx.has_bancs
+        )
+    if libbnc_present and requires_bancs:
+        results.append(
+            CheckResult(
+                "8.9", "Block 8", title_89, "pass",
+                detail="lib declarada y el servicio es BUS/IIB con invocaBancs=true",
+            )
+        )
+    elif libbnc_present and not requires_bancs:
+        results.append(
+            CheckResult(
+                "8.9", "Block 8", title_89, "fail", severity="high",
+                detail=(
+                    "lib-bnc-api-client declarada pero el servicio no es BUS/IIB con "
+                    "invocaBancs=true; el PR-gate del banco la rechaza."
+                ),
+                suggested_fix=(
+                    "Remover com.pichincha.bnc:lib-bnc-api-client (y las "
+                    "spring.autoconfigure.exclude BANCS), o declarar "
+                    ".capamedia/fabrics.json con invoca_bancs:true si realmente es BANCS."
+                ),
+            )
+        )
+    elif not libbnc_present and requires_bancs:
+        results.append(
+            CheckResult(
+                "8.9", "Block 8", title_89, "fail", severity="high",
+                detail="servicio BUS/IIB con invocaBancs=true pero falta lib-bnc-api-client.",
+                suggested_fix="Agregar implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'.",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "8.9", "Block 8", title_89, "pass",
+                detail="servicio no-BANCS sin lib-bnc-api-client (correcto)",
+            )
+        )
     return results
 
 

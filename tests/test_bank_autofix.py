@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from capamedia_cli.core.bank_autofix import (
+    _requires_bancs_from_matrix,
     fix_add_bplogger_to_service,
     fix_add_libbnc_dependency,
     fix_catalog_info_scaffold,
@@ -14,6 +15,7 @@ from capamedia_cli.core.bank_autofix import (
     fix_yml_remove_defaults,
     run_bank_autofix,
 )
+from capamedia_cli.core.legacy_analyzer import detect_bancs_connection
 
 # ---------------------------------------------------------------------------
 # Regla 4 — @BpLogger
@@ -570,3 +572,48 @@ def test_run_bank_autofix_subset(tmp_path: Path) -> None:
     results = run_bank_autofix(tmp_path, rules=["8"], requires_bancs=True)
     assert len(results) == 1
     assert results[0].rule == "8"
+
+
+# ---------------------------------------------------------------------------
+# Regla 8 — contrato de gating sin cambios; el fix del detector (F1) evita el
+# falso positivo de reagregar lib-bnc en BUS sin BANCS (WSReglas0010).
+# ---------------------------------------------------------------------------
+
+_GRADLE_WEBFLUX = (
+    "plugins { id 'java' }\n\ndependencies {\n"
+    "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n}\n"
+)
+
+
+def test_requires_bancs_from_matrix_seals_contract() -> None:
+    """El gating NO cambia: requiere (source bus/iib) Y has_bancs."""
+    assert _requires_bancs_from_matrix("bus", False) is False
+    assert _requires_bancs_from_matrix("iib", False) is False
+    assert _requires_bancs_from_matrix("bus", True) is True
+    assert _requires_bancs_from_matrix("was", True) is False
+
+
+def _has_bancs_for(tmp_path: Path, esql_body: str) -> bool:
+    legacy = tmp_path / "legacy"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "flow.esql").write_text(esql_body, encoding="utf-8")
+    has_bancs, _ = detect_bancs_connection(legacy)
+    return has_bancs
+
+
+def test_libbnc_not_readded_for_bus_with_non_bancs_ump(tmp_path: Path) -> None:
+    """Regresion WSReglas0010: BUS con solo UMP no-BANCS -> autofix NO reagrega la lib."""
+    has_bancs = _has_bancs_for(tmp_path, "CALL UMPSeguridad0085.consultar();\n")
+    assert has_bancs is False  # gracias al fix F1 del detector
+    (tmp_path / "build.gradle").write_text(_GRADLE_WEBFLUX, encoding="utf-8")
+    run_bank_autofix(tmp_path, rules=["8"], source_type="bus", has_bancs=has_bancs)
+    assert "lib-bnc-api-client" not in (tmp_path / "build.gradle").read_text(encoding="utf-8")
+
+
+def test_libbnc_added_for_bus_with_bancs_ump(tmp_path: Path) -> None:
+    """Control positivo: BUS con UMP BANCS -> autofix SI agrega la lib."""
+    has_bancs = _has_bancs_for(tmp_path, "CALL UMPClientes0002.consultar();\n")
+    assert has_bancs is True
+    (tmp_path / "build.gradle").write_text(_GRADLE_WEBFLUX, encoding="utf-8")
+    run_bank_autofix(tmp_path, rules=["8"], source_type="bus", has_bancs=has_bancs)
+    assert "lib-bnc-api-client" in (tmp_path / "build.gradle").read_text(encoding="utf-8")

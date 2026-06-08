@@ -453,6 +453,29 @@ implementation 'com.pichincha.bnc:lib-bnc-api-client:1.0.5'
 // (dependency block sin la libreria)
 ```
 
+### Aplicabilidad estricta — solo BUS/IIB con invocaBancs=true
+
+La Regla 8 (declarar `lib-bnc-api-client`) **solo aplica a servicios BUS/IIB con
+`invocaBancs=true`**. Fuente de verdad: `.capamedia/fabrics.json`
+(`{source_kind: iib, tecnologia: bus, invoca_bancs: <bool>}`). El PR-gate oficial
+(`validate_hexagonal.py`, `_is_bus_bancs`) lee ese archivo y **rechaza** el PR si
+la lib esta declarada en un servicio que no es BUS+invocaBancs:
+
+    lib-bnc-api-client declarada pero la matriz no clasifica el servicio
+    como BUS/IIB con invocaBancs=true.
+
+**Servicio que NO llama a BANCS:** NO declarar la lib ni las 3
+`spring.autoconfigure.exclude` BANCS; crear `.capamedia/fabrics.json` con
+`invoca_bancs: false`. Validado por el Check 8.9 del checklist.
+
+### Falso positivo conocido (UMP no-BANCS) — corregido v0.28.6
+
+El detector `legacy_analyzer.detect_bancs_connection` **ya NO** marca BANCS por
+cualquier `UMP*` en el ESQL. Solo cuentan UMPs de prefijo BANCS conocido
+(`UMPClientes`, `UMPCuentas`, `UMPTransacciones`, ...) o una TX literal `0NNNNN`.
+Las UMP no-BANCS (Cyxtera/`UMPSeguridad`, autorizadores, `UMPGenerico`) NO
+implican BANCS (caso WSReglas0010: `UMPSeguridad0085` envuelve Cyxtera SOAP).
+
 ---
 
 ## Regla 8.5 - Spring Boot baseline + Jackson/Netty sin pins manuales

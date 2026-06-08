@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from capamedia_cli.core.legacy_analyzer import (
+    BANCS_UMP_PREFIXES,
+    _has_bancs_ump,
     analyze_wsdl,
+    detect_bancs_connection,
     detect_ump_references,
     extract_tx_codes,
     score_complexity,
@@ -101,3 +104,74 @@ def test_score_complexity_boundaries() -> None:
     assert score_complexity(1, 0, False) == "low"
     assert score_complexity(1, 2, False) == "medium"
     assert score_complexity(3, 4, True) == "high"
+
+
+# ---------------------------------------------------------------------------
+# detect_bancs_connection — la senal 1 solo cuenta UMPs BANCS (fix WSReglas0010)
+# ---------------------------------------------------------------------------
+
+
+def _write_legacy(tmp_path: Path, name: str, body: str) -> Path:
+    f = tmp_path / "legacy" / name
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body, encoding="utf-8")
+    return tmp_path / "legacy"
+
+
+def test_has_bancs_ump_prefix_matching() -> None:
+    assert _has_bancs_ump(["UMPClientes0002"]) is True
+    assert _has_bancs_ump(["umptransacciones0010"]) is True  # lowercase WAS
+    assert _has_bancs_ump(["UMPSeguridad0085"]) is False
+    assert _has_bancs_ump(["UMPAutorizadores0001"]) is False
+    assert _has_bancs_ump([]) is False
+    assert "umpclientes" in BANCS_UMP_PREFIXES
+
+
+def test_bancs_false_positive_non_bancs_ump(tmp_path: Path) -> None:
+    """Caso WSReglas0010: ESQL con solo UMPs no-BANCS y sin TX -> NO es BANCS."""
+    legacy = _write_legacy(
+        tmp_path,
+        "ConsultarSeguridad.esql",
+        "CALL UMPSeguridad0085.consultar();\nSET x = UMPGenerico0002;\n",
+    )
+    has_bancs, evidence = detect_bancs_connection(legacy)
+    assert has_bancs is False
+    assert evidence == []
+
+
+def test_bancs_true_with_bancs_ump(tmp_path: Path) -> None:
+    """UMP de prefijo BANCS conocido -> es BANCS."""
+    legacy = _write_legacy(tmp_path, "flow.esql", "CALL UMPClientes0002.consultar();\n")
+    has_bancs, evidence = detect_bancs_connection(legacy)
+    assert has_bancs is True
+    assert any("UMP BANCS" in e for e in evidence)
+
+
+def test_bancs_true_with_tx_literal_even_if_ump_unknown(tmp_path: Path) -> None:
+    """UMP no-BANCS pero con TX literal 0NNNNN -> la senal 2 (TX) manda."""
+    legacy = _write_legacy(
+        tmp_path,
+        "flow.esql",
+        "CALL UMPSeguridad0085.consultar();\nSET tx = '060480';\n",
+    )
+    has_bancs, evidence = detect_bancs_connection(legacy)
+    assert has_bancs is True
+    assert any("TX literal" in e for e in evidence)
+
+
+def test_bancs_true_httprequest_bancs_msgflow(tmp_path: Path) -> None:
+    """HTTPRequest a bancs en msgflow -> senal 3 intacta."""
+    legacy = _write_legacy(
+        tmp_path, "flow.msgflow", "<node type='HTTPRequest' url='http://bancs/core'/>"
+    )
+    has_bancs, evidence = detect_bancs_connection(legacy)
+    assert has_bancs is True
+    assert any("HTTPRequest" in e for e in evidence)
+
+
+def test_bancs_true_bancsclient_java(tmp_path: Path) -> None:
+    """BancsClient en Java -> senal 4 intacta."""
+    legacy = _write_legacy(tmp_path, "Foo.java", "class Foo { BancsClient c; }")
+    has_bancs, evidence = detect_bancs_connection(legacy)
+    assert has_bancs is True
+    assert any("BancsClient" in e for e in evidence)

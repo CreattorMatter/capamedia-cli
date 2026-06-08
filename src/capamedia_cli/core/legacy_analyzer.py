@@ -24,6 +24,24 @@ RE_UMP_REFERENCE = re.compile(r"\b(UMP[A-Z][a-zA-Z]+\d{4})\b")
 RE_TX_CODE = re.compile(r"'(\d{6})'")
 RE_SCHEMALOCATION = re.compile(r'schemaLocation="([^"]+)"')
 
+# Prefijos de UMP que envuelven TX del Core Adapter BANCS (0NNNNN). SOLO estas
+# UMPs cuentan como evidencia de BANCS en la senal 1 de detect_bancs_connection;
+# las UMP genericas/no-BANCS (UMPSeguridad, UMPAutorizadores, UMPGenerico,
+# UMPReglas, ...) NO. El arbitro fuerte sigue siendo la TX literal 0NNNNN
+# (senal 2). En minuscula para comparar case-insensitive.
+BANCS_UMP_PREFIXES: frozenset[str] = frozenset(
+    {
+        "umpclientes",
+        "umpcuentas",
+        "umptransacciones",
+        "umpproductos",
+        "umptarjetas",
+        "umptransferencias",
+        "umppagos",
+        "umpcontratos",
+    }
+)
+
 
 # -- Dataclasses ------------------------------------------------------------
 
@@ -330,19 +348,35 @@ def score_complexity(op_count: int, ump_count: int, has_db: bool) -> str:
 # -- BANCS connection detection ---------------------------------------------
 
 
+def _has_bancs_ump(ump_names: list[str]) -> bool:
+    """True si alguna UMP referenciada tiene prefijo de la lista BANCS conocida.
+
+    El prefijo es la parte alfabetica antes del numero (`UMPClientes0002` ->
+    `umpclientes`). Una UMP generica/no-BANCS (UMPSeguridad, UMPAutorizadores,
+    UMPGenerico, ...) NO cuenta como evidencia de BANCS.
+    """
+    for ump in ump_names:
+        m = re.match(r"(?i)(ump[a-z]+?)\d{4}", ump)
+        if m and m.group(1).lower() in BANCS_UMP_PREFIXES:
+            return True
+    return False
+
+
 def detect_bancs_connection(legacy_root: Path) -> tuple[bool, list[str]]:
     """True si el servicio conecta a BANCS por cualquier via.
 
     4 senales:
-      1. UMPs referenciadas (patron indirecto)
-      2. TX BANCS literal (0NNNNN) en ESQL sin prefijo UMP adyacente
+      1. UMPs de prefijo BANCS conocido (`BANCS_UMP_PREFIXES`); las UMP
+         genericas/no-BANCS (UMPSeguridad, UMPAutorizadores, ...) NO cuentan
+      2. TX BANCS literal (0NNNNN) en ESQL (arbitro fuerte)
       3. HTTPRequest node apuntando a BANCS en msgflows
       4. BancsClient / @BancsService en Java
     """
     evidence: list[str] = []
-    # 1. UMPs
-    if detect_ump_references(legacy_root):
-        evidence.append("UMP references")
+    # 1. UMPs de prefijo BANCS conocido (las UMP no-BANCS no cuentan)
+    bancs_umps = [u for u in detect_ump_references(legacy_root) if _has_bancs_ump([u])]
+    if bancs_umps:
+        evidence.append("UMP BANCS references: " + ", ".join(sorted(bancs_umps)))
     # 2. TX literal 0NNNNN en ESQL
     tx_pattern = re.compile(r"['\"]0\d{5}['\"]")
     for esql in legacy_root.rglob("*.esql"):

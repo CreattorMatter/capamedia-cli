@@ -87,6 +87,15 @@ En ORQ, `REST + WebFlux` es solo el arquetipo Spring; el contrato externo viene
 de WSDL/XSD y sigue siendo SOAP XML. `application/json`, DTOs JSON externos o
 happy-path JSON son error salvo evidencia legacy explicita.
 
+> **Falso positivo conocido del autofix Regla 8 (corregido v0.28.6):** una
+> referencia a `UMP*` en el ESQL NO implica BANCS. Las UMP no-BANCS
+> (`UMPSeguridad*`, `UMPAutorizadores*`, `UMPGenerico*`, wrappers de Cyxtera/ODM)
+> NO requieren `lib-bnc-api-client`. La clasificacion la decide
+> `.capamedia/fabrics.json` (`invoca_bancs`), no el conteo de UMPs. Si un
+> servicio BUS-sin-BANCS termina con la lib, el Check 8.9 la marca HIGH (el
+> PR-gate del banco la rechaza): removerla junto con las 3
+> `spring.autoconfigure.exclude` BANCS y confirmar `invoca_bancs: false`.
+
 ## Paso 1.6 - Deployment metadata y Helm limpios
 
 - `metadata.name` en `catalog-info.yaml` debe ser literalmente

@@ -32,7 +32,9 @@ stop and report a blocker instead of changing the archetype.
    JAXB classes, and Spring MVC infrastructure. Do not add WebFlux.
 2. **BANCS is prohibited here.** Do not add `lib-bnc-api-client`,
    `BancsService`, `BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*`,
-   or `dependsOn: lib-bnc-api-client`.
+   or `dependsOn: lib-bnc-api-client`. Create/confirm `.capamedia/fabrics.json`
+   with `invoca_bancs: false` (PR-gate source of truth). A `UMP*` reference does
+   NOT reclassify the service as BANCS (e.g. `UMPSeguridad*` wraps Cyxtera SOAP).
 3. **WAS endpoints are not BUS endpoints.** WAS SOAP keeps the legacy/MCP path,
    normally `/<ServiceName>/soap/*` and `/<ServiceName>/soap/<ServiceName>Request`.
    Never rewrite WAS to `/IntegrationBus/soap/...` unless legacy WAS evidence

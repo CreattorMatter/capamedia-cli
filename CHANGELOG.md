@@ -6,6 +6,48 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.6] - 2026-06-08
+
+### Fixed — Falso positivo Regla 8: `lib-bnc-api-client` en BUS sin BANCS
+
+`legacy_analyzer.detect_bancs_connection` marcaba `has_bancs=True` ante
+**cualquier** referencia `UMP*` en el ESQL (señal 1), sin distinguir UMPs BANCS
+de no-BANCS. Eso reinsertaba `lib-bnc-api-client` en servicios BUS sin BANCS
+(caso WSReglas0010: `UMPSeguridad0085` envuelve Cyxtera SOAP) — lib que el
+PR-gate oficial (`validate_hexagonal`) luego **rechaza**. Arreglar el detector
+corrige los dos caminos (el autofix Regla 8 y el `invoca_bancs` que se escribe en
+`fabrics.json`).
+
+- **`BANCS_UMP_PREFIXES`** en
+  [`legacy_analyzer.py`](src/capamedia_cli/core/legacy_analyzer.py): la señal 1
+  solo cuenta UMPs de prefijo BANCS conocido (`UMPClientes`, `UMPCuentas`, ...);
+  la TX literal `0NNNNN` sigue siendo el árbitro fuerte (señal 2). Las UMP
+  no-BANCS (`UMPSeguridad`, `UMPAutorizadores`, `UMPGenerico`) ya no cuentan.
+- **Check 8.9** (Block 8): `lib-bnc-api-client` declarada SOLO si BUS/IIB +
+  invocaBancs — lee `.capamedia/fabrics.json` (fallback a la matriz). Espejo del
+  PR-gate. +5 tests.
+- Canónicos: `bank-official-rules.md` (Regla 8 aplicabilidad estricta + falso
+  positivo), `bancs.md`, `CLAUDE.md`, `doublecheck.md`, `migrate-rest-full.md`,
+  `migrate-soap-full.md`.
+
+### Added — Check 5.13 ORQ-RETURN-PARITY (paridad de short-circuit)
+
+En ORQ IIB, un `PROCEDURE` downstream sin `RETURN FALSE` en su path de error es
+best-effort; migrarlo como rama mandatoria del `Mono.zip` hace el servicio **más
+estricto que el legacy** y rompe productivo (ORQClientes0022, PROCEDURE OP21:
+cliente sin asesor → 500 en vez de 200 con campos vacíos).
+
+- **Check 5.13** (Block 5, solo `source_kind=orq`): cruza las ramas
+  `Mono.zip`/`.onErrorResume` del migrado contra el `RETURN FALSE` de los
+  `PROCEDURE` del ESQL legacy (reutiliza el cross-check del Check 15.1).
+  best-effort migrado como mandatorio → **HIGH "estricto"**; mandatorio migrado
+  con `onErrorResume` → **HIGH "permisivo"**; sin legacy → **LOW**. +6 tests.
+- Regla `ORQ-RETURN-PARITY` en `migrate-rest-full.md` (Block 3; el fallback
+  best-effort va en `application/util/` por Service Purity).
+
+Suite **939 verde**. (De paso: resuelto un `import json` sin usar en
+`checklist_rules.py`.)
+
 ## [0.28.5] - 2026-05-29
 
 ### Changed — `mensajeNegocio`: no eliminar el tag (vaciar) + respetar el legacy
