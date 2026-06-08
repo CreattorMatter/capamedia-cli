@@ -124,6 +124,10 @@ def test_has_bancs_ump_prefix_matching() -> None:
     assert _has_bancs_ump(["UMPSeguridad0085"]) is False
     assert _has_bancs_ump(["UMPAutorizadores0001"]) is False
     assert _has_bancs_ump([]) is False
+    # nombre compuesto: cuenta como su prefijo base (startswith), no igualdad
+    assert _has_bancs_ump(["UMPCuentasAhorro0010"]) is True
+    assert _has_bancs_ump(["UMPClientesNaturales0002"]) is True
+    assert _has_bancs_ump(["UMPSeguridadAvanzada0085"]) is False
     assert "umpclientes" in BANCS_UMP_PREFIXES
 
 

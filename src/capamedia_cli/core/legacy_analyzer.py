@@ -357,7 +357,12 @@ def _has_bancs_ump(ump_names: list[str]) -> bool:
     """
     for ump in ump_names:
         m = re.match(r"(?i)(ump[a-z]+?)\d{4}", ump)
-        if m and m.group(1).lower() in BANCS_UMP_PREFIXES:
+        if not m:
+            continue
+        prefix = m.group(1).lower()
+        # startswith: las UMP de nombre compuesto (`umpcuentasahorro`) cuentan
+        # como su prefijo base (`umpcuentas`).
+        if any(prefix.startswith(known) for known in BANCS_UMP_PREFIXES):
             return True
     return False
 

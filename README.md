@@ -483,6 +483,11 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.7 — Hardening checks 8.9/5.13 (revisión adversarial)
+
+- [x] v0.28.7 - **Check 8.9 corregido**: leía `invoca_bancs` como bool pero el formato real es string → réplica exacta de `validate_hexagonal` (`_load_fabrics_metadata` + `_fabrics_requires_bancs`, acepta string/camelCase/source_kind), test de paridad contra el vendor. Detección de lib ignora comentarios
+- [x] v0.28.7 - **Check 5.13 corregido**: `onErrorResume` scopeado a los servicios con `Mono.zip` + sus `util/*Helper.java` (antes era global y contradecía Service Purity); caso mixto → LOW manual; helper ESQL descarta comentarios. Detector: `startswith` para UMP compuestas. +6 tests, suite 945. Hallado por un workflow de revisión adversarial sobre el diff de v0.28.6
+
 ### Release 0.28.6 — Regla 8 falso positivo BANCS + ORQ-RETURN-PARITY
 
 - [x] v0.28.6 - **Fix detector BANCS (falso positivo Regla 8)**: `detect_bancs_connection` ya no marca BANCS por cualquier `UMP*`; solo UMPs de prefijo BANCS conocido (`BANCS_UMP_PREFIXES`) o TX literal `0NNNNN`. Evita reinsertar `lib-bnc-api-client` en BUS-sin-BANCS (WSReglas0010). + **Check 8.9** (lib solo si BUS+invocaBancs, lee `fabrics.json`, espejo del PR-gate). +8 tests

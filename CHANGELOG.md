@@ -6,6 +6,40 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.7] - 2026-06-08
+
+### Fixed — Hardening de los checks 8.9 y 5.13 (revisión adversarial)
+
+Una revisión adversarial de v0.28.6 encontró **6 HIGH reales** que la suite verde
+no detectaba (los tests solo cubrían casos degenerados). Arreglados:
+
+**Check 8.9 (lib-bnc vs invocaBancs):**
+- Leía `invoca_bancs` con `isinstance(bool)`, pero los escritores reales
+  (`fabrics.py`, `review.py`) lo serializan como **string** → la rama
+  `fabrics.json` nunca corría en producción y daba veredictos **cruzados con el
+  PR-gate**. Ahora usa `_load_fabrics_metadata` + `_fabrics_requires_bancs`,
+  **réplica exacta** de `validate_hexagonal` (acepta string, camelCase
+  `invocaBancs`, `source_kind` OR `tecnologia`). Test de paridad directo contra
+  el vendor.
+- Detección de la lib ignora comentarios (no substring crudo); fallback unificado
+  con el Check 0.2d (`_matrix_requires_bancs`); `suggested_fix` OLA-aware.
+
+**Check 5.13 (ORQ-RETURN-PARITY):**
+- El conteo de `onErrorResume` era global sobre todos los `*ServiceImpl.java`
+  (falso positivo cross-file) y solo miraba el ServiceImpl, **contradiciendo el
+  canónico de Service Purity** del propio commit (el wrapper va en `util/`). Ahora
+  scopea a los servicios con `Mono.zip` **+** sus `util/*Helper.java`.
+- El caso de downstreams **mixtos** (mandatory + best-effort) caía a `PASS`
+  silencioso (no detectaba la regresión OP21). Ahora → **LOW revisión manual**.
+- Helper ESQL: descarta comentarios antes de buscar `RETURN FALSE` y lee
+  `RETURNS BOOLEAN` hasta el primer `BEGIN` (no un corte fijo).
+
+**Detector BANCS:** `_has_bancs_ump` matchea por prefijo (`startswith`), así las
+UMP compuestas (`UMPCuentasAhorro`) cuentan como su base.
+
++6 tests (paridad con el vendor, mixto, onErrorResume-en-helper, UMP compuesta).
+Suite **945 verde**.
+
 ## [0.28.6] - 2026-06-08
 
 ### Fixed — Falso positivo Regla 8: `lib-bnc-api-client` en BUS sin BANCS

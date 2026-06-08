@@ -796,3 +796,68 @@ def test_8_9_no_fabrics_falls_back_to_ctx(tmp_path: Path) -> None:
     check = _find(run_block_8(ctx), "8.9")
     assert check.status == "fail"
     assert check.severity == "high"
+
+
+def _write_fabrics_raw(root: Path, payload: dict) -> None:
+    fj = root / ".capamedia" / "fabrics.json"
+    fj.parent.mkdir(parents=True, exist_ok=True)
+    fj.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_8_9_reads_string_invoca_bancs_like_pr_gate(tmp_path: Path) -> None:
+    """El fabrics.json REAL serializa invoca_bancs como STRING; el check debe leerlo."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_WITH_LIBBNC)
+    _write_fabrics_raw(root, {"source_kind": "iib", "tecnologia": "bus", "invoca_bancs": "true"})
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "pass"
+
+
+def test_8_9_camelcase_and_source_kind_match_gate(tmp_path: Path) -> None:
+    """invocaBancs camelCase + source_kind=iib (tecnologia≠bus) -> requires (como el gate)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _GRADLE_WITH_LIBBNC)
+    _write_fabrics_raw(root, {"source_kind": "iib", "tecnologia": "rest", "invocaBancs": True})
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "pass"
+
+
+def test_8_9_ignores_libbnc_in_comment(tmp_path: Path) -> None:
+    """La lib mencionada SOLO en un comentario no cuenta como declarada."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(
+        root,
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies {\n"
+        "    // NEVER add com.pichincha.bnc:lib-bnc-api-client here\n"
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+        "}\n",
+    )
+    _write_fabrics(root, invoca_bancs=False)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "pass"
+
+
+def test_8_9_parity_with_vendor_is_bus_bancs() -> None:
+    """La replica _fabrics_requires_bancs coincide con el PR-gate _is_bus_bancs en
+    los casos que el review marco como divergentes."""
+    import importlib.util
+
+    import capamedia_cli
+    from capamedia_cli.core.checklist_rules import _fabrics_requires_bancs
+
+    vendor = Path(capamedia_cli.__file__).parent / "data" / "vendor" / "validate_hexagonal.py"
+    spec = importlib.util.spec_from_file_location("validate_hexagonal_paritytest", vendor)
+    vh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vh)
+    cases = [
+        {"source_kind": "iib", "tecnologia": "bus", "invoca_bancs": "true"},
+        {"source_kind": "bus", "invoca_bancs": "true"},
+        {"source_kind": "bus", "invocaBancs": True},
+        {"source_kind": "iib", "tecnologia": "rest", "invoca_bancs": True},
+        {"tecnologia": "was", "invoca_bancs": "false"},
+        {"tecnologia": "bus", "invoca_bancs": False},
+        {},
+    ]
+    for meta in cases:
+        assert _fabrics_requires_bancs(meta) == vh._is_bus_bancs(meta), meta

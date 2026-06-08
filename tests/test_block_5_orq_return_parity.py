@@ -121,3 +121,50 @@ def test_5_13_low_when_orq_but_no_legacy(tmp_path: Path) -> None:
     check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=None)), "5.13")
     assert check.status == "fail"
     assert check.severity == "low"
+
+
+# -- H4/H6: caso mixto y onErrorResume en helper de util/ -------------------
+
+_SVC_MANDATORY_WITH_ONERROR = (
+    "package com.pichincha.sp.application.service;\n"
+    "class FooServiceImpl {\n"
+    "    Mono<Result> consultar() {\n"
+    "        return Mono.zip(a.consultar(cif).onErrorResume(t -> Mono.just(EMPTY)),\n"
+    "                b.consultar(cif)).map(this::build);\n"
+    "    }\n"
+    "}\n"
+)
+_HELPER_WITH_ONERROR = (
+    "package com.pichincha.sp.application.util;\n"
+    "class FooDownstreamHelper {\n"
+    "    static Mono<X> advisorBestEffort() {\n"
+    "        return port.consultar().onErrorResume(t -> Mono.just(EMPTY));\n"
+    "    }\n"
+    "}\n"
+)
+
+
+def test_5_13_mixed_downstreams_is_low_manual_review(tmp_path: Path) -> None:
+    """Caso mixto (mandatory + best-effort): el check agregado no distingue rama
+    -> LOW revision manual, NO PASS silencioso (regresion que H4 detecto)."""
+    root = _make_orq(tmp_path, _SVC_MANDATORY_WITH_ONERROR)
+    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE + "\n" + _ESQL_ONLY_TRUE)
+    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
+    assert check.status == "fail"
+    assert check.severity == "low"
+    assert "mixtos" in check.detail
+
+
+def test_5_13_onerror_in_util_helper_not_flagged(tmp_path: Path) -> None:
+    """El .onErrorResume best-effort vive en application/util/*Helper.java
+    (Service Purity): NO debe dar FAIL HIGH 'estricto' (regresion que H6 detecto)."""
+    root = _make_orq(tmp_path, _SVC_MANDATORY)  # ServiceImpl con Mono.zip, sin onErrorResume
+    helper = (
+        root
+        / "src/main/java/com/pichincha/sp/application/util/FooDownstreamHelper.java"
+    )
+    helper.parent.mkdir(parents=True)
+    helper.write_text(_HELPER_WITH_ONERROR, encoding="utf-8")
+    legacy = _legacy(tmp_path, _ESQL_ONLY_TRUE)  # best-effort
+    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
+    assert check.status == "pass"
