@@ -6,6 +6,38 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.10] - 2026-06-09
+
+### Reverted — Parser por-rama del Check 5.13 + señal 2b (3ª revisión adversarial)
+
+La 3ª revisión adversarial encontró que el mini-tokenizer de v0.28.9 (y la señal
+2b) eran estructuralmente frágiles: cada fix cerraba unos casos y abría otros de
+la misma clase (text blocks Java `"""`, `<` relacional, TX en comillas dobles,
+monorepos). Tras **3 rondas de regresiones en la misma familia de código**, se
+decide revertir las heurísticas frágiles en vez de seguir parchando un parser de
+Java a mano.
+
+- **Check 5.13 → conteo agregado conservador** (el validado en v0.28.7): detección
+  léxica simple (`_calls_mono_zip` por línea + conteo `.onError*` agregado sobre el
+  servicio y sus helpers). Veredicto fuerte (HIGH) solo en fan-outs **homogéneos**;
+  **mixto → LOW** (revisión manual). Eliminados `_strip_java_noise`,
+  `_zip_legs_with_onerror` y el consumo por-rama (origen de los 3 HIGH de v0.28.9).
+- **Señal 2b revertida** (TX en UMPs clonadas + denylist `NON_BANCS_UMP_PREFIXES`):
+  reabría el falso positivo de WSReglas0010 (un return code `0NNNNN` no es una TX) y
+  no era cerrable de forma léxica robusta. `detect_bancs_connection` vuelve a su
+  firma de 1 argumento.
+- **Check 8.9** conserva la detección en submódulos (`rglob`) con el early-return
+  estricto restaurado (sin la inconsistencia H3 en monorepos sin gradle raíz).
+
+**Se conserva todo lo sólido**: gate ORQ por token + `source_type`, exclusión
+`test` (paridad PR-gate), `BANCS_UMP_PREFIXES` documentada + test de sincronía, F11
+(`analisis-orq.md`), mensajeNegocio, Helm, netty. Suite **952 verde**.
+
+> Lección: parsear Java con heurísticas léxicas a mano no escala (3 revisiones lo
+> confirmaron). El Check 5.13 es deliberadamente **conservador/agregado**: prefiere
+> LOW (revisión manual) a un veredicto fuerte incorrecto en un check que el banco
+> usa como árbitro de PRs.
+
 ## [0.28.9] - 2026-06-09
 
 ### Fixed — Revisión adversarial de v0.28.8 (2 HIGH + 6 MEDIUM)

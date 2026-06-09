@@ -9,11 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from capamedia_cli.core.checklist_rules import (
-    CheckContext,
-    _zip_legs_with_onerror,
-    run_block_5,
-)
+from capamedia_cli.core.checklist_rules import CheckContext, run_block_5
 
 
 def _find(results, check_id):
@@ -159,11 +155,11 @@ def test_5_13_mixed_downstreams_is_low_manual_review(tmp_path: Path) -> None:
     assert "mixtos" in check.detail
 
 
-def test_5_13_onerror_in_util_helper_is_low_not_high(tmp_path: Path) -> None:
-    """best-effort con .onError* SOLO en un helper (no inline en la rama del zip):
-    NO debe dar FAIL HIGH (H6); sin resolucion leg->helper queda LOW (revision
-    manual, M1: no enmascarar con un onError que podria ser de otra operacion)."""
-    root = _make_orq(tmp_path, _SVC_MANDATORY)  # Mono.zip sin onError inline
+def test_5_13_onerror_in_util_helper_not_high(tmp_path: Path) -> None:
+    """El .onError* best-effort vive en un helper de application/util/ (Service
+    Purity): cuenta en el conteo agregado del scope (servicio + helpers) -> PASS,
+    NO FAIL HIGH 'estricto' (H6)."""
+    root = _make_orq(tmp_path, _SVC_MANDATORY)  # Mono.zip sin onError inline en el servicio
     helper = (
         root
         / "src/main/java/com/pichincha/sp/application/util/FooDownstreamHelper.java"
@@ -172,8 +168,7 @@ def test_5_13_onerror_in_util_helper_is_low_not_high(tmp_path: Path) -> None:
     helper.write_text(_HELPER_WITH_ONERROR, encoding="utf-8")
     legacy = _legacy(tmp_path, _ESQL_ONLY_TRUE)  # best-effort
     check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
-    assert check.status == "fail"
-    assert check.severity == "low"  # no HIGH (H6), no PASS (M1)
+    assert check.status == "pass"
 
 
 # -- A1/A2: gate ORQ por token + override de source_type explicito -----------
@@ -215,93 +210,18 @@ def test_5_13_mono_zip_in_comment_not_detected(tmp_path: Path) -> None:
     assert _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13") is None
 
 
-# -- A5: parser de ramas del Mono.zip ----------------------------------------
+# Nota: el parser por-rama del Mono.zip (v0.28.8-0.28.9) se revirtio en v0.28.10
+# por fragilidad estructural (text blocks/generics/strings — 3 rondas de review
+# adversarial). El Check 5.13 es ahora AGREGADO conservador: fan-out homogeneo
+# (todos mandatory o todos best-effort) -> veredicto fuerte (HIGH/PASS); mixto ->
+# LOW (revision manual). Cubierto por los tests de arriba + el mixto-is-low abajo.
 
 
-def test_zip_legs_with_onerror_per_leg() -> None:
-    legs = _zip_legs_with_onerror("Mono.zip(a.x(), b.x().onErrorResume(t -> Mono.just(E)))")
-    assert legs == [[False, True]]
-
-
-def test_zip_legs_nested_and_map() -> None:
-    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x()).map(this::build)") == [[False, False]]
-
-
-def test_zip_legs_dirty_parse_degrades() -> None:
-    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x(") is None  # desbalanceado -> None
-
-
-def test_zip_legs_ignores_block_comment_and_string() -> None:
-    """.onErrorResume / Mono.zip dentro de comentario de bloque o string NO cuenta (H1)."""
-    assert _zip_legs_with_onerror(
-        "/* old: Mono.zip(x.onErrorResume(e), y) */ Mono.zip(a(), b())"
-    ) == [[False, False]]
-    assert _zip_legs_with_onerror('Mono.zip(a().name("x.onErrorResume.y"), b())') == [[False, False]]
-
-
-def test_zip_legs_ignores_zipdelayerror() -> None:
-    """Mono.zipDelayError NO es Mono.zip (H1)."""
-    assert _zip_legs_with_onerror("Mono.zipDelayError(a.onErrorResume(e), b)") == []
-
-
-def test_zip_legs_generics_not_split() -> None:
-    """Comas en generics `<A,B>` no parten legs (L1)."""
-    assert _zip_legs_with_onerror("Mono.zip(this.<Tuple2<A,B>>call(), b())") == [[False, False]]
-
-
-def test_zip_legs_onerror_family() -> None:
-    """onErrorReturn / onErrorComplete cuentan como proteccion best-effort (M3)."""
-    assert _zip_legs_with_onerror(
-        "Mono.zip(a().onErrorReturn(E), b().onErrorComplete())"
-    ) == [[True, True]]
-
-
-def test_zip_legs_multiple_zips_grouped() -> None:
-    """Cada Mono.zip es un grupo separado, no aplanado (M4)."""
-    assert _zip_legs_with_onerror(
-        "Mono.zip(a(), b().onErrorResume(e)); Mono.zip(c(), d())"
-    ) == [[False, True], [False, False]]
-
-
-# -- A6: conteo por-rama (cross-op intra-file, mixto MEDIUM) ------------------
-
-_SVC_ZIP_PLUS_OTHER_OP_ONERROR = (
-    "package com.pichincha.sp.application.service;\n"
-    "class FooServiceImpl {\n"
-    "    Mono<X> consultar() { return Mono.zip(a.x(), b.x()).map(this::build); }\n"
-    "    Mono<Y> otra() { return c.x().onErrorResume(t -> Mono.just(E)); }\n"
-    "}\n"
-)
-
-
-def test_5_13_onerror_outside_zip_same_file_not_miscounted(tmp_path: Path) -> None:
-    """all-mandatory: el Mono.zip no tiene onError pero OTRA operacion del mismo
-    archivo si -> el conteo por-rama no la cuenta -> PASS (antes daria HIGH falso)."""
-    root = _make_orq(tmp_path, _SVC_ZIP_PLUS_OTHER_OP_ONERROR)
-    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE)  # todos mandatory
-    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
-    assert check.status == "pass"
-
-
-def test_5_13_mixed_more_onerror_than_besteffort_is_medium(tmp_path: Path) -> None:
-    svc = (
-        "package com.pichincha.sp.application.service;\n"
-        "class FooServiceImpl {\n"
-        "    Mono<X> consultar() {\n"
-        "        return Mono.zip(a.x().onErrorResume(t -> Mono.just(E)),\n"
-        "                b.x().onErrorResume(t -> Mono.just(E))).map(this::build);\n"
-        "    }\n}\n"
-    )
-    root = _make_orq(tmp_path, svc)
-    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE + "\n" + _ESQL_ONLY_TRUE)  # 1 mand + 1 best
-    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
-    assert check.status == "fail"
-    assert check.severity == "medium"
-
-
-def test_5_13_mixed_no_onerror_is_medium_strict(tmp_path: Path) -> None:
-    root = _make_orq(tmp_path, _SVC_MANDATORY)  # Mono.zip sin onError
+def test_5_13_mixed_downstreams_stays_low(tmp_path: Path) -> None:
+    """Downstreams mixtos (mandatory + best-effort) -> LOW manual, nunca MEDIUM/HIGH
+    automatico: el conteo agregado no distingue por rama."""
+    root = _make_orq(tmp_path, _SVC_MANDATORY)
     legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE + "\n" + _ESQL_ONLY_TRUE)  # mixto
     check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
     assert check.status == "fail"
-    assert check.severity == "medium"
+    assert check.severity == "low"

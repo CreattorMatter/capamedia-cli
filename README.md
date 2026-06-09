@@ -483,6 +483,10 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.10 — Revert del parser por-rama del 5.13 + señal 2b (3ª revisión)
+
+- [x] v0.28.10 - **Revert de heurísticas frágiles**: tras 3 rondas de regresiones (el mini-tokenizer de v0.28.9 fallaba con text blocks Java/`<` relacional/TX en comillas dobles), el **Check 5.13 vuelve al conteo agregado conservador** validado en v0.28.7 (homogéneo→HIGH, mixto→LOW, **sin parsear Java**). **Señal 2b revertida** (reabría el falso positivo de WSReglas0010). **8.9** conserva submódulos con early-return estricto. Se conserva: gate ORQ por token, exclusión test, F11, docs, mensajeNegocio, Helm, netty. Suite 952. (lección: parsear Java a mano no escala — el 5.13 prefiere LOW manual a un veredicto fuerte incorrecto)
+
 ### Release 0.28.9 — Fix de la revisión adversarial de v0.28.8 (tokenizer + 2b)
 
 - [x] v0.28.9 - **Mini-tokenizer literal-aware** para el parser `Mono.zip` (neutraliza strings/comentarios, ignora `Mono.zipDelayError`, balancea generics, grupos por-zip) → cierra los FALSE HIGH del Check 5.13. Familias `onError*` (Resume/Return/Complete), parseo sucio → LOW (nunca PASS), mixto comparado solo con un zip (M4), best-effort en helper → LOW (M1). **Detector 2b**: denylist `NON_BANCS_UMP_PREFIXES` + filtro de fechas → cierra el falso positivo de WSReglas0010 (`'000404'`) que la señal 2b había reabierto. **Check 8.9**: `all_gradle` antes del early-return (monorepos) + exclusión `test` (paridad PR-gate). Claim `orquideas` corregido. +6 tests regresión, suite 965. (2 HIGH + 6 MEDIUM de la revisión adversarial, todos verificados ejecutando el código)

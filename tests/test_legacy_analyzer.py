@@ -181,47 +181,10 @@ def test_bancs_true_bancsclient_java(tmp_path: Path) -> None:
     assert any("BancsClient" in e for e in evidence)
 
 
-# -- L7: TX BANCS en los ESQL de las UMPs clonadas ---------------------------
-
-
-def test_bancs_true_with_tx_in_cloned_ump(tmp_path: Path) -> None:
-    """UMP no-BANCS sin TX propio + repo de UMP clonado con TX 0NNNNN -> BANCS (2b)."""
-    legacy = tmp_path / "legacy"
-    legacy.mkdir(parents=True)
-    (legacy / "flow.esql").write_text("CALL UMPInversiones0007.consultar();\n", encoding="utf-8")
-    umps = tmp_path / "umps"
-    repo = umps / "sqb-msa-umpinversiones0007"
-    repo.mkdir(parents=True)
-    (repo / "wrapper.esql").write_text("SET tx = '012345';\n", encoding="utf-8")
-    has_bancs, evidence = detect_bancs_connection(legacy, umps_root=umps)
-    assert has_bancs is True
-    assert any("UMP" in e and "TX" in e for e in evidence)
-
-
-def test_bancs_false_when_non_bancs_ump_has_return_code(tmp_path: Path) -> None:
-    """H2: UMPSeguridad0085 (no-BANCS, denylist) con un return code '000404'
-    clonado NO debe marcar BANCS (cierra el falso positivo reabierto en v0.28.8)."""
-    legacy = tmp_path / "legacy"
-    legacy.mkdir(parents=True)
-    (legacy / "flow.esql").write_text("CALL UMPSeguridad0085.consultar();\n", encoding="utf-8")
-    umps = tmp_path / "umps"
-    repo = umps / "sqb-msa-umpseguridad0085"
-    repo.mkdir(parents=True)
-    (repo / "logic.esql").write_text("SET retCode = '000404';\n", encoding="utf-8")  # return code
-    has_bancs, _ = detect_bancs_connection(legacy, umps_root=umps)
-    assert has_bancs is False
-
-
-def test_bancs_no_break_when_umps_root_none(tmp_path: Path) -> None:
-    legacy = tmp_path / "legacy"
-    legacy.mkdir(parents=True)
-    (legacy / "flow.esql").write_text("CALL UMPSeguridad0085.consultar();\n", encoding="utf-8")
-    has_bancs, _ = detect_bancs_connection(legacy, umps_root=None)
-    assert has_bancs is False
-
-
-def test_detect_bancs_back_compat_one_arg(tmp_path: Path) -> None:
-    """Llamada con 1 arg sigue funcionando (protege los 4 callers externos)."""
+def test_bancs_true_tx_literal_in_service_esql(tmp_path: Path) -> None:
+    """TX literal 0NNNNN en el ESQL del servicio -> senal 2 (arbitro fuerte).
+    Nota: la senal 2b (TX en UMPs clonadas) se revirtio en v0.28.10 por reabrir
+    el falso positivo de WSReglas0010 (un return code 0NNNNN no es una TX)."""
     legacy = tmp_path / "legacy"
     legacy.mkdir(parents=True)
     (legacy / "flow.esql").write_text("SET tx = '060480';\n", encoding="utf-8")

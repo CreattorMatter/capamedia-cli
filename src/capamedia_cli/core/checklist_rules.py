@@ -8,9 +8,9 @@ Los bloques son espejo de `prompts/post-migracion/03-checklist.md` del repo orig
 
 from __future__ import annotations
 
-from collections import Counter
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -722,97 +722,24 @@ def _legacy_procedures_return_false(legacy_path: Path | None) -> dict[str, bool]
     return procs
 
 
-# `Mono.zip(` tolerante a multilinea/espacios; NO matchea `Mono.zipDelayError(`.
+# `Mono.zip(` tolerante a espacios; NO matchea `Mono.zipDelayError(`. Familia
+# Reactor best-effort (devuelven/continuan ante error, no re-lanzan).
 _MONO_ZIP_RE = re.compile(r"Mono\s*\.\s*zip\s*\(")
-# Familias Reactor que devuelven/continuan ante error (best-effort), no re-lanzan.
 _ONERROR_RE = re.compile(r"\.onError(?:Resume|Return|Complete)\s*\(")
 
 
-def _strip_java_noise(text: str) -> str:
-    """Reemplaza por espacios (preservando posiciones y newlines) el contenido de
-    comentarios `//` y `/* */` y de literales string/char Java. Asi el balanceo
-    de parentesis/comas opera solo sobre codigo real: un `.onErrorResume` dentro
-    de un string o comentario, un `)` literal, o un `Mono.zip` comentado, dejan de
-    contar."""
-    out: list[str] = []
-    i, n = 0, len(text)
-    while i < n:
-        two = text[i : i + 2]
-        ch = text[i]
-        if two == "//":
-            j = text.find("\n", i)
-            j = n if j == -1 else j
-            out.append(" " * (j - i))
-            i = j
-        elif two == "/*":
-            j = text.find("*/", i + 2)
-            j = n if j == -1 else j + 2
-            out.append("".join("\n" if c == "\n" else " " for c in text[i:j]))
-            i = j
-        elif ch in ('"', "'"):
-            out.append(" ")
-            i += 1
-            while i < n:
-                c = text[i]
-                if c == "\\" and i + 1 < n:
-                    out.append("  ")
-                    i += 2
-                    continue
-                out.append("\n" if c == "\n" else " ")
-                i += 1
-                if c == ch:
-                    break
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out)
-
-
 def _calls_mono_zip(java_text: str) -> bool:
-    """True si el codigo invoca `Mono.zip(` fuera de comentarios/strings
-    (literal-aware, tolera `Mono\\n.zip(`)."""
-    return _MONO_ZIP_RE.search(_strip_java_noise(java_text)) is not None
-
-
-def _zip_legs_with_onerror(java_text: str) -> list[list[bool]] | None:
-    """Por cada `Mono.zip(...)` del codigo devuelve un GRUPO: lista de bool por
-    leg de nivel superior (True si la leg contiene una invocacion `.onError*(`
-    de las familias best-effort). Devuelve `None` si algun zip queda con
-    parentesis desbalanceados (parseo sucio -> el caller degrada, nunca HIGH).
-    Literal-aware (`_strip_java_noise`), localiza zips con `_MONO_ZIP_RE` (no
-    `zipDelayError`) y balancea `()` y `<>` para no partir legs por comas de
-    generics/lambdas."""
-    clean = _strip_java_noise(java_text)
-    groups: list[list[bool]] = []
-    for m in _MONO_ZIP_RE.finditer(clean):
-        open_paren = m.end() - 1  # el '(' del match
-        depth = angle = 0
-        leg_start = open_paren + 1
-        legs: list[bool] = []
-        closed = False
-        i = open_paren
-        while i < len(clean):
-            ch = clean[i]
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    legs.append(bool(_ONERROR_RE.search(clean[leg_start:i])))
-                    closed = True
-                    break
-            elif ch == "<":
-                angle += 1
-            elif ch == ">" and angle > 0:
-                angle -= 1
-            elif ch == "," and depth == 1 and angle == 0:
-                legs.append(bool(_ONERROR_RE.search(clean[leg_start:i])))
-                leg_start = i + 1
-            i += 1
-        if not closed:
-            return None  # parseo sucio (desbalanceado)
-        groups.append(legs)
-    return groups
+    """True si el codigo invoca `Mono.zip(` en una linea NO comentada (un
+    `// TODO Mono.zip` no activa el check). Deteccion lexica por linea: NO intenta
+    parsear el Java (un mini-parser a mano resulto fragil — text blocks, generics,
+    strings; ver CHANGELOG 0.28.10). El veredicto del 5.13 es agregado/conservador."""
+    for line in java_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("//", "*", "/*")):
+            continue
+        if _MONO_ZIP_RE.search(stripped):
+            return True
+    return False
 
 
 def _collect_tx_codes_from_yaml(text: str) -> set[str]:
@@ -1923,9 +1850,7 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
             stripped = line.strip()
             if not stripped or stripped.startswith("//") or stripped.startswith("*"):
                 continue
-            if re.search(r"Normalizer\.normalize\s*\(|stripAccents\s*\(|removeAccents\s*\(", line):
-                normalize_hits.append((f, line_no, stripped))
-            elif re.search(r'replaceAll\s*\(\s*"\\\\s\+"\s*,', line):
+            if re.search(r"Normalizer\.normalize\s*\(|stripAccents\s*\(|removeAccents\s*\(", line) or re.search(r'replaceAll\s*\(\s*"\\\\s\+"\s*,', line):
                 normalize_hits.append((f, line_no, stripped))
     if normalize_hits:
         sample = normalize_hits[0]
@@ -2324,9 +2249,12 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
         if zip_files:
             helper_files = list(java_dir.rglob("*Helper.java")) if java_dir.is_dir() else []
             scope_text = "\n".join(_read_or_empty(f) for f in zip_files + helper_files)
-            # onError* (familias best-effort: Resume/Return/Complete) en todo el
-            # scope (servicio + helpers), literal-aware -> detecta ESTRICTEZ.
-            n_onerror_family = len(_ONERROR_RE.findall(_strip_java_noise(scope_text)))
+            # Conteo AGREGADO de onError* (familias best-effort) en el servicio y
+            # sus helpers. Heuristica lexica conservadora: NO se parsea el Java por
+            # rama (un mini-parser a mano resulto fragil con text blocks/generics/
+            # strings — ver CHANGELOG 0.28.10). Veredicto fuerte (HIGH) solo en
+            # fan-outs HOMOGENEOS; downstreams mixtos -> LOW (revision manual).
+            n_onerror = len(_ONERROR_RE.findall(scope_text))
             if ctx.legacy_path is None or not ctx.legacy_path.exists():
                 results.append(
                     CheckResult(
@@ -2336,7 +2264,7 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
                             "paridad de short-circuit. Revisar manual."
                         ),
                         suggested_fix=(
-                            "Cruzar cada rama del Mono.zip con el RETURN FALSE del "
+                            "Cruzar las ramas del Mono.zip con el RETURN FALSE del "
                             "PROCEDURE legacy: best-effort -> .onError*; "
                             "mandatorio -> sin .onError*."
                         ),
@@ -2346,20 +2274,6 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
                 procs = _legacy_procedures_return_false(ctx.legacy_path)
                 best_effort = sorted(p for p, hf in procs.items() if not hf)
                 mandatory = sorted(p for p, hf in procs.items() if hf)
-                # Ramas POR zip (literal-aware). None = parseo sucio -> degradar,
-                # nunca HIGH ni PASS-coherente. Permisividad = ramas onError* inline;
-                # estrictez = ausencia de onError* en servicio y helpers.
-                groups = _zip_legs_with_onerror(scope_text)
-                parse_clean = groups is not None
-                n_legs_oe = sum(1 for g in (groups or []) for leg in g if leg)
-                # cardinalidades comparables solo con UN bloque Mono.zip (un ORQ);
-                # con varios no se puede cruzar n_legs (cross-zip) vs procedures.
-                one_zip = parse_clean and len(groups) == 1
-                _fix_strict = (
-                    "Aplicar .onErrorResume(t -> Mono.just(EMPTY_RESPONSE)) a las ramas "
-                    "best-effort (en un helper de application/util/ por Service Purity)."
-                )
-                _fix_loose = "Quitar .onError* de las ramas mandatorias para propagar el error."
                 if not procs:
                     results.append(
                         CheckResult(
@@ -2367,114 +2281,64 @@ def run_block_5(ctx: CheckContext) -> list[CheckResult]:
                             detail="ORQ: sin PROCEDURE downstream BOOLEAN detectables en el legacy para cruzar",
                         )
                     )
-                elif mandatory and not best_effort:
-                    # Todos mandatorios: ninguna rama deberia llevar .onError*.
-                    if not parse_clean:
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "fail", severity="low",
-                                detail=(
-                                    f"ORQ con {len(mandatory)} downstream mandatorio(s) pero el parseo del "
-                                    "Mono.zip no fue concluyente: verificar manual que ninguna rama use .onError*."
-                                ),
-                                suggested_fix=_fix_loose,
-                            )
-                        )
-                    elif n_legs_oe > 0:
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "fail", severity="high",
-                                detail=(
-                                    f"ORQ mas PERMISIVO que el legacy: los {len(mandatory)} PROCEDURE "
-                                    f"downstream son mandatorios (RETURN FALSE) pero {n_legs_oe} rama(s) "
-                                    "del Mono.zip usan .onError*, ignorando errores que el legacy propaga."
-                                ),
-                                suggested_fix=_fix_loose,
-                            )
-                        )
-                    else:
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "pass",
-                                detail=f"ORQ: {len(mandatory)} downstream mandatorio(s), sin .onError* en las ramas (coherente)",
-                            )
-                        )
-                elif best_effort and not mandatory:
-                    # Todos best-effort: alguna proteccion onError* esperada.
-                    if n_legs_oe > 0:
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "pass",
-                                detail=f"ORQ: {len(best_effort)} downstream best-effort con .onError* en las ramas (coherente)",
-                            )
-                        )
-                    elif n_onerror_family == 0:
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "fail", severity="high",
-                                detail=(
-                                    f"ORQ mas ESTRICTO que el legacy: {len(best_effort)} downstream "
-                                    f"best-effort (sin RETURN FALSE: {', '.join(best_effort[:4])}) pero el "
-                                    "migrado no usa .onError* en el servicio ni en sus helpers."
-                                ),
-                                suggested_fix=_fix_strict,
-                            )
-                        )
-                    else:
-                        # onError* existe pero en helpers, no inline en una rama: no
-                        # se puede confirmar que proteja estas ramas -> revision manual.
-                        results.append(
-                            CheckResult(
-                                "5.13", "Block 5", title_513, "fail", severity="low",
-                                detail=(
-                                    f"ORQ con {len(best_effort)} downstream best-effort sin .onError* inline "
-                                    "en las ramas del Mono.zip (hay .onError* en helpers): verificar manual "
-                                    "que esas ramas queden protegidas."
-                                ),
-                                suggested_fix=_fix_strict,
-                            )
-                        )
-                elif one_zip and n_legs_oe > len(best_effort):
-                    # Mixto, un solo zip, con MAS ramas onError* que best-effort
-                    # -> alguna mandatoria lo tiene -> probable permisividad.
-                    results.append(
-                        CheckResult(
-                            "5.13", "Block 5", title_513, "fail", severity="medium",
-                            detail=(
-                                f"ORQ mixto ({len(mandatory)} mandatorio(s), {len(best_effort)} best-effort) "
-                                f"con {n_legs_oe} ramas .onError* > {len(best_effort)} best-effort: alguna rama "
-                                "mandatoria estaria ignorando errores. Verificar por rama."
-                            ),
-                            suggested_fix=_fix_loose,
-                        )
-                    )
-                elif n_onerror_family == 0:
-                    # Mixto sin NINGUN onError* -> las best-effort no estan protegidas.
-                    results.append(
-                        CheckResult(
-                            "5.13", "Block 5", title_513, "fail", severity="medium",
-                            detail=(
-                                f"ORQ mixto con {len(best_effort)} downstream best-effort "
-                                f"({', '.join(best_effort[:3])}) pero sin .onError* en ninguna rama "
-                                "ni helper: esas ramas abortarian el Mono.zip. Verificar por rama."
-                            ),
-                            suggested_fix=_fix_strict,
-                        )
-                    )
-                else:
-                    # Mixto con cardinalidades plausibles (o varios zips) -> manual (LOW).
+                elif best_effort and mandatory:
+                    # Downstreams mixtos: el conteo agregado no distingue por rama;
+                    # sin parseo confiable no se afirma paridad -> revision manual
+                    # (NO PASS silencioso, NO HIGH automatico).
                     results.append(
                         CheckResult(
                             "5.13", "Block 5", title_513, "fail", severity="low",
                             detail=(
-                                f"ORQ con downstreams mixtos ({len(mandatory)} mandatorio(s), "
-                                f"{len(best_effort)} best-effort) y {n_legs_oe} rama(s) .onError*. "
-                                "El check no distingue por rama: verificar manualmente que cada best-effort "
-                                "use .onError* y cada mandatoria no."
+                                f"ORQ con downstreams mixtos ({len(mandatory)} mandatorio(s): "
+                                f"{', '.join(mandatory[:3])}; {len(best_effort)} best-effort: "
+                                f"{', '.join(best_effort[:3])}) y {n_onerror} onError*. El check "
+                                "agregado no distingue por rama: verificar manualmente que cada rama "
+                                "best-effort use .onError* y cada mandatoria no."
                             ),
                             suggested_fix=(
-                                "Mapear cada rama del Mono.zip al PROCEDURE que migra (best-effort -> "
-                                ".onErrorResume; mandatorio -> sin)."
+                                "Mapear cada rama del Mono.zip al PROCEDURE que migra: best-effort -> "
+                                ".onErrorResume(Mono.just(EMPTY)); mandatorio -> sin .onErrorResume."
+                            ),
+                        )
+                    )
+                elif best_effort and n_onerror == 0:
+                    results.append(
+                        CheckResult(
+                            "5.13", "Block 5", title_513, "fail", severity="high",
+                            detail=(
+                                f"ORQ mas ESTRICTO que el legacy: {len(best_effort)} downstream "
+                                f"best-effort (PROCEDURE sin RETURN FALSE: {', '.join(best_effort[:4])}) "
+                                "pero el migrado no usa .onError* en el servicio ni en sus helpers."
+                            ),
+                            suggested_fix=(
+                                "Aplicar .onErrorResume(t -> Mono.just(EMPTY_RESPONSE)) a las ramas "
+                                "best-effort (en un helper de application/util/ por Service Purity) "
+                                "para no abortar el Mono.zip."
+                            ),
+                        )
+                    )
+                elif mandatory and n_onerror > 0:
+                    results.append(
+                        CheckResult(
+                            "5.13", "Block 5", title_513, "fail", severity="high",
+                            detail=(
+                                f"ORQ mas PERMISIVO que el legacy: los {len(mandatory)} PROCEDURE "
+                                "downstream tienen RETURN FALSE (mandatorios) pero el migrado usa "
+                                f".onError* en {n_onerror} rama(s), ignorando errores que el legacy propaga."
+                            ),
+                            suggested_fix=(
+                                "Quitar .onError* de las ramas mandatorias para propagar el "
+                                "error como el legacy."
+                            ),
+                        )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            "5.13", "Block 5", title_513, "pass",
+                            detail=(
+                                f"ORQ: paridad short-circuit coherente ({len(mandatory)} mandatorio(s), "
+                                f"{len(best_effort)} best-effort, {n_onerror} onError*)"
                             ),
                         )
                     )
@@ -2894,9 +2758,13 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
         )
         if f.exists()
     ]
+    if not gradle_files:
+        return results
     # Todos los build.gradle del proyecto, incluidos submodulos (paridad con el
-    # PR-gate, que usa **/build.gradle* y excluye `test`). Lo usa el Check 8.9; el
-    # early-return mira esto para no anularlo en monorepos sin gradle en la raiz.
+    # PR-gate, que usa **/build.gradle* y excluye `test`). Lo usa el Check 8.9 para
+    # detectar lib-bnc en submodulos cuando hay gradle en la raiz (caso comun). En
+    # monorepos SIN gradle raiz el early-return de arriba corta antes (consistente
+    # con 8.1-8.8, que son root-only): se acepta no cubrir ese caso raro.
     all_gradle = [
         gf
         for gf in (
@@ -2905,8 +2773,6 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
         )
         if "test" not in [p.lower() for p in gf.parts]
     ]
-    if not gradle_files and not all_gradle:
-        return results
 
     undertow_artifacts: list[str] = []
     for gradle_file in gradle_files:
