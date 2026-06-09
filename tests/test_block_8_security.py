@@ -861,3 +861,19 @@ def test_8_9_parity_with_vendor_is_bus_bancs() -> None:
     ]
     for meta in cases:
         assert _fabrics_requires_bancs(meta) == vh._is_bus_bancs(meta), meta
+
+
+def test_8_9_libbnc_in_submodule_detected(tmp_path: Path) -> None:
+    """La lib en un submodulo (no en el gradle raiz) se detecta (rglob, L4)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
+    sub = root / "modulo-app"
+    sub.mkdir(parents=True, exist_ok=True)
+    (sub / "build.gradle").write_text(
+        "dependencies {\n    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'\n}\n",
+        encoding="utf-8",
+    )
+    _write_fabrics(root, invoca_bancs=False)
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
+    assert check.status == "fail"
+    assert check.severity == "high"

@@ -108,7 +108,24 @@ For each ORQ operation:
 - Which error codes are explicitly catalogued in the ORQ ESQL/msgflow?
 - Is there a global handler / catch terminal?
 
-**Output:** Brief description of error strategy. Do NOT enumerate every error code unless trivially few.
+**Short-circuit classification per delegation (ORQ-RETURN-PARITY).** For each
+`CALL XXX INTO respuesta` (or equivalent delegation), locate `CREATE PROCEDURE
+XXX() RETURNS BOOLEAN` in the legacy ESQL and inspect its body (ignoring `--`
+and `/* */` comments) — **control-flow scan only, NOT business-logic reverse
+engineering**:
+- has a `RETURN FALSE` in its error path → **MANDATORY** (a failure aborts the
+  flow; the migrated branch must NOT use `.onErrorResume`).
+- only `RETURN TRUE` (no `RETURN FALSE`) → **BEST-EFFORT** (a failure does not
+  abort; the migrated branch must wrap with `.onErrorResume(Mono.just(EMPTY))`).
+- not locatable / ambiguous → **UNKNOWN → default MANDATORY**, and record an
+  Uncertainty for human override (fail-closed: prefer over-propagating).
+Classify per call site with evidence (`CREATE PROCEDURE ... at <file:line>;
+RETURN FALSE present/absent`). The migration prompt (`migrate-rest-full.md`,
+ORQ-RETURN-PARITY) and Check 5.13 consume this instead of re-discovering it.
+
+**Output:** Brief description of error strategy + a per-delegation short-circuit
+classification (MANDATORY | BEST-EFFORT | UNKNOWN) with evidence. Do NOT
+enumerate every error code unless trivially few.
 
 ### Step E: Classification (ORQ → always REST + WebFlux)
 

@@ -23,6 +23,20 @@ En estos casos: **NO** declarar `lib-bnc-api-client` ni las
 Adapter via TX literal `0NNNNN` (o UMP de prefijo BANCS) necesita la lib. El CLI
 lo valida en el Check 8.9.
 
+### Prefijos UMP que SÍ son BANCS (allowlist de la señal 1)
+
+El detector marca BANCS por una UMP **solo** si su prefijo (parte alfabética)
+empieza (`startswith`) con uno de estos 8 — espejo de
+`legacy_analyzer.BANCS_UMP_PREFIXES` (árbitro = código; un test de sincronía lo
+valida):
+
+`UMPClientes`, `UMPCuentas`, `UMPTransacciones`, `UMPProductos`, `UMPTarjetas`,
+`UMPTransferencias`, `UMPPagos`, `UMPContratos`.
+
+El árbitro fuerte sigue siendo la TX literal `0NNNNN` (en el ESQL del servicio o
+de la UMP clonada). La completitud de esta lista depende del catálogo de dominios
+del banco (pendiente de validar).
+
 ## Core Adapter
 - NUNCA llamar BANCS TCP directamente desde un MSA consumidor
 - NUNCA agregar frm-lib-ad-bnc-core-adapter como dependencia del MSA consumidor

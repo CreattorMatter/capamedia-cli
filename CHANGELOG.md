@@ -6,6 +6,42 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.8] - 2026-06-08
+
+### Changed — Pendientes del review: robustez de los checks 5.13/8.9 + detector
+
+Cierre de los LOW del review adversarial + la mejora viable del Check 5.13. Un 2º
+workflow de diseño verificó contra el código y **descartó el matching 1:1 por
+inviable** (el legacy ORQ es secuencial y no expone una llave estable
+rama↔procedure) a favor del **conteo por-rama**.
+
+**Check 5.13 (ORQ-RETURN-PARITY):**
+- `onErrorResume` contado **por-rama** (parseo balanceado del `Mono.zip`) en vez
+  de global: cierra el falso positivo de un `onErrorResume` en otra operación del
+  mismo archivo. HIGH solo en fan-outs **homogéneos**; **mixto → MEDIUM** (por
+  cardinalidades) o LOW manual; nunca HIGH con parseo sucio.
+- Gate ORQ por **token** (`_looks_like_orq` ya no matchea `mayorque`/`orquideas`)
+  y respeta un `source_type` explícito no-orq; `Mono.zip` detectado ignorando
+  comentarios. Canónico (`checklist-rules.md` 5.13) corregido: documenta el cruce
+  **agregado**, no 1:1.
+
+**Check 8.9:** escanea `build.gradle` en **submódulos** (`rglob`, paridad con el PR-gate).
+
+**Detector BANCS:** la señal 2 (TX `0NNNNN`) también escanea los ESQL de las
+**UMPs clonadas** (`detect_bancs_connection(legacy_root, umps_root)`); una UMP que
+envuelve una TX BANCS cuenta. `BANCS_UMP_PREFIXES` documentada como fuente de
+verdad (espejo en `bancs.md` + test de sincronía). Comentario del supuesto `\d{4}`.
+
+**Prompt:** `analisis-orq.md` clasifica cada delegación mandatory/best-effort
+(control-flow scan, fail-closed `UNKNOWN→MANDATORY`) para que migrate/Check 5.13
+la consuman.
+
++14 tests. Suite **959 verde**.
+
+> Fuera de alcance (requieren input externo): el matching 1:1 del 5.13 (sin ORQ
+> migrado de referencia), D7 (catálogo de prefijos BANCS del banco), y el ESQL de
+> ORQClientes0022/OP21 para un test de regresión realista del caso mixto.
+
 ## [0.28.7] - 2026-06-08
 
 ### Fixed — Hardening de los checks 8.9 y 5.13 (revisión adversarial)

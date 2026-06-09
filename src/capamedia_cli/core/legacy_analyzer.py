@@ -20,6 +20,9 @@ from pathlib import Path
 
 RE_WSDL_OPERATION = re.compile(r'<(?:wsdl:)?operation\s+name="([^"]+)"', re.IGNORECASE)
 RE_WSDL_TARGETNS = re.compile(r'targetNamespace="([^"]+)"')
+# Supuesto: el sufijo numerico de las UMP es de 4 digitos (mismo supuesto en
+# `_has_bancs_ump`). Si el banco emite UMPs con sufijo != 4 digitos, relajar a
+# `\d{3,}` de forma COORDINADA en ambos sitios (no por separado).
 RE_UMP_REFERENCE = re.compile(r"\b(UMP[A-Z][a-zA-Z]+\d{4})\b")
 RE_TX_CODE = re.compile(r"'(\d{6})'")
 RE_SCHEMALOCATION = re.compile(r'schemaLocation="([^"]+)"')
@@ -29,6 +32,10 @@ RE_SCHEMALOCATION = re.compile(r'schemaLocation="([^"]+)"')
 # las UMP genericas/no-BANCS (UMPSeguridad, UMPAutorizadores, UMPGenerico,
 # UMPReglas, ...) NO. El arbitro fuerte sigue siendo la TX literal 0NNNNN
 # (senal 2). En minuscula para comparar case-insensitive.
+#
+# FUENTE DE VERDAD ejecutable: esta frozenset. `context/bancs.md` la espeja para
+# humanos; los cambios se hacen AQUI y un test de sincronia lo valida. La
+# completitud depende del catalogo de dominios del banco (D7, pendiente).
 BANCS_UMP_PREFIXES: frozenset[str] = frozenset(
     {
         "umpclientes",
@@ -367,13 +374,16 @@ def _has_bancs_ump(ump_names: list[str]) -> bool:
     return False
 
 
-def detect_bancs_connection(legacy_root: Path) -> tuple[bool, list[str]]:
+def detect_bancs_connection(
+    legacy_root: Path, umps_root: Path | None = None, source_kind: str = ""
+) -> tuple[bool, list[str]]:
     """True si el servicio conecta a BANCS por cualquier via.
 
     4 senales:
       1. UMPs de prefijo BANCS conocido (`BANCS_UMP_PREFIXES`); las UMP
          genericas/no-BANCS (UMPSeguridad, UMPAutorizadores, ...) NO cuentan
-      2. TX BANCS literal (0NNNNN) en ESQL (arbitro fuerte)
+      2. TX BANCS literal (0NNNNN) en los ESQL del servicio o, si `umps_root`
+         esta clonado, en los ESQL de las UMPs referenciadas (arbitro fuerte)
       3. HTTPRequest node apuntando a BANCS en msgflows
       4. BancsClient / @BancsService en Java
     """
@@ -382,8 +392,9 @@ def detect_bancs_connection(legacy_root: Path) -> tuple[bool, list[str]]:
     bancs_umps = [u for u in detect_ump_references(legacy_root) if _has_bancs_ump([u])]
     if bancs_umps:
         evidence.append("UMP BANCS references: " + ", ".join(sorted(bancs_umps)))
-    # 2. TX literal 0NNNNN en ESQL
+    # 2. TX literal 0NNNNN en los ESQL del servicio
     tx_pattern = re.compile(r"['\"]0\d{5}['\"]")
+    tx_found = False
     for esql in legacy_root.rglob("*.esql"):
         try:
             text = esql.read_text(encoding="utf-8", errors="ignore")
@@ -391,7 +402,26 @@ def detect_bancs_connection(legacy_root: Path) -> tuple[bool, list[str]]:
             continue
         if tx_pattern.search(text):
             evidence.append(f"TX literal en {esql.name}")
+            tx_found = True
             break
+    # 2b. (L7) TX BANCS en los ESQL de las UMPs clonadas, solo si el servicio no
+    # tenia TX propia: una UMP que envuelve una TX 0NNNNN es un wrapper BANCS.
+    if not tx_found and umps_root and umps_root.exists():
+        for ump in detect_ump_references(legacy_root):
+            repo = _find_ump_repo(umps_root, ump, source_kind)
+            if repo is None:
+                continue
+            found_in_ump = False
+            for esql in repo.rglob("*.esql"):
+                try:
+                    if tx_pattern.search(esql.read_text(encoding="utf-8", errors="ignore")):
+                        evidence.append(f"TX literal BANCS en UMP {ump} ({esql.name})")
+                        found_in_ump = True
+                        break
+                except OSError:
+                    continue
+            if found_in_ump:
+                break
     # 3. HTTPRequest con BANCS en msgflow
     for msgflow in legacy_root.rglob("*.msgflow"):
         try:
@@ -915,7 +945,7 @@ def analyze_legacy(legacy_root: Path, service_name: str, umps_root: Path | None 
         has_db, db_evidence = detect_database_usage(legacy_root)
 
     # Detectar BANCS por cualquier via (no solo UMPs)
-    has_bancs, bancs_evidence = detect_bancs_connection(legacy_root)
+    has_bancs, bancs_evidence = detect_bancs_connection(legacy_root, umps_root, source_kind)
 
     # Para WAS sin WSDL suelto, contar endpoints por codigo Java
     if source_kind == "was" and wsdl_info is None:

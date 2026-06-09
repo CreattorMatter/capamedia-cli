@@ -483,6 +483,10 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.8 — Pendientes del review: robustez 5.13/8.9 + detector
+
+- [x] v0.28.8 - **Check 5.13 por-rama**: conteo de `onErrorResume` por rama del `Mono.zip` (parseo balanceado) en vez de global; mixto → MEDIUM/LOW, nunca HIGH con parseo sucio. Gate ORQ por token (no `mayorque`/`orquideas`) + respeta `source_type`. **Check 8.9** escanea submódulos. **Detector**: señal TX también en UMPs clonadas; `BANCS_UMP_PREFIXES` documentada + test de sincronía. `analisis-orq.md` clasifica mandatory/best-effort. +14 tests, suite 959. (el matching 1:1 del 5.13 se descartó por inviable — un 2º workflow de diseño confirmó que el legacy no expone una llave estable)
+
 ### Release 0.28.7 — Hardening checks 8.9/5.13 (revisión adversarial)
 
 - [x] v0.28.7 - **Check 8.9 corregido**: leía `invoca_bancs` como bool pero el formato real es string → réplica exacta de `validate_hexagonal` (`_load_fabrics_metadata` + `_fabrics_requires_bancs`, acepta string/camelCase/source_kind), test de paridad contra el vendor. Detección de lib ignora comentarios

@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from capamedia_cli.core.checklist_rules import CheckContext, run_block_5
+from capamedia_cli.core.checklist_rules import (
+    CheckContext,
+    _zip_legs_with_onerror,
+    run_block_5,
+)
 
 
 def _find(results, check_id):
@@ -168,3 +172,101 @@ def test_5_13_onerror_in_util_helper_not_flagged(tmp_path: Path) -> None:
     legacy = _legacy(tmp_path, _ESQL_ONLY_TRUE)  # best-effort
     check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
     assert check.status == "pass"
+
+
+# -- A1/A2: gate ORQ por token + override de source_type explicito -----------
+
+
+def test_5_13_explicit_was_source_overrides_name(tmp_path: Path) -> None:
+    """source_type='was' + nombre con substring 'mayorque' -> 5.13 NO se emite."""
+    root = tmp_path / "consultamayorquedato0001"
+    svc = root / "src/main/java/com/pichincha/sp/application/service/FooServiceImpl.java"
+    svc.parent.mkdir(parents=True)
+    svc.write_text(_SVC_MANDATORY, encoding="utf-8")
+    ctx = CheckContext(migrated_path=root, legacy_path=None, source_type="was")
+    assert _find(run_block_5(ctx), "5.13") is None
+
+
+def test_5_13_embedded_orq_substring_not_orq(tmp_path: Path) -> None:
+    """Sin source_type, 'mayorque'/'orquideas' no activan 5.13 (token-boundary)."""
+    root = tmp_path / "consultamayorquedato0001"
+    svc = root / "src/main/java/com/pichincha/sp/application/service/FooServiceImpl.java"
+    svc.parent.mkdir(parents=True)
+    svc.write_text(_SVC_MANDATORY, encoding="utf-8")
+    assert _find(run_block_5(CheckContext(migrated_path=root, legacy_path=None)), "5.13") is None
+
+
+# -- A3: Mono.zip en comentario no activa ------------------------------------
+
+
+def test_5_13_mono_zip_in_comment_not_detected(tmp_path: Path) -> None:
+    body = (
+        "package com.pichincha.sp.application.service;\n"
+        "class FooServiceImpl {\n"
+        "    // pendiente: migrar a Mono.zip(...)\n"
+        "    Mono<X> consultar() { return port.consultar(); }\n"
+        "}\n"
+    )
+    root = _make_orq(tmp_path, body)
+    legacy = _legacy(tmp_path, _ESQL_ONLY_TRUE)
+    assert _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13") is None
+
+
+# -- A5: parser de ramas del Mono.zip ----------------------------------------
+
+
+def test_zip_legs_with_onerror_per_leg() -> None:
+    legs = _zip_legs_with_onerror("Mono.zip(a.x(), b.x().onErrorResume(t -> Mono.just(E)))")
+    assert legs == [False, True]
+
+
+def test_zip_legs_nested_and_map() -> None:
+    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x()).map(this::build)") == [False, False]
+
+
+def test_zip_legs_dirty_parse_degrades() -> None:
+    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x(") == []  # parentesis desbalanceados
+
+
+# -- A6: conteo por-rama (cross-op intra-file, mixto MEDIUM) ------------------
+
+_SVC_ZIP_PLUS_OTHER_OP_ONERROR = (
+    "package com.pichincha.sp.application.service;\n"
+    "class FooServiceImpl {\n"
+    "    Mono<X> consultar() { return Mono.zip(a.x(), b.x()).map(this::build); }\n"
+    "    Mono<Y> otra() { return c.x().onErrorResume(t -> Mono.just(E)); }\n"
+    "}\n"
+)
+
+
+def test_5_13_onerror_outside_zip_same_file_not_miscounted(tmp_path: Path) -> None:
+    """all-mandatory: el Mono.zip no tiene onError pero OTRA operacion del mismo
+    archivo si -> el conteo por-rama no la cuenta -> PASS (antes daria HIGH falso)."""
+    root = _make_orq(tmp_path, _SVC_ZIP_PLUS_OTHER_OP_ONERROR)
+    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE)  # todos mandatory
+    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
+    assert check.status == "pass"
+
+
+def test_5_13_mixed_more_onerror_than_besteffort_is_medium(tmp_path: Path) -> None:
+    svc = (
+        "package com.pichincha.sp.application.service;\n"
+        "class FooServiceImpl {\n"
+        "    Mono<X> consultar() {\n"
+        "        return Mono.zip(a.x().onErrorResume(t -> Mono.just(E)),\n"
+        "                b.x().onErrorResume(t -> Mono.just(E))).map(this::build);\n"
+        "    }\n}\n"
+    )
+    root = _make_orq(tmp_path, svc)
+    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE + "\n" + _ESQL_ONLY_TRUE)  # 1 mand + 1 best
+    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
+    assert check.status == "fail"
+    assert check.severity == "medium"
+
+
+def test_5_13_mixed_no_onerror_is_medium_strict(tmp_path: Path) -> None:
+    root = _make_orq(tmp_path, _SVC_MANDATORY)  # Mono.zip sin onError
+    legacy = _legacy(tmp_path, _ESQL_RETURNS_FALSE + "\n" + _ESQL_ONLY_TRUE)  # mixto
+    check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
+    assert check.status == "fail"
+    assert check.severity == "medium"

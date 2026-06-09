@@ -179,3 +179,53 @@ def test_bancs_true_bancsclient_java(tmp_path: Path) -> None:
     has_bancs, evidence = detect_bancs_connection(legacy)
     assert has_bancs is True
     assert any("BancsClient" in e for e in evidence)
+
+
+# -- L7: TX BANCS en los ESQL de las UMPs clonadas ---------------------------
+
+
+def test_bancs_true_with_tx_in_cloned_ump(tmp_path: Path) -> None:
+    """UMP no-BANCS sin TX propio + repo de UMP clonado con TX 0NNNNN -> BANCS (2b)."""
+    legacy = tmp_path / "legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "flow.esql").write_text("CALL UMPInversiones0007.consultar();\n", encoding="utf-8")
+    umps = tmp_path / "umps"
+    repo = umps / "sqb-msa-umpinversiones0007"
+    repo.mkdir(parents=True)
+    (repo / "wrapper.esql").write_text("SET tx = '012345';\n", encoding="utf-8")
+    has_bancs, evidence = detect_bancs_connection(legacy, umps_root=umps)
+    assert has_bancs is True
+    assert any("UMP" in e and "TX" in e for e in evidence)
+
+
+def test_bancs_no_break_when_umps_root_none(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "flow.esql").write_text("CALL UMPSeguridad0085.consultar();\n", encoding="utf-8")
+    has_bancs, _ = detect_bancs_connection(legacy, umps_root=None)
+    assert has_bancs is False
+
+
+def test_detect_bancs_back_compat_one_arg(tmp_path: Path) -> None:
+    """Llamada con 1 arg sigue funcionando (protege los 4 callers externos)."""
+    legacy = tmp_path / "legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "flow.esql").write_text("SET tx = '060480';\n", encoding="utf-8")
+    has_bancs, _ = detect_bancs_connection(legacy)
+    assert has_bancs is True
+
+
+def test_bancs_prefixes_documented_in_bancs_md() -> None:
+    """bancs.md espeja BANCS_UMP_PREFIXES (sincronia doc<->codigo, L6)."""
+    import capamedia_cli
+
+    bancs_md = (
+        Path(capamedia_cli.__file__).parent
+        / "data"
+        / "canonical"
+        / "context"
+        / "bancs.md"
+    ).read_text(encoding="utf-8")
+    for prefix in BANCS_UMP_PREFIXES:
+        expected = "UMP" + prefix[3:].capitalize()
+        assert expected in bancs_md, f"{expected} falta en bancs.md"
