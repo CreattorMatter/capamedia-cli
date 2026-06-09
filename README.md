@@ -483,9 +483,13 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.28.9 — Fix de la revisión adversarial de v0.28.8 (tokenizer + 2b)
+
+- [x] v0.28.9 - **Mini-tokenizer literal-aware** para el parser `Mono.zip` (neutraliza strings/comentarios, ignora `Mono.zipDelayError`, balancea generics, grupos por-zip) → cierra los FALSE HIGH del Check 5.13. Familias `onError*` (Resume/Return/Complete), parseo sucio → LOW (nunca PASS), mixto comparado solo con un zip (M4), best-effort en helper → LOW (M1). **Detector 2b**: denylist `NON_BANCS_UMP_PREFIXES` + filtro de fechas → cierra el falso positivo de WSReglas0010 (`'000404'`) que la señal 2b había reabierto. **Check 8.9**: `all_gradle` antes del early-return (monorepos) + exclusión `test` (paridad PR-gate). Claim `orquideas` corregido. +6 tests regresión, suite 965. (2 HIGH + 6 MEDIUM de la revisión adversarial, todos verificados ejecutando el código)
+
 ### Release 0.28.8 — Pendientes del review: robustez 5.13/8.9 + detector
 
-- [x] v0.28.8 - **Check 5.13 por-rama**: conteo de `onErrorResume` por rama del `Mono.zip` (parseo balanceado) en vez de global; mixto → MEDIUM/LOW, nunca HIGH con parseo sucio. Gate ORQ por token (no `mayorque`/`orquideas`) + respeta `source_type`. **Check 8.9** escanea submódulos. **Detector**: señal TX también en UMPs clonadas; `BANCS_UMP_PREFIXES` documentada + test de sincronía. `analisis-orq.md` clasifica mandatory/best-effort. +14 tests, suite 959. (el matching 1:1 del 5.13 se descartó por inviable — un 2º workflow de diseño confirmó que el legacy no expone una llave estable)
+- [x] v0.28.8 - **Check 5.13 por-rama**: conteo de `onErrorResume` por rama del `Mono.zip` (parseo balanceado) en vez de global; mixto → MEDIUM/LOW, nunca HIGH con parseo sucio. Gate ORQ por token (no el `orq` embebido de `mayorque`) + respeta `source_type`. **Check 8.9** escanea submódulos. **Detector**: señal TX también en UMPs clonadas; `BANCS_UMP_PREFIXES` documentada + test de sincronía. `analisis-orq.md` clasifica mandatory/best-effort. +14 tests, suite 959. (el matching 1:1 del 5.13 se descartó por inviable — un 2º workflow de diseño confirmó que el legacy no expone una llave estable)
 
 ### Release 0.28.7 — Hardening checks 8.9/5.13 (revisión adversarial)
 

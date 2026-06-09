@@ -49,6 +49,23 @@ BANCS_UMP_PREFIXES: frozenset[str] = frozenset(
     }
 )
 
+# Prefijos de UMP conocidamente NO-BANCS (wrappers de Cyxtera/seguridad/ODM/etc.).
+# La senal 2b (TX en UMPs clonadas) las SALTA para no marcar BANCS por un return
+# code/constante `0NNNNN` (ej. UMPSeguridad0085 con `'000404'`). Lista best-effort
+# espejo de la documentada en bancs.md; completitud pendiente (D7).
+NON_BANCS_UMP_PREFIXES: frozenset[str] = frozenset(
+    {
+        "umpseguridad",
+        "umpautorizadores",
+        "umpgenerico",
+        "umpreglas",
+        "umptecnicos",
+        "umpcanales",
+        "umpfirmas",
+        "umpdocumentos",
+    }
+)
+
 
 # -- Dataclasses ------------------------------------------------------------
 
@@ -374,6 +391,15 @@ def _has_bancs_ump(ump_names: list[str]) -> bool:
     return False
 
 
+def _is_non_bancs_ump(ump_name: str) -> bool:
+    """True si la UMP tiene un prefijo conocidamente NO-BANCS (denylist)."""
+    m = re.match(r"(?i)(ump[a-z]+?)\d{4}", ump_name)
+    if not m:
+        return False
+    prefix = m.group(1).lower()
+    return any(prefix.startswith(known) for known in NON_BANCS_UMP_PREFIXES)
+
+
 def detect_bancs_connection(
     legacy_root: Path, umps_root: Path | None = None, source_kind: str = ""
 ) -> tuple[bool, list[str]]:
@@ -406,21 +432,18 @@ def detect_bancs_connection(
             break
     # 2b. (L7) TX BANCS en los ESQL de las UMPs clonadas, solo si el servicio no
     # tenia TX propia: una UMP que envuelve una TX 0NNNNN es un wrapper BANCS.
+    # Saltar las UMP conocidamente no-BANCS (denylist) para no marcar BANCS por
+    # un return code/constante `0NNNNN` (caso WSReglas0010/UMPSeguridad0085).
+    # `extract_tx_codes` aplica el filtro de fechas y excluye `.git`.
     if not tx_found and umps_root and umps_root.exists():
         for ump in detect_ump_references(legacy_root):
+            if _is_non_bancs_ump(ump):
+                continue
             repo = _find_ump_repo(umps_root, ump, source_kind)
             if repo is None:
                 continue
-            found_in_ump = False
-            for esql in repo.rglob("*.esql"):
-                try:
-                    if tx_pattern.search(esql.read_text(encoding="utf-8", errors="ignore")):
-                        evidence.append(f"TX literal BANCS en UMP {ump} ({esql.name})")
-                        found_in_ump = True
-                        break
-                except OSError:
-                    continue
-            if found_in_ump:
+            if any(c.startswith("0") for c in extract_tx_codes(repo)):
+                evidence.append(f"TX literal BANCS en UMP {ump}")
                 break
     # 3. HTTPRequest con BANCS en msgflow
     for msgflow in legacy_root.rglob("*.msgflow"):

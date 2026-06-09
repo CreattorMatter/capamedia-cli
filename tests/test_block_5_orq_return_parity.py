@@ -159,10 +159,11 @@ def test_5_13_mixed_downstreams_is_low_manual_review(tmp_path: Path) -> None:
     assert "mixtos" in check.detail
 
 
-def test_5_13_onerror_in_util_helper_not_flagged(tmp_path: Path) -> None:
-    """El .onErrorResume best-effort vive en application/util/*Helper.java
-    (Service Purity): NO debe dar FAIL HIGH 'estricto' (regresion que H6 detecto)."""
-    root = _make_orq(tmp_path, _SVC_MANDATORY)  # ServiceImpl con Mono.zip, sin onErrorResume
+def test_5_13_onerror_in_util_helper_is_low_not_high(tmp_path: Path) -> None:
+    """best-effort con .onError* SOLO en un helper (no inline en la rama del zip):
+    NO debe dar FAIL HIGH (H6); sin resolucion leg->helper queda LOW (revision
+    manual, M1: no enmascarar con un onError que podria ser de otra operacion)."""
+    root = _make_orq(tmp_path, _SVC_MANDATORY)  # Mono.zip sin onError inline
     helper = (
         root
         / "src/main/java/com/pichincha/sp/application/util/FooDownstreamHelper.java"
@@ -171,7 +172,8 @@ def test_5_13_onerror_in_util_helper_not_flagged(tmp_path: Path) -> None:
     helper.write_text(_HELPER_WITH_ONERROR, encoding="utf-8")
     legacy = _legacy(tmp_path, _ESQL_ONLY_TRUE)  # best-effort
     check = _find(run_block_5(CheckContext(migrated_path=root, legacy_path=legacy)), "5.13")
-    assert check.status == "pass"
+    assert check.status == "fail"
+    assert check.severity == "low"  # no HIGH (H6), no PASS (M1)
 
 
 # -- A1/A2: gate ORQ por token + override de source_type explicito -----------
@@ -188,7 +190,8 @@ def test_5_13_explicit_was_source_overrides_name(tmp_path: Path) -> None:
 
 
 def test_5_13_embedded_orq_substring_not_orq(tmp_path: Path) -> None:
-    """Sin source_type, 'mayorque'/'orquideas' no activan 5.13 (token-boundary)."""
+    """Sin source_type, un 'orq' EMBEBIDO ('mayorque') no activa 5.13 (token-boundary).
+    Nota: 'orquideas'/'orquesta' SI matchean (empiezan con orq) — colision aceptada."""
     root = tmp_path / "consultamayorquedato0001"
     svc = root / "src/main/java/com/pichincha/sp/application/service/FooServiceImpl.java"
     svc.parent.mkdir(parents=True)
@@ -217,15 +220,47 @@ def test_5_13_mono_zip_in_comment_not_detected(tmp_path: Path) -> None:
 
 def test_zip_legs_with_onerror_per_leg() -> None:
     legs = _zip_legs_with_onerror("Mono.zip(a.x(), b.x().onErrorResume(t -> Mono.just(E)))")
-    assert legs == [False, True]
+    assert legs == [[False, True]]
 
 
 def test_zip_legs_nested_and_map() -> None:
-    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x()).map(this::build)") == [False, False]
+    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x()).map(this::build)") == [[False, False]]
 
 
 def test_zip_legs_dirty_parse_degrades() -> None:
-    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x(") == []  # parentesis desbalanceados
+    assert _zip_legs_with_onerror("Mono.zip(a.x(), b.x(") is None  # desbalanceado -> None
+
+
+def test_zip_legs_ignores_block_comment_and_string() -> None:
+    """.onErrorResume / Mono.zip dentro de comentario de bloque o string NO cuenta (H1)."""
+    assert _zip_legs_with_onerror(
+        "/* old: Mono.zip(x.onErrorResume(e), y) */ Mono.zip(a(), b())"
+    ) == [[False, False]]
+    assert _zip_legs_with_onerror('Mono.zip(a().name("x.onErrorResume.y"), b())') == [[False, False]]
+
+
+def test_zip_legs_ignores_zipdelayerror() -> None:
+    """Mono.zipDelayError NO es Mono.zip (H1)."""
+    assert _zip_legs_with_onerror("Mono.zipDelayError(a.onErrorResume(e), b)") == []
+
+
+def test_zip_legs_generics_not_split() -> None:
+    """Comas en generics `<A,B>` no parten legs (L1)."""
+    assert _zip_legs_with_onerror("Mono.zip(this.<Tuple2<A,B>>call(), b())") == [[False, False]]
+
+
+def test_zip_legs_onerror_family() -> None:
+    """onErrorReturn / onErrorComplete cuentan como proteccion best-effort (M3)."""
+    assert _zip_legs_with_onerror(
+        "Mono.zip(a().onErrorReturn(E), b().onErrorComplete())"
+    ) == [[True, True]]
+
+
+def test_zip_legs_multiple_zips_grouped() -> None:
+    """Cada Mono.zip es un grupo separado, no aplanado (M4)."""
+    assert _zip_legs_with_onerror(
+        "Mono.zip(a(), b().onErrorResume(e)); Mono.zip(c(), d())"
+    ) == [[False, True], [False, False]]
 
 
 # -- A6: conteo por-rama (cross-op intra-file, mixto MEDIUM) ------------------

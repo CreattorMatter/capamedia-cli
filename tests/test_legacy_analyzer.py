@@ -198,6 +198,20 @@ def test_bancs_true_with_tx_in_cloned_ump(tmp_path: Path) -> None:
     assert any("UMP" in e and "TX" in e for e in evidence)
 
 
+def test_bancs_false_when_non_bancs_ump_has_return_code(tmp_path: Path) -> None:
+    """H2: UMPSeguridad0085 (no-BANCS, denylist) con un return code '000404'
+    clonado NO debe marcar BANCS (cierra el falso positivo reabierto en v0.28.8)."""
+    legacy = tmp_path / "legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "flow.esql").write_text("CALL UMPSeguridad0085.consultar();\n", encoding="utf-8")
+    umps = tmp_path / "umps"
+    repo = umps / "sqb-msa-umpseguridad0085"
+    repo.mkdir(parents=True)
+    (repo / "logic.esql").write_text("SET retCode = '000404';\n", encoding="utf-8")  # return code
+    has_bancs, _ = detect_bancs_connection(legacy, umps_root=umps)
+    assert has_bancs is False
+
+
 def test_bancs_no_break_when_umps_root_none(tmp_path: Path) -> None:
     legacy = tmp_path / "legacy"
     legacy.mkdir(parents=True)

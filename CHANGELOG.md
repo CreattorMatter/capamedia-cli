@@ -6,6 +6,39 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.28.9] - 2026-06-09
+
+### Fixed — Revisión adversarial de v0.28.8 (2 HIGH + 6 MEDIUM)
+
+Una 2ª revisión adversarial (workflow) encontró que el parser por-rama y la señal
+2b de v0.28.8 introdujeron falsos positivos/negativos (todos verificados ejecutando
+el código). Arreglados con un **mini-tokenizer Java literal-aware**:
+
+- **Parser `Mono.zip` (H1/M2/L1/L8):** nuevo `_strip_java_noise` (neutraliza
+  strings, char y comentarios `//` y `/* */`); localiza zips con `_MONO_ZIP_RE`
+  (ya NO matchea `Mono.zipDelayError`, tolera multilínea); balancea `<>` (generics
+  no parten legs); devuelve **grupos por-zip** (`None` si parseo sucio). Cierra los
+  FALSE HIGH por comentario de bloque / string / `zipDelayError`.
+- **Check 5.13 (M1/M2/M3/M4):** parseo sucio en all-mandatory → **LOW** (nunca PASS
+  "coherente"); detecta familias `onError*` (`Resume`/`Return`/`Complete`), no solo
+  `onErrorResume`; el mixto solo compara cardinalidades con **un** `Mono.zip` (M4);
+  en all-best-effort, `onError*` solo en helper (no inline en la rama) → **LOW**, no
+  PASS (M1, no enmascarar con un onError que podría ser de otra operación).
+- **Detector señal 2b (H2):** denylist `NON_BANCS_UMP_PREFIXES` + `extract_tx_codes`
+  (hereda filtro de fechas + exclusión `.git`) — `UMPSeguridad0085` con un return
+  code `'000404'` ya NO marca BANCS (cierra el falso positivo de WSReglas0010 que la
+  señal 2b había reabierto).
+- **Check 8.9 (M6/M7):** `all_gradle` se computa al inicio y el early-return ya no
+  lo anula en monorepos sin gradle en la raíz; exclusión alineada con el PR-gate
+  (`test`, no `.git`/`build`).
+- **Doc (M5):** corregido el claim falso de que el gate ORQ excluye
+  `orquideas`/`orquesta` (solo excluye el `orq` embebido de `mayorque`).
+
++6 tests de regresión del parser + H2. Suite **965 verde**.
+
+> Limitación conocida documentada: sin resolución leg→helper, un best-effort cuyo
+> `onError*` vive en un helper (no inline) queda en LOW (revisión manual), no PASS.
+
 ## [0.28.8] - 2026-06-08
 
 ### Changed — Pendientes del review: robustez de los checks 5.13/8.9 + detector
@@ -20,7 +53,7 @@ rama↔procedure) a favor del **conteo por-rama**.
   de global: cierra el falso positivo de un `onErrorResume` en otra operación del
   mismo archivo. HIGH solo en fan-outs **homogéneos**; **mixto → MEDIUM** (por
   cardinalidades) o LOW manual; nunca HIGH con parseo sucio.
-- Gate ORQ por **token** (`_looks_like_orq` ya no matchea `mayorque`/`orquideas`)
+- Gate ORQ por **token** (`_looks_like_orq` ya no matchea el `orq` embebido de `mayorque`)
   y respeta un `source_type` explícito no-orq; `Mono.zip` detectado ignorando
   comentarios. Canónico (`checklist-rules.md` 5.13) corregido: documenta el cruce
   **agregado**, no 1:1.
