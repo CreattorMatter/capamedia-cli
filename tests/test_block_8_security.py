@@ -25,12 +25,16 @@ from pathlib import Path
 from capamedia_cli.core.bank_autofix import (
     fix_netty_full_tree_pin,
     fix_remove_netty_pin,
+    fix_webflux_security_pins,
 )
 from capamedia_cli.core.checklist_rules import CheckContext, run_block_8
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
+    SPRING_FRAMEWORK_BOM_COORD,
+    SPRING_FRAMEWORK_BOM_VERSION,
+    WEBFLUX_SECURITY_DEPENDENCY_PINS,
 )
 
 
@@ -361,12 +365,12 @@ dependencyManagement {
 
 
 # ---------------------------------------------------------------------------
-# v0.27.0 — WebFlux: pin 4.1.133.Final permitido (CVE-fix oficial 2026-05)
+# v0.27.0 — WebFlux: pin 4.1.135.Final permitido (CVE-fix oficial 2026-05)
 # ---------------------------------------------------------------------------
 
 
-def test_8_7_allows_4_1_133_pin_in_webflux(tmp_path: Path) -> None:
-    """WebFlux + pin oficial `io.netty:*:4.1.133.Final` -> pass."""
+def test_8_7_allows_4_1_135_pin_in_webflux(tmp_path: Path) -> None:
+    """WebFlux + pin oficial `io.netty:*:4.1.135.Final` -> pass."""
     root = _make_minimal_project(tmp_path)
     _write_gradle(
         root,
@@ -380,8 +384,8 @@ dependencies {
 dependencyManagement {
     dependencies {
         // CVE-fix oficial 2026-05
-        dependency 'io.netty:netty-codec-http:4.1.133.Final'
-        dependency 'io.netty:netty-codec-http2:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http:4.1.135.Final'
+        dependency 'io.netty:netty-codec-http2:4.1.135.Final'
     }
 }
 """,
@@ -392,11 +396,11 @@ dependencyManagement {
     check = _find(results, "8.7")
 
     assert check.status == "pass"
-    assert "4.1.133.Final" in check.detail
+    assert "4.1.135.Final" in check.detail
 
 
-def test_8_7_rejects_non_133_pin_in_webflux(tmp_path: Path) -> None:
-    """WebFlux + pin distinto de 4.1.133.Final -> FAIL HIGH."""
+def test_8_7_rejects_non_135_pin_in_webflux(tmp_path: Path) -> None:
+    """WebFlux + pin distinto de 4.1.135.Final -> FAIL HIGH."""
     root = _make_minimal_project(tmp_path)
     _write_gradle(
         root,
@@ -423,8 +427,8 @@ dependencyManagement {
     assert check.severity == "high"
 
 
-def test_8_7_rejects_4_1_133_pin_when_not_webflux(tmp_path: Path) -> None:
-    """MVC/SOAP + pin 4.1.133.Final -> FAIL HIGH. La excepcion es solo WebFlux."""
+def test_8_7_rejects_4_1_135_pin_when_not_webflux(tmp_path: Path) -> None:
+    """MVC/SOAP + pin 4.1.135.Final -> FAIL HIGH. La excepcion es solo WebFlux."""
     root = _make_minimal_project(tmp_path)
     _write_gradle(
         root,
@@ -437,7 +441,7 @@ dependencies {
 
 dependencyManagement {
     dependencies {
-        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http:4.1.135.Final'
     }
 }
 """,
@@ -450,8 +454,8 @@ dependencyManagement {
     assert check.status == "fail"
 
 
-def test_autofix_preserves_4_1_133_pin_in_webflux(tmp_path: Path) -> None:
-    """En WebFlux el autofix preserva el pin oficial 4.1.133.Final."""
+def test_autofix_preserves_4_1_135_pin_in_webflux(tmp_path: Path) -> None:
+    """En WebFlux el autofix preserva el pin oficial 4.1.135.Final."""
     root = _make_minimal_project(tmp_path)
     f = _write_gradle(
         root,
@@ -464,7 +468,7 @@ dependencies {
 
 dependencyManagement {
     dependencies {
-        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http:4.1.135.Final'
     }
 }
 """,
@@ -474,10 +478,10 @@ dependencyManagement {
     text = f.read_text(encoding="utf-8")
 
     assert result.applied is False
-    assert "io.netty:netty-codec-http:4.1.133.Final" in text
+    assert "io.netty:netty-codec-http:4.1.135.Final" in text
 
 
-def test_autofix_removes_non_133_pin_in_webflux(tmp_path: Path) -> None:
+def test_autofix_removes_non_135_pin_in_webflux(tmp_path: Path) -> None:
     """En WebFlux el autofix sigue removiendo pins de otras versiones."""
     root = _make_minimal_project(tmp_path)
     f = _write_gradle(
@@ -504,8 +508,8 @@ dependencyManagement {
     assert "4.1.132.Final" not in text
 
 
-def test_autofix_mixed_pins_in_webflux_only_removes_non_133(tmp_path: Path) -> None:
-    """En WebFlux con varios pins, solo se removeria los NO 4.1.133.Final."""
+def test_autofix_mixed_pins_in_webflux_only_removes_non_135(tmp_path: Path) -> None:
+    """En WebFlux con varios pins, solo se removeria los NO 4.1.135.Final."""
     root = _make_minimal_project(tmp_path)
     f = _write_gradle(
         root,
@@ -518,7 +522,7 @@ dependencies {
 
 dependencyManagement {
     dependencies {
-        dependency 'io.netty:netty-codec-http:4.1.133.Final'
+        dependency 'io.netty:netty-codec-http:4.1.135.Final'
         dependency 'io.netty:netty-resolver-dns:4.1.132.Final'
     }
 }
@@ -529,12 +533,12 @@ dependencyManagement {
     text = f.read_text(encoding="utf-8")
 
     assert result.applied is True
-    assert "io.netty:netty-codec-http:4.1.133.Final" in text
+    assert "io.netty:netty-codec-http:4.1.135.Final" in text
     assert "netty-resolver-dns" not in text
 
 
 # ---------------------------------------------------------------------------
-# Check 8.8 + autofix fix_netty_full_tree_pin — arbol Netty completo (12 modulos)
+# Check 8.8 + autofix fix_netty_full_tree_pin — arbol Netty completo (NETTY_CORE_MODULES)
 # en WebFlux con doble mecanismo (dependencyManagement + resolutionStrategy.force).
 # WSClientes0013 (2026-05-29): pinear solo netty-codec* dejaba 9 CVEs vivos.
 # ---------------------------------------------------------------------------
@@ -591,7 +595,7 @@ def test_8_8_fail_when_tree_incomplete(tmp_path: Path) -> None:
 
 
 def test_8_8_pass_when_tree_complete(tmp_path: Path) -> None:
-    """Los 12 modulos core en dependency + force -> PASS."""
+    """Todos los modulos core (NETTY_CORE_MODULES) en dependency + force -> PASS."""
     root = _make_minimal_project(tmp_path)
     _write_gradle(root, _webflux_gradle(NETTY_CORE_MODULES, NETTY_CORE_MODULES))
 
@@ -877,3 +881,129 @@ def test_8_9_libbnc_in_submodule_detected(tmp_path: Path) -> None:
     check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.9")
     assert check.status == "fail"
     assert check.severity == "high"
+
+
+# ---------------------------------------------------------------------------
+# Check 8.10 + autofix fix_webflux_security_pins — pins NO-Netty del stack
+# WebFlux (Snyk 2026-06): micrometer-core, reactor-netty-http, spring-retry,
+# spring-kafka (dependency) + spring-framework-bom (mavenBom). Mismo gate que 8.8
+# (WebFlux con Netty ya pineado en la version permitida). MVC/SOAP no aplican.
+# ---------------------------------------------------------------------------
+
+
+def test_8_10_autofix_adds_all_missing_webflux_pins(tmp_path: Path) -> None:
+    """WebFlux con Netty pineado pero sin los pins NO-Netty -> autofix los agrega."""
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(root, _webflux_gradle(_CORE_4))  # netty ok, faltan los 5
+
+    result = fix_webflux_security_pins(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    for coord, ver in WEBFLUX_SECURITY_DEPENDENCY_PINS.items():
+        assert f"dependency '{coord}:{ver}'" in text
+    assert (
+        f"mavenBom '{SPRING_FRAMEWORK_BOM_COORD}:{SPRING_FRAMEWORK_BOM_VERSION}'"
+        in text
+    )
+    assert text.count("{") == text.count("}")  # gradle balanceado
+
+
+def test_8_10_autofix_skips_non_webflux(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    gradle = _webflux_gradle(_CORE_4).replace(
+        "spring-boot-starter-webflux", "spring-boot-starter-web"
+    )
+    f = _write_gradle(root, gradle)
+
+    result = fix_webflux_security_pins(root)
+
+    assert result.applied is False
+    assert f.read_text(encoding="utf-8") == gradle
+
+
+def test_8_10_autofix_skips_when_netty_not_pinned(tmp_path: Path) -> None:
+    """WebFlux pero sin pin base de Netty -> gate cierra (8.7/8.8 primero)."""
+    root = _make_minimal_project(tmp_path)
+    gradle = (
+        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "dependencies {\n"
+        "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
+        "}\n"
+    )
+    f = _write_gradle(root, gradle)
+
+    result = fix_webflux_security_pins(root)
+
+    assert result.applied is False
+    assert f.read_text(encoding="utf-8") == gradle
+
+
+def test_8_10_autofix_idempotent(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    f = _write_gradle(root, _webflux_gradle(_CORE_4))
+
+    fix_webflux_security_pins(root)
+    after_first = f.read_text(encoding="utf-8")
+    second = fix_webflux_security_pins(root)
+    after_second = f.read_text(encoding="utf-8")
+
+    assert second.applied is False
+    assert after_first == after_second
+
+
+def test_8_10_autofix_replaces_wrong_version(tmp_path: Path) -> None:
+    """spring-kafka pineado en version vieja -> se corrige a la requerida."""
+    root = _make_minimal_project(tmp_path)
+    # Inyectar spring-kafka viejo dentro del bloque dependencyManagement.dependencies
+    gradle = _webflux_gradle(_CORE_4).replace(
+        "    }\n}\n",
+        "        dependency 'org.springframework.kafka:spring-kafka:3.3.0'\n    }\n}\n",
+        1,
+    )
+    f = _write_gradle(root, gradle)
+
+    result = fix_webflux_security_pins(root)
+    text = f.read_text(encoding="utf-8")
+
+    assert result.applied is True
+    assert "spring-kafka:3.3.16" in text
+    assert "spring-kafka:3.3.0'" not in text
+
+
+def test_8_10_check_fails_when_incomplete(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _webflux_gradle(_CORE_4))  # netty ok, faltan los 5
+
+    check = _find(
+        run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.10"
+    )
+    assert check is not None
+    assert check.status == "fail"
+    assert check.severity == "high"
+
+
+def test_8_10_check_passes_when_complete(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _webflux_gradle(_CORE_4))
+    fix_webflux_security_pins(root)  # completa los pins
+
+    check = _find(
+        run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.10"
+    )
+    assert check is not None
+    assert check.status == "pass"
+
+
+def test_8_10_check_absent_for_non_webflux(tmp_path: Path) -> None:
+    """MVC/SOAP no emite el check 8.10 (reactor-netty/spring-kafka no aplican)."""
+    root = _make_minimal_project(tmp_path)
+    gradle = _webflux_gradle(_CORE_4).replace(
+        "spring-boot-starter-webflux", "spring-boot-starter-web"
+    )
+    _write_gradle(root, gradle)
+
+    check = _find(
+        run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.10"
+    )
+    assert check is None

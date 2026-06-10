@@ -399,17 +399,20 @@ def test_run_bank_autofix_does_not_add_bancs_without_context(tmp_path: Path) -> 
     )
 
     results = run_bank_autofix(tmp_path)
-    # 12 reglas (4, 6, 7, 8, 8b, 9, 9j, 5.6.5, 9h.1, 9h.2, 8.7, 8.8) — la 6 tiene 2 fixes -> 13 results
-    assert len(results) == 13
+    # 13 reglas (4, 6, 7, 8, 8b, 9, 9j, 5.6.5, 9h.1, 9h.2, 8.7, 8.8, 8.10) — la 6
+    # tiene 2 fixes -> 14 results
+    assert len(results) == 14
     rules_applied = {r.rule for r in results if r.applied}
     # Deberia aplicar 4, 7 y 9. La regla 8 queda en modo conservador:
     # normaliza si existe, pero no inventa BANCS sin matriz BUS/IIB+invocaBancs.
     # La 8b no aplica si lib-bnc-api-client no esta en el classpath.
+    # La 8.10 no aplica: no es WebFlux.
     assert "4" in rules_applied
     assert "7" in rules_applied
     assert "9" in rules_applied
     assert "8" not in rules_applied
     assert "8b" not in rules_applied
+    assert "8.10" not in rules_applied
 
 
 def test_run_bank_autofix_adds_bancs_for_iib_with_invoca_bancs(tmp_path: Path) -> None:

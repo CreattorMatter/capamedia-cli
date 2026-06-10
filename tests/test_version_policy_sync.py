@@ -53,8 +53,10 @@ def test_spring_boot_baseline_cited_in_canonicals() -> None:
 
 
 def test_old_netty_version_not_allowed_anywhere() -> None:
-    """La version vieja con CVEs (4.1.132.Final) puede mencionarse como ejemplo
-    de lo prohibido, pero NUNCA debe figurar como la version permitida."""
+    """La version permitida vigente debe figurar en el canonical; las viejas
+    (4.1.132/4.1.133) solo pueden aparecer como ejemplo de lo prohibido."""
     rules = _read("context/bank-official-rules.md")
-    # Si aparece 4.1.132, debe estar en contexto de "NO"/"prohibido"/"bug", no como permitida.
-    assert "4.1.133.Final" in rules  # la permitida si esta
+    # La version permitida (constante) si debe estar citada literal.
+    assert NETTY_WEBFLUX_ALLOWED_VERSION in rules
+    # La version vieja no debe figurar como la permitida (drift de v0.27.2).
+    assert "4.1.133.Final" not in rules

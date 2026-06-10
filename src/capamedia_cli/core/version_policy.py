@@ -13,28 +13,34 @@ import re
 SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 
 # Excepcion oficial (v0.27.0): en proyectos WebFlux el pin
-# `io.netty:*:4.1.133.Final` esta permitido porque cierra los CVEs Snyk 2026-05
+# `io.netty:*:4.1.135.Final` esta permitido porque cierra los CVEs Snyk 2026-05/06
 # del netty-codec-http sin esperar al proximo BOM. Cualquier otra version
 # manual sigue bloqueada por Check 8.7. MVC/SOAP: ningun pin manual permitido.
+#
+# Historial: 4.1.133.Final (v0.27.0) -> 4.1.135.Final (Snyk 2026-06).
 #
 # Fuente unica: el canonical (bank-official-rules.md Regla 8.5, checklist-rules.md
 # Check 8.7, migrate-rest-full.md) debe citar este mismo valor. El test
 # test_version_policy_canonical_sync lo verifica para evitar el drift que causo
 # v0.27.2 (codigo y canonical desincronizados).
-NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.133.Final"
+NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.135.Final"
 
 # Arbol core de Netty que debe quedar pineado a NETTY_WEBFLUX_ALLOWED_VERSION en
 # proyectos WebFlux (el BOM de Spring Boot 3.5.x trae io.netty 4.1.121.Final
 # vulnerable). Pinear solo `netty-codec*` deja transitivos cercanos
 # (netty-handler-proxy, etc.) en version vulnerable — Snyk reporto 9 CVEs en
-# WSClientes0013 (2026-05-29). Excluye intencionalmente los binarios nativos
-# (`netty-transport-native-*`, se versionan por SO) y los SSL bindings opcionales
+# WSClientes0013 (2026-05-29). Incluye `netty-transport-native-unix-common`
+# porque es el modulo Java puro (platform-independent) que comparten los
+# transportes nativos — NO un binario por-SO. Excluye intencionalmente los
+# binarios nativos con classifier por SO (`netty-transport-native-epoll`,
+# `netty-transport-native-kqueue`) y los SSL bindings opcionales
 # (`netty-tcnative-*`). Se pinean con doble mecanismo: dependencyManagement
 # `dependency` + resolutionStrategy `force`.
 NETTY_CORE_MODULES: tuple[str, ...] = (
     "netty-common",
     "netty-buffer",
     "netty-transport",
+    "netty-transport-native-unix-common",
     "netty-resolver",
     "netty-resolver-dns",
     "netty-codec",
@@ -45,6 +51,28 @@ NETTY_CORE_MODULES: tuple[str, ...] = (
     "netty-handler",
     "netty-handler-proxy",
 )
+
+
+# Pins de seguridad CVE-driven para el stack WebFlux (BUS REST + ORQ), del mismo
+# Snyk report 2026-06 que el arbol Netty (Check 8.8). SOLO WebFlux: reactor-netty
+# y spring-kafka no existen en MVC/SOAP, y el resto se overridea junto al pin
+# Netty en el mismo bloque `dependencyManagement`. Cada uno va como
+# `dependency 'group:artifact:version'`.
+#
+# spring-framework-bom NO va aca: es un `mavenBom` import (estructura distinta),
+# ver SPRING_FRAMEWORK_BOM_PIN abajo.
+WEBFLUX_SECURITY_DEPENDENCY_PINS: dict[str, str] = {
+    "io.micrometer:micrometer-core": "1.15.12",
+    "io.projectreactor.netty:reactor-netty-http": "1.2.18",
+    "org.springframework.retry:spring-retry": "2.0.13",
+    "org.springframework.kafka:spring-kafka": "3.3.16",
+}
+
+# Override del Spring Framework BOM (CVE 2026-06). Va como
+# `imports { mavenBom 'org.springframework:spring-framework-bom:6.2.19' }`
+# dentro de `dependencyManagement`, NO como `dependency`.
+SPRING_FRAMEWORK_BOM_COORD = "org.springframework:spring-framework-bom"
+SPRING_FRAMEWORK_BOM_VERSION = "6.2.19"
 
 
 def parse_numeric_version(version: str) -> tuple[int, ...]:

@@ -20,6 +20,9 @@ from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
+    SPRING_FRAMEWORK_BOM_COORD,
+    SPRING_FRAMEWORK_BOM_VERSION,
+    WEBFLUX_SECURITY_DEPENDENCY_PINS,
     is_version_lower,
 )
 
@@ -872,6 +875,29 @@ def _netty_modules_pinned_cl(text: str, line_re: re.Pattern[str]) -> dict[str, s
         m = _NETTY_MODULE_VER_RE.search(raw)
         if m:
             found.setdefault(m.group("mod"), m.group("ver"))
+    return found
+
+
+# Coords genericas `group:artifact -> version` para Check 8.10 (pins WebFlux
+# NO-Netty). Matchea `dependency 'g:a:v'` y `mavenBom 'g:a:v'`.
+_DEP_COORD_RE = re.compile(
+    r"^\s*dependency\s+['\"](?P<ga>[^:'\"]+:[^:'\"]+):(?P<ver>[^'\"]+)['\"]"
+)
+_BOM_COORD_RE = re.compile(
+    r"^\s*mavenBom\s+['\"](?P<ga>[^:'\"]+:[^:'\"]+):(?P<ver>[^'\"]+)['\"]"
+)
+
+
+def _coord_versions_cl(text: str, line_re: re.Pattern[str]) -> dict[str, str]:
+    """Mapa {group:artifact: version} de lineas que matchean `line_re`
+    (`dependency`/`mavenBom`), ignorando comentarios."""
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        if raw.strip().startswith(("//", "/*", "*")):
+            continue
+        m = line_re.match(raw)
+        if m:
+            found.setdefault(m.group("ga"), m.group("ver"))
     return found
 
 
@@ -2941,7 +2967,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
-    # 8.8 - Arbol Netty completo (12 modulos core) en WebFlux con doble mecanismo
+    # 8.8 - Arbol Netty completo (NETTY_CORE_MODULES) en WebFlux con doble mecanismo
     # (dependencyManagement.dependency + resolutionStrategy.force). Solo aplica
     # cuando ya hay un pin io.netty en la version permitida: el BOM de Spring Boot
     # 3.5.x trae 4.1.121.Final vulnerable, y pinear solo `netty-codec*` deja
@@ -2966,16 +2992,17 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                         f"resolutionStrategy.force faltan {len(missing_force)}: "
                         + ", ".join(missing_force)
                     )
+                n_modules = len(NETTY_CORE_MODULES)
                 results.append(
                     CheckResult(
                         "8.8",
                         "Block 8",
-                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        f"Arbol Netty completo en WebFlux ({n_modules} modulos, doble pin)",
                         "fail",
                         severity="high",
                         detail="; ".join(parts),
                         suggested_fix=(
-                            f"Pinear los 12 modulos core de Netty a "
+                            f"Pinear los {n_modules} modulos core de Netty a "
                             f"{NETTY_WEBFLUX_ALLOWED_VERSION} con doble mecanismo "
                             f"(dependencyManagement.dependency + "
                             f"resolutionStrategy.force). Autofix: "
@@ -2985,14 +3012,15 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     )
                 )
             else:
+                n_modules = len(NETTY_CORE_MODULES)
                 results.append(
                     CheckResult(
                         "8.8",
                         "Block 8",
-                        "Arbol Netty completo en WebFlux (12 modulos, doble pin)",
+                        f"Arbol Netty completo en WebFlux ({n_modules} modulos, doble pin)",
                         "pass",
                         detail=(
-                            f"12 modulos core pineados a "
+                            f"{n_modules} modulos core pineados a "
                             f"{NETTY_WEBFLUX_ALLOWED_VERSION} (dependency + force)"
                         ),
                     )
@@ -3051,6 +3079,68 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 detail="servicio no-BANCS sin lib-bnc-api-client (correcto)",
             )
         )
+
+    # 8.10 - pins de seguridad WebFlux NO-Netty (Snyk 2026-06): micrometer-core,
+    # reactor-netty-http, spring-retry, spring-kafka (dependency) +
+    # spring-framework-bom (mavenBom). Mismo gate que 8.8 (WebFlux con Netty ya
+    # pineado en la version permitida): toda la remediacion CVE WebFlux se exige
+    # como una unidad. MVC/SOAP no aplican (reactor-netty/spring-kafka no existen).
+    if allow_webflux_pin:
+        combined = "\n".join(_read_or_empty(gf) for gf in gradle_files)
+        netty_dep_mods = _netty_modules_pinned_cl(combined, _NETTY_DEPENDENCY_LINE_RE)
+        if NETTY_WEBFLUX_ALLOWED_VERSION in netty_dep_mods.values():
+            deps = _coord_versions_cl(combined, _DEP_COORD_RE)
+            boms = _coord_versions_cl(combined, _BOM_COORD_RE)
+            problems: list[str] = []
+            for coord, ver in WEBFLUX_SECURITY_DEPENDENCY_PINS.items():
+                cur = deps.get(coord)
+                if cur is None:
+                    problems.append(f"falta dependency {coord}:{ver}")
+                elif cur != ver:
+                    problems.append(f"{coord} en {cur}, requiere {ver}")
+            bom_cur = boms.get(SPRING_FRAMEWORK_BOM_COORD)
+            if bom_cur is None:
+                problems.append(
+                    f"falta mavenBom {SPRING_FRAMEWORK_BOM_COORD}:{SPRING_FRAMEWORK_BOM_VERSION}"
+                )
+            elif bom_cur != SPRING_FRAMEWORK_BOM_VERSION:
+                problems.append(
+                    f"mavenBom {SPRING_FRAMEWORK_BOM_COORD} en {bom_cur}, "
+                    f"requiere {SPRING_FRAMEWORK_BOM_VERSION}"
+                )
+            title_810 = "Pins de seguridad WebFlux NO-Netty (Snyk 2026-06)"
+            if problems:
+                results.append(
+                    CheckResult(
+                        "8.10",
+                        "Block 8",
+                        title_810,
+                        "fail",
+                        severity="high",
+                        detail="; ".join(problems),
+                        suggested_fix=(
+                            "Pinear en dependencyManagement: "
+                            "dependency 'io.micrometer:micrometer-core:1.15.12', "
+                            "'io.projectreactor.netty:reactor-netty-http:1.2.18', "
+                            "'org.springframework.retry:spring-retry:2.0.13', "
+                            "'org.springframework.kafka:spring-kafka:3.3.16' + "
+                            "imports { mavenBom "
+                            f"'{SPRING_FRAMEWORK_BOM_COORD}:{SPRING_FRAMEWORK_BOM_VERSION}' }}. "
+                            "Autofix: fix_webflux_security_pins."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "8.10",
+                        "Block 8",
+                        title_810,
+                        "pass",
+                        detail="pins de seguridad WebFlux NO-Netty completos",
+                    )
+                )
+
     return results
 
 

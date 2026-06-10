@@ -25,6 +25,9 @@ from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
+    SPRING_FRAMEWORK_BOM_COORD,
+    SPRING_FRAMEWORK_BOM_VERSION,
+    WEBFLUX_SECURITY_DEPENDENCY_PINS,
 )
 
 # ---------------------------------------------------------------------------
@@ -1566,7 +1569,7 @@ def _remove_netty_pins_from_dependency_management(
 # Regla 8.8 — Arbol Netty completo pineado a la version permitida en WebFlux.
 #
 # El BOM de Spring Boot 3.5.14 trae `io.netty:*:4.1.121.Final` (vulnerable). En
-# WebFlux hay que pinear el arbol core de Netty (12 modulos, NETTY_CORE_MODULES)
+# WebFlux hay que pinear el arbol core de Netty (NETTY_CORE_MODULES)
 # a NETTY_WEBFLUX_ALLOWED_VERSION con DOBLE mecanismo:
 #   - `dependencyManagement { dependencies { dependency '...' } }`
 #   - `configurations.all { resolutionStrategy { force '...' } }`
@@ -1645,7 +1648,7 @@ def _append_resolution_force_block(text: str, modules: list[str], version: str) 
 
 def fix_netty_full_tree_pin(project_root: Path) -> BankAutofixResult:
     """En proyectos WebFlux que YA pinean `io.netty` en la version permitida,
-    asegura que los 12 modulos core (`NETTY_CORE_MODULES`) esten pineados a
+    asegura que los modulos core (`NETTY_CORE_MODULES`) esten pineados a
     `NETTY_WEBFLUX_ALLOWED_VERSION` con doble mecanismo (dependencyManagement
     `dependency` + resolutionStrategy `force`).
 
@@ -1727,6 +1730,209 @@ def fix_netty_full_tree_pin(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 8.10 — Pins de seguridad NO-Netty del stack WebFlux (Snyk 2026-06).
+#
+# Mismo Snyk report que el arbol Netty (8.8) para servicios WebFlux: ademas del
+# arbol io.netty hay que overridear micrometer-core, reactor-netty-http,
+# spring-retry, spring-kafka (como `dependency`) y spring-framework-bom (como
+# `mavenBom` import). SOLO WebFlux (BUS REST + ORQ): reactor-netty y spring-kafka
+# no existen en MVC/SOAP. Gated igual que 8.8 (netty ya pineado en la version
+# permitida) para mover toda la remediacion WebFlux como una unidad y garantizar
+# que existe el bloque `dependencyManagement` donde insertar.
+# ---------------------------------------------------------------------------
+
+_DEP_LINE_ANY_RE = re.compile(
+    r"^\s*dependency\s+['\"](?P<ga>[^:'\"]+:[^:'\"]+):(?P<ver>[^'\"]+)['\"]"
+)
+_MAVENBOM_LINE_RE = re.compile(
+    r"^\s*mavenBom\s+['\"](?P<ga>[^:'\"]+:[^:'\"]+):(?P<ver>[^'\"]+)['\"]"
+)
+_DEP_ANCHOR_RE = re.compile(r"^\s*dependency\s+['\"]")
+_MAVENBOM_ANCHOR_RE = re.compile(r"^\s*mavenBom\s+['\"]")
+_IMPORTS_OPEN_RE = re.compile(r"^\s*imports\s*\{")
+_DEP_MGMT_OPEN_RE = re.compile(r"^\s*dependencyManagement\s*\{")
+
+
+def _is_gradle_comment(raw: str) -> bool:
+    return raw.lstrip().startswith(("//", "/*", "*"))
+
+
+def _coord_versions(text: str, line_re: re.Pattern[str]) -> dict[str, str]:
+    """{group:artifact: version} de lineas `dependency`/`mavenBom` no comentadas."""
+    found: dict[str, str] = {}
+    for raw in text.splitlines():
+        if _is_gradle_comment(raw):
+            continue
+        m = line_re.match(raw)
+        if m:
+            found.setdefault(m.group("ga"), m.group("ver"))
+    return found
+
+
+def _replace_coord_version(
+    text: str, line_re: re.Pattern[str], coord: str, version: str, keyword: str
+) -> tuple[str, bool]:
+    """Reemplaza la version de una linea `<keyword> 'coord:oldver'` -> version."""
+    out: list[str] = []
+    changed = False
+    for raw in text.splitlines(keepends=True):
+        m = line_re.match(raw)
+        if m and m.group("ga") == coord and not _is_gradle_comment(raw):
+            indent = raw[: len(raw) - len(raw.lstrip())]
+            out.append(f"{indent}{keyword} '{coord}:{version}'\n")
+            changed = True
+        else:
+            out.append(raw)
+    return "".join(out), changed
+
+
+def _insert_generic_deps_after_last(
+    text: str, ga_v_pairs: list[tuple[str, str]]
+) -> tuple[str, bool]:
+    """Inserta `dependency 'ga:ver'` despues de la ultima linea `dependency '...'`
+    (no comentario). Sin ancla -> no toca."""
+    lines = text.splitlines(keepends=True)
+    last_idx = -1
+    indent = "        "
+    for i, raw in enumerate(lines):
+        if _is_gradle_comment(raw):
+            continue
+        if _DEP_ANCHOR_RE.match(raw):
+            last_idx = i
+            indent = raw[: len(raw) - len(raw.lstrip())]
+    if last_idx == -1:
+        return text, False
+    additions = [f"{indent}dependency '{ga}:{ver}'\n" for ga, ver in ga_v_pairs]
+    return "".join(lines[: last_idx + 1] + additions + lines[last_idx + 1 :]), True
+
+
+def _ensure_maven_bom(text: str, coord: str, version: str) -> tuple[str, bool]:
+    """Asegura `mavenBom 'coord:version'` en el bloque `imports {}` del
+    `dependencyManagement`. Reemplaza si esta en otra version; lo crea si falta
+    el `imports {}` (justo despues de `dependencyManagement {`)."""
+    boms = _coord_versions(text, _MAVENBOM_LINE_RE)
+    if boms.get(coord) == version:
+        return text, False
+    if coord in boms:  # version distinta -> reemplazar in place
+        return _replace_coord_version(text, _MAVENBOM_LINE_RE, coord, version, "mavenBom")
+
+    lines = text.splitlines(keepends=True)
+    # 1) insertar despues del ultimo mavenBom existente
+    last_bom = -1
+    indent = "        "
+    for i, raw in enumerate(lines):
+        if _is_gradle_comment(raw):
+            continue
+        if _MAVENBOM_ANCHOR_RE.match(raw):
+            last_bom = i
+            indent = raw[: len(raw) - len(raw.lstrip())]
+    if last_bom != -1:
+        line = f"{indent}mavenBom '{coord}:{version}'\n"
+        return "".join([*lines[: last_bom + 1], line, *lines[last_bom + 1 :]]), True
+    # 2) sin mavenBom: insertar dentro del bloque `imports {`
+    for i, raw in enumerate(lines):
+        if _IMPORTS_OPEN_RE.match(raw):
+            inner = raw[: len(raw) - len(raw.lstrip())] + "    "
+            line = f"{inner}mavenBom '{coord}:{version}'\n"
+            return "".join([*lines[: i + 1], line, *lines[i + 1 :]]), True
+    # 3) sin imports: crear el bloque justo despues de `dependencyManagement {`
+    for i, raw in enumerate(lines):
+        if _DEP_MGMT_OPEN_RE.match(raw):
+            base = raw[: len(raw) - len(raw.lstrip())] + "    "
+            block = [
+                f"{base}imports {{\n",
+                f"{base}    mavenBom '{coord}:{version}'\n",
+                f"{base}}}\n",
+            ]
+            return "".join(lines[: i + 1] + block + lines[i + 1 :]), True
+    return text, False
+
+
+def fix_webflux_security_pins(project_root: Path) -> BankAutofixResult:
+    """En proyectos WebFlux que YA pinean Netty en la version permitida, asegura
+    los pins de seguridad NO-Netty del mismo Snyk report (WEBFLUX_SECURITY_
+    DEPENDENCY_PINS como `dependency` + spring-framework-bom como `mavenBom`).
+
+    Idempotente. Inserta los faltantes y corrige versiones distintas. Skip si:
+    no hay build.gradle, no es WebFlux, o Netty aun no esta pineado en la version
+    permitida (eso lo gobierna 8.7/8.8 primero).
+    """
+    result = BankAutofixResult(rule="8.10", applied=False)
+    gradle_files = [
+        f
+        for f in (project_root / "build.gradle", project_root / "build.gradle.kts")
+        if f.exists()
+    ]
+    if not gradle_files:
+        result.notes = "no se encontro build.gradle"
+        return result
+
+    is_webflux = any(
+        "spring-boot-starter-webflux" in f.read_text(encoding="utf-8", errors="replace")
+        for f in gradle_files
+    )
+    if not is_webflux:
+        result.notes = "no es WebFlux; los pins de seguridad WebFlux solo aplican alli"
+        return result
+
+    modified: list[Path] = []
+    for f in gradle_files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        # Gate: solo cuando Netty ya esta pineado en la version permitida (mismo
+        # bloque dependencyManagement de la remediacion CVE WebFlux).
+        netty_deps = _netty_modules_pinned(text, _NETTY_DEP_LINE_RE)
+        if NETTY_WEBFLUX_ALLOWED_VERSION not in netty_deps.values():
+            continue
+
+        new_text = text
+        changes: list[str] = []
+
+        # 1) dependency pins (micrometer, reactor-netty, spring-retry, spring-kafka)
+        deps = _coord_versions(new_text, _DEP_LINE_ANY_RE)
+        to_insert: list[tuple[str, str]] = []
+        for coord, version in WEBFLUX_SECURITY_DEPENDENCY_PINS.items():
+            current = deps.get(coord)
+            if current == version:
+                continue
+            if current is None:
+                to_insert.append((coord, version))
+            else:  # version distinta -> reemplazar in place
+                new_text, did = _replace_coord_version(
+                    new_text, _DEP_LINE_ANY_RE, coord, version, "dependency"
+                )
+                if did:
+                    changes.append(f"{coord} {current}->{version}")
+        if to_insert:
+            new_text, did = _insert_generic_deps_after_last(new_text, to_insert)
+            if did:
+                changes.extend(f"+{ga}:{ver}" for ga, ver in to_insert)
+
+        # 2) spring-framework-bom (mavenBom)
+        new_text, did_bom = _ensure_maven_bom(
+            new_text, SPRING_FRAMEWORK_BOM_COORD, SPRING_FRAMEWORK_BOM_VERSION
+        )
+        if did_bom:
+            changes.append(f"mavenBom {SPRING_FRAMEWORK_BOM_COORD}:{SPRING_FRAMEWORK_BOM_VERSION}")
+
+        if new_text != text:
+            f.write_text(new_text, encoding="utf-8")
+            modified.append(f)
+            result.changes.append(
+                f"{f.relative_to(project_root)}: pins WebFlux Snyk ({', '.join(changes)})"
+            )
+
+    if modified:
+        result.applied = True
+        result.files_modified = modified
+    else:
+        result.notes = (
+            "pins de seguridad WebFlux ya presentes, o sin pin base de Netty "
+            "(8.7/8.8 primero)"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1750,7 +1956,10 @@ def run_bank_autofix(
     wanted = (
         set(rules)
         if rules
-        else {"4", "6", "7", "8", "8b", "9", "9j", "5.6.5", "9h.1", "9h.2", "8.7", "8.8"}
+        else {
+            "4", "6", "7", "8", "8b", "9", "9j", "5.6.5",
+            "9h.1", "9h.2", "8.7", "8.8", "8.10",
+        }
     )
     if requires_bancs is None:
         requires_bancs = _requires_bancs_from_matrix(source_type, has_bancs)
@@ -1788,4 +1997,6 @@ def run_bank_autofix(
         results.append(fix_remove_netty_pin(project_root))
     if "8.8" in wanted:
         results.append(fix_netty_full_tree_pin(project_root))
+    if "8.10" in wanted:
+        results.append(fix_webflux_security_pins(project_root))
     return results

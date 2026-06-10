@@ -6,6 +6,51 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-06-10
+
+### Changed — Netty `4.1.133.Final` → `4.1.135.Final` + árbol con `unix-common`
+
+Snyk 2026-06 para el stack WebFlux.
+
+- `NETTY_WEBFLUX_ALLOWED_VERSION` = `4.1.135.Final` (era `4.1.133.Final`).
+  Propagado a `version_policy.py` + los 4 canónicos que lo citan
+  (`bank-official-rules.md`, `checklist-rules.md`, `migrate-rest-full.md`,
+  `doublecheck.md`) — guardado por `test_version_policy_canonical_sync`.
+- `NETTY_CORE_MODULES`: +`netty-transport-native-unix-common` (12 → 13). Es el
+  módulo Java puro que comparten los transportes nativos, NO un binario por-SO;
+  se siguen excluyendo `netty-transport-native-epoll`/`kqueue` (classifier por
+  SO) y `netty-tcnative-*`. El conteo en los mensajes del Check 8.8 ahora es
+  dinámico (`len(NETTY_CORE_MODULES)`) para no volver a desfasar.
+
+### Added — Check + autofix 8.10: pins de seguridad WebFlux NO-Netty (Snyk 2026-06)
+
+Mismo Snyk report que el árbol Netty, **solo WebFlux** (BUS REST + ORQ):
+`reactor-netty-http` y `spring-kafka` no existen en MVC/SOAP.
+
+- `version_policy.py`: `WEBFLUX_SECURITY_DEPENDENCY_PINS`
+  (`io.micrometer:micrometer-core:1.15.12`,
+  `io.projectreactor.netty:reactor-netty-http:1.2.18`,
+  `org.springframework.retry:spring-retry:2.0.13`,
+  `org.springframework.kafka:spring-kafka:3.3.16`) +
+  `SPRING_FRAMEWORK_BOM_COORD`/`SPRING_FRAMEWORK_BOM_VERSION` (`6.2.19`, como
+  `mavenBom`). Fuente única.
+- **Check 8.10** (`checklist_rules.py`): en WebFlux con Netty ya pineado en la
+  versión permitida (mismo gate que 8.8), exige los 4 `dependency` + el
+  `mavenBom` en `dependencyManagement`. Faltante/versión distinta → FAIL HIGH.
+- **Autofix `fix_webflux_security_pins`** (clave `"8.10"`): inserta/corrige los
+  pins; crea el bloque `imports {}` si falta. Idempotente. Registrado en el
+  set por defecto de `run_bank_autofix`.
+- Canónicos: `bank-official-rules.md` (nueva sección + autofix), `checklist-rules.md`
+  (Check 8.10), `migrate-rest-full.md` (ejemplo build.gradle).
+
+### Tests
+
+- `test_block_8_security.py`: +9 casos (autofix 8.10 add/skip/idempotente/replace
+  + check fail/pass/absent); netty tests migrados a `4.1.135.Final`.
+- `test_bank_autofix.py`: orquestador 13 → 14 results (regla 8.10).
+- `test_version_policy_sync.py`: la versión vieja `4.1.133.Final` ya no figura
+  como permitida.
+
 ## [0.28.10] - 2026-06-09
 
 ### Reverted — Parser por-rama del Check 5.13 + señal 2b (3ª revisión adversarial)

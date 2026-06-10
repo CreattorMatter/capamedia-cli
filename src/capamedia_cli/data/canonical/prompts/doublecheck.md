@@ -299,7 +299,7 @@ o abrir el PR si no hay residuales HIGH.
 11. **Gradle seguridad.** No debe quedar `spring-boot-starter-undertow`,
     `io.undertow:*` ni `undertowVersion`; usar default embebido
     Tomcat para MVC/Spring WS o Netty para WebFlux. **No quitar Netty en
-    WebFlux:** el doublecheck NO debe eliminar el pin `io.netty:*:4.1.133.Final`
+    WebFlux:** el doublecheck NO debe eliminar el pin `io.netty:*:4.1.135.Final`
     del `dependencyManagement` en proyectos WebFlux (`spring-boot-starter-webflux`
     presente). Es el CVE-fix Snyk 2026-05 aprobado (excepcion oficial v0.27.0 del
     Check 8.7); el autofix `fix_remove_netty_pin` ya lo preserva y el doublecheck
