@@ -290,7 +290,7 @@ o abrir el PR si no hay residuales HIGH.
    que solo lee env/YAML/properties, reemplazar por `@ConfigurationProperties`
    o bean de config; los output ports son para dependencias externas.
 9. **Spring Boot baseline.** `build.gradle` debe quedar con
-   `id 'org.springframework.boot' version '3.5.14'` o superior aprobado. Si
+   `id 'org.springframework.boot' version '3.5.15'` o superior aprobado. Si
    aparece una versión menor, actualizar el literal del plugin sin reemplazar
    el scaffold del MCP.
 10. **Pipeline/catalog namespace.** `KUBERNETES_NAMESPACE` en
