@@ -91,6 +91,19 @@ For each delegation found:
 - Operation invoked
 - Evidence (file + line)
 
+**PRIMARY SOURCE — Ola2 downstream catalog (if injected).** If a
+`## Downstreams del catalogo Ola2` block was injected above this prompt, use ITS
+list as the *authoritative expected set* of downstreams and reconcile 3-way against the
+`*.esql`/`*.msgflow` you scanned:
+- in both → confirmed.
+- in catalog, not in artifacts → `MISSING_IN_ARTIFACTS` (do NOT drop: the clone may
+  be incomplete or the call indirect).
+- in artifacts, not in catalog → `EXTRA_NOT_IN_CATALOG` (do NOT drop: the catalog is
+  a snapshot and may be incomplete — the ESQL/code is the arbiter of the real set).
+The catalog is CONTEXT, not arbiter: it does NOT say whether a downstream is
+mandatory or best-effort — that comes exclusively from the ESQL `RETURN FALSE` scan
+in Step D. If no Ola2 block was injected, proceed artifact-only (behavior unchanged).
+
 **Output:** Delegation map.
 
 ### Step C: Map field flow (in/out)
@@ -122,6 +135,10 @@ engineering**:
 Classify per call site with evidence (`CREATE PROCEDURE ... at <file:line>;
 RETURN FALSE present/absent`). The migration prompt (`migrate-rest-full.md`,
 ORQ-RETURN-PARITY) and Check 5.13 consume this instead of re-discovering it.
+
+**Ola2 catalog boundary:** even when an Ola2 downstream block is injected, the
+MANDATORY/BEST-EFFORT decision here is derived ONLY from the ESQL `RETURN FALSE`
+scan — never from the catalog list, `in_ola1`, `in_discovery`, or tecnologia.
 
 **Output:** Brief description of error strategy + a per-delegation short-circuit
 classification (MANDATORY | BEST-EFFORT | UNKNOWN) with evidence. Do NOT
@@ -167,11 +184,15 @@ The file `ANALISIS_ORQ_<ServiceName>.md` must contain:
 Table per operation: name, SOAPAction, top-level request fields, top-level response fields.
 
 ### 3. Delegation Map
-For each downstream call:
-- Target service name
-- Operation invoked
-- ORQ source location (file + node)
-- Evidence (line number in ESQL/msgflow)
+Table per downstream call: `| Downstream | Operation | Source | in_ola1 | tecnologia | ORQ location | Evidence |`.
+`Source` marks provenance vs the injected Ola2 catalog: `both` (confirmed),
+`MISSING_IN_ARTIFACTS` (catalog-only), `EXTRA_NOT_IN_CATALOG` (artifact-only).
+`in_ola1`/`tecnologia` come from the Ola2 block when present, else `-`.
+
+**GUARDRAIL:** this table lists WHAT the ORQ calls, NOT whether each call is
+MANDATORY or BEST-EFFORT. The short-circuit classification lives ONLY in Section 5 /
+Step D (from the ESQL `RETURN FALSE` scan). Do NOT add a mandatory/best-effort column
+sourced from the catalog.
 
 ### 4. Field Forwarding
 For each operation: which input fields go to which downstream call; which downstream response fields come back.

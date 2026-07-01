@@ -582,8 +582,10 @@ def _build_batch_migrate_prompt(
 ) -> str:
     from capamedia_cli.core.catalog_injector import (
         contains_catalog_block,
+        contains_ola2_downstreams_block,
         detect_relevant_tx,
         format_for_prompt,
+        format_ola2_downstreams_block,
         load_catalogs,
     )
 
@@ -599,6 +601,13 @@ def _build_batch_migrate_prompt(
         tx_codes = detect_relevant_tx(workspace, service)
         snapshot = load_catalogs(workspace)
         catalog_block = format_for_prompt(snapshot, relevant_tx=tx_codes)
+
+    # Downstreams del catalogo Ola2: solo si `service` es un orquestador conocido
+    # (el helper devuelve "" para no-ORQ o entrega 2+). Contexto, no arbitro.
+    if contains_ola2_downstreams_block(prompt_body):
+        ola2_block = ""
+    else:
+        ola2_block = format_ola2_downstreams_block(service)
 
     base = textwrap.dedent(
         f"""
@@ -664,9 +673,12 @@ def _build_batch_migrate_prompt(
         """
     ).strip()
 
+    parts = [base]
     if catalog_block:
-        return base + "\n\n" + catalog_block.rstrip()
-    return base
+        parts.append(catalog_block.rstrip())
+    if ola2_block:
+        parts.append(ola2_block.rstrip())
+    return "\n\n".join(parts)
 
 
 def _strip_code_fence(raw: str) -> str:

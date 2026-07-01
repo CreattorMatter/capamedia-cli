@@ -467,3 +467,56 @@ def detect_relevant_tx(
             found.add(m.group(1))
 
     return sorted(found)
+
+
+# -- Downstreams del catalogo Ola2 (contexto para el analisis ORQ) -----------
+
+_OLA2_DOWNSTREAMS_MARKER = "## Downstreams del catalogo Ola2"
+
+
+def contains_ola2_downstreams_block(text: str) -> bool:
+    """True si el texto ya trae el bloque de downstreams Ola2 (dedup simetrico a
+    `contains_catalog_block`). Marcador propio: no colisiona con `_CATALOG_MARKER`."""
+    return _OLA2_DOWNSTREAMS_MARKER in (text or "")
+
+
+def format_ola2_downstreams_block(service: str) -> str:
+    """Bloque markdown con el mapa de downstreams del catalogo Ola2 para un ORQ.
+
+    Devuelve `""` si `service` no es un orquestador conocido (degradacion graciosa:
+    un ORQ de entrega 2+ o un WS simple no reciben bloque). CONTEXTO no-autoritativo:
+    la lista es el fan-out de discovery; la obligatoriedad (mandatory vs best-effort)
+    NO sale de aca, sale del `RETURN FALSE` del ESQL legacy.
+    """
+    from capamedia_cli.core import ola2_catalog as _ola2  # lazy: evita PyYAML en import
+
+    if not _ola2.is_orchestrator(service):
+        return ""
+    canonical = _ola2.get_service(service)["name"]  # forma canonica, no la pasada
+    lines = [
+        f"{_OLA2_DOWNSTREAMS_MARKER} ({canonical})",
+        "",
+        "Mapa de fan-out del ORQ segun el Discovery del banco (Ola2). Es CONTEXTO,",
+        "NO arbitro: usalo para saber QUE servicios llama este orquestador; el ESQL",
+        "legacy sigue mandando sobre el set real de llamadas y sobre toda la logica.",
+        "",
+        "| Downstream | in_discovery | in_ola1 | Tecnologia | Metodos que expone |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for d in _ola2.get_downstreams(service):
+        name = d["service"]
+        fic = _ola2.get_discovery(name) or {}
+        tec = (fic.get("tecnologia") or "").replace("\n", " ").strip() or "-"
+        met = (fic.get("metodos_expone") or "").replace("\n", " ").strip() or "-"
+        lines.append(
+            f"| {name} | {'si' if d['in_discovery'] else 'no'} | "
+            f"{'si' if d['in_ola1'] else 'no'} | {tec} | {met} |"
+        )
+    lines += [
+        "",
+        "> NOTA DURA: esta tabla lista el fan-out (QUE llama el ORQ), NO si cada rama",
+        "> es mandatory o best-effort. La obligatoriedad se determina SOLO leyendo el",
+        "> `RETURN FALSE` del PROCEDURE del ESQL legacy de cada llamada; no la derives",
+        "> de esta tabla ni de `in_ola1`/`in_discovery`/tecnologia.",
+    ]
+    return "\n".join(lines).rstrip() + "\n"

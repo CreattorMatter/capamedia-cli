@@ -54,3 +54,31 @@ def test_unknown_service_is_safe() -> None:
     assert not cat.is_known("WSNoExiste9999")
     assert cat.get_downstreams("WSNoExiste9999") == []
     assert cat.get_discovery("WSNoExiste9999") is None
+
+
+# -- P0: endurecimiento de la clave de identidad -----------------------------
+
+
+def test_resolve_migrated_name_form() -> None:
+    """El nombre migrado (tpr-msa-sp-...) resuelve al mismo servicio (bug del prefijo)."""
+    assert cat.is_orchestrator("tpr-msa-sp-orqproductos0019")
+    assert cat.is_known("tnd-msa-sp-wsclientes0043")
+    s = cat.get_service("tpr-msa-sp-orqproductos0019")
+    assert s is not None and s["name"] == "ORQProductos0019"
+
+
+def test_resolve_case_insensitive_no_mangling() -> None:
+    """Lookup por minusculas contra los keys reales: robusto al case sin reconstruir
+    el nombre (no rompe camelCase interno tipo WSCuentaCorriente de entrega 2+)."""
+    assert cat.get_service("ORQPRODUCTOS0019")["name"] == "ORQProductos0019"
+    assert cat.get_service("orqproductos0019")["name"] == "ORQProductos0019"
+
+
+def test_known_distinguishes_absent_from_empty_downstreams() -> None:
+    """is_known separa 'ausente del catalogo' de 'servicio sin downstreams'."""
+    assert not cat.is_known("ORQProductos9999")  # ausente (entrega 2+)
+    assert cat.get_downstreams("ORQProductos9999") == []
+    # WS conocido no-orquestador: downstreams vacio pero is_known True
+    assert cat.is_known("WSProductos0033")
+    assert not cat.is_orchestrator("WSProductos0033")
+    assert cat.get_downstreams("WSProductos0033") == []
