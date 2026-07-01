@@ -530,3 +530,66 @@ def format_ola2_downstreams_block(service: str) -> str:
         "> NUNCA saltees ni elimines una delegacion por `in_ola1=si`.",
     ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+# -- Ficha de discovery de un servicio (contexto para migrar CUALQUIER servicio) --
+
+_OLA2_CARD_MARKER = "## Ficha de discovery Ola2"
+
+
+def contains_ola2_service_card(text: str) -> bool:
+    """True si el texto ya trae la ficha de discovery Ola2 (dedup)."""
+    return _OLA2_CARD_MARKER in (text or "")
+
+
+def _oneline(value: str | None) -> str:
+    """Colapsa todo el whitespace de un valor a una sola linea (celda de lista)."""
+    return " ".join((value or "").split())
+
+
+def format_ola2_service_card(service: str) -> str:
+    """Ficha de discovery Ola2 de un servicio (ORQ o WS): metadata + links, como
+    contexto para migrarlo. Aplica a CUALQUIER servicio del catalogo (no solo ORQ).
+
+    Devuelve `""` si el servicio no esta en el catalogo (degradacion graciosa).
+    CONTEXTO no-autoritativo: el codigo legacy sigue siendo la verdad sobre el
+    comportamiento; la ficha es referencia (descripcion, tribu, metodos, links).
+    """
+    from capamedia_cli.core import ola2_catalog as _ola2  # lazy: evita PyYAML en import
+
+    svc = _ola2.get_service(service)
+    if not svc:
+        return ""
+    name = svc.get("name") or service
+    fic = _ola2.get_discovery(service) or {}
+
+    lines = [
+        f"{_OLA2_CARD_MARKER} ({name})",
+        "",
+        "Contexto del banco (Discovery Ola2). Referencia para migrar este servicio;",
+        "el codigo legacy sigue siendo la verdad sobre su comportamiento real.",
+        "",
+    ]
+    fields = [
+        ("Nuevo nombre", svc.get("new_name") or fic.get("new_name")),
+        ("Complejidad", svc.get("complexity")),
+        ("Tipo", svc.get("legacy_type") or fic.get("tipo")),
+        ("Tribu", fic.get("tribu")),
+        ("Tecnologia", fic.get("tecnologia")),
+        ("Tecnologia backend", fic.get("tecnologia_backend")),
+        ("Protocolos", fic.get("protocolos")),
+        ("Metodos que expone", fic.get("metodos_expone")),
+        ("Descripcion", fic.get("descripcion")),
+    ]
+    for label, value in fields:
+        v = _oneline(value)
+        if v:
+            lines.append(f"- {label}: {v}")
+    links = [
+        f"{label}: {url.strip()}"
+        for label, key in (("IcePanel", "link_icepanel"), ("WSDL", "link_wsdl"), ("Codigo", "link_codigo"))
+        if (url := str(fic.get(key) or "")).strip()
+    ]
+    if links:
+        lines.append("- Links: " + " | ".join(links))
+    return "\n".join(lines).rstrip() + "\n"

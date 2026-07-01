@@ -583,9 +583,11 @@ def _build_batch_migrate_prompt(
     from capamedia_cli.core.catalog_injector import (
         contains_catalog_block,
         contains_ola2_downstreams_block,
+        contains_ola2_service_card,
         detect_relevant_tx,
         format_for_prompt,
         format_ola2_downstreams_block,
+        format_ola2_service_card,
         load_catalogs,
     )
 
@@ -608,6 +610,12 @@ def _build_batch_migrate_prompt(
         ola2_block = ""
     else:
         ola2_block = format_ola2_downstreams_block(service)
+
+    # Ficha de discovery del servicio: CUALQUIER servicio del catalogo (ORQ o WS).
+    if contains_ola2_service_card(prompt_body):
+        card_block = ""
+    else:
+        card_block = format_ola2_service_card(service)
 
     base = textwrap.dedent(
         f"""
@@ -676,6 +684,8 @@ def _build_batch_migrate_prompt(
     parts = [base]
     if catalog_block:
         parts.append(catalog_block.rstrip())
+    if card_block:
+        parts.append(card_block.rstrip())
     if ola2_block:
         parts.append(ola2_block.rstrip())
     return "\n\n".join(parts)

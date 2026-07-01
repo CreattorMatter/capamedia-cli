@@ -9,7 +9,9 @@ from capamedia_cli.core.catalog_injector import (
     _OLA2_DOWNSTREAMS_MARKER,
     _cell,
     contains_ola2_downstreams_block,
+    contains_ola2_service_card,
     format_ola2_downstreams_block,
+    format_ola2_service_card,
 )
 
 
@@ -111,3 +113,48 @@ def test_block_note_forbids_skipping_by_in_ola1() -> None:
     low = block.lower()
     assert "in_ola1" in low
     assert "nunca saltees" in low
+
+
+# -- Ficha de discovery por servicio (cualquier servicio, no solo ORQ) --------
+
+
+def test_service_card_for_ws_has_ficha_and_links() -> None:
+    card = format_ola2_service_card("WSProductos0033")
+    assert contains_ola2_service_card(card)
+    assert "Tecnologia:" in card
+    assert "Metodos que expone:" in card
+    assert "Links:" in card  # icepanel/wsdl/codigo
+
+
+def test_service_card_for_orchestrator_too() -> None:
+    card = format_ola2_service_card("ORQProductos0015")
+    assert contains_ola2_service_card(card)
+    assert "ORQProductos0015" in card
+    assert "no-autoritativo" in card.lower() or "codigo legacy sigue siendo la verdad" in card.lower()
+
+
+def test_service_card_empty_for_unknown() -> None:
+    assert format_ola2_service_card("WSNoExiste9999") == ""
+
+
+def test_service_card_case_and_form_insensitive() -> None:
+    canonical = format_ola2_service_card("WSProductos0033")
+    assert canonical != ""
+    assert format_ola2_service_card("wsproductos0033") == canonical
+    assert format_ola2_service_card("tmp-msa-sp-wsproductos0033") == canonical
+
+
+def test_build_prompt_ws_gets_card_but_no_downstreams(tmp_path: Path) -> None:
+    from capamedia_cli.commands.batch import _build_batch_migrate_prompt
+
+    out = _build_batch_migrate_prompt("WSProductos0033", tmp_path, tmp_path / "mig", "BASE")
+    assert contains_ola2_service_card(out)  # WS recibe su ficha
+    assert not contains_ola2_downstreams_block(out)  # pero NO el mapa de downstreams
+
+
+def test_build_prompt_orq_gets_card_and_downstreams(tmp_path: Path) -> None:
+    from capamedia_cli.commands.batch import _build_batch_migrate_prompt
+
+    out = _build_batch_migrate_prompt("ORQProductos0015", tmp_path, tmp_path / "mig", "BASE")
+    assert contains_ola2_service_card(out)
+    assert contains_ola2_downstreams_block(out)
