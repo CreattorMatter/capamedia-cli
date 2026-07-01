@@ -1,8 +1,7 @@
 {
   "meta": {
     "ola": 2,
-    "entrega": 1,
-    "source": "servicios-ola2-entrega1.numbers",
+    "source": "servicios-ola2.numbers",
     "n_services": 25,
     "n_orchestrators": 5,
     "n_relations": 37

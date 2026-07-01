@@ -33,7 +33,7 @@ def test_block_has_hard_note_forbidding_mandatory_derivation() -> None:
 def test_block_empty_for_non_orchestrator_and_unknown() -> None:
     assert format_ola2_downstreams_block("WSClientes0024") == ""  # WS conocido, no ORQ
     assert format_ola2_downstreams_block("WSProductos0033") == ""
-    assert format_ola2_downstreams_block("ORQProductos9999") == ""  # ausente (entrega 2+)
+    assert format_ola2_downstreams_block("ORQProductos9999") == ""  # ausente del catalogo
 
 
 def test_block_case_and_form_insensitive() -> None:

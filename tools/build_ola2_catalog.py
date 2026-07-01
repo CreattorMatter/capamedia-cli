@@ -5,8 +5,8 @@ solo lee el JSON generado). Reproducible: correr de nuevo cuando el banco actual
 el .numbers.
 
     python tools/build_ola2_catalog.py \
-        tools/ola2/servicios-ola2-entrega1.numbers \
-        src/capamedia_cli/data/catalog/ola2_entrega1.json
+        tools/ola2/servicios-ola2.numbers \
+        src/capamedia_cli/data/catalog/ola2.json
 
 Estrategia deliberada (leccion del Check 5.13): NO se parsea el texto libre de la
 columna "Integraciones / Consume" con un mini-parser fragil. El mapa
@@ -202,7 +202,6 @@ def build(numbers_path: str) -> dict:
     return {
         "meta": {
             "ola": 2,
-            "entrega": 1,
             "source": numbers_path.split("/")[-1],
             "n_services": len(services),
             "n_orchestrators": len(orchestrators),

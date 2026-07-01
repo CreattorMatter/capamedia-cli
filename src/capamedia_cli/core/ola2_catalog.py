@@ -1,6 +1,6 @@
 """Loader del catalogo de Discovery Ola 2.
 
-El catalogo (`data/catalog/ola2_entrega1.json`) se genera desde el `.numbers` del
+El catalogo (`data/catalog/ola2.json`) se genera desde el `.numbers` del
 banco con `tools/build_ola2_catalog.py`. Aqui SOLO se lee el JSON (el CLI en runtime
 no depende de `numbers-parser`). Da al analisis de orquestadores el mapa REAL
 orquestador->downstream + la ficha de cada servicio, en vez de adivinarlos del ESQL.
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 _CATALOG_PATH = (
-    Path(__file__).resolve().parent.parent / "data" / "catalog" / "ola2_entrega1.json"
+    Path(__file__).resolve().parent.parent / "data" / "catalog" / "ola2.json"
 )
 # Prefijo del nombre migrado: `tpr-msa-sp-orqproductos0019` -> `orqproductos0019`.
 _MIGRATED_PREFIX_RE = re.compile(r"(?i)^[a-z]{3}-msa-[a-z]{2}-")
@@ -82,7 +82,7 @@ def get_downstreams(orchestrator: str) -> list[dict[str, Any]]:
     """Downstreams de un orquestador: lista de `{service, in_discovery, in_ola1}`.
 
     Vacia si el servicio no es orquestador o no esta en el catalogo. OJO: `[]` NO
-    distingue 'ORQ sin downstreams' de 'ORQ ausente del catalogo' (entrega 2+):
+    distingue 'ORQ sin downstreams' de 'ORQ ausente del catalogo' (aun no relevado):
     consultar `is_known()` primero cuando la distincion importe.
     """
     svc = get_service(orchestrator)

@@ -491,7 +491,7 @@ def format_ola2_downstreams_block(service: str) -> str:
     """Bloque markdown con el mapa de downstreams del catalogo Ola2 para un ORQ.
 
     Devuelve `""` si `service` no es un orquestador conocido (degradacion graciosa:
-    un ORQ de entrega 2+ o un WS simple no reciben bloque). CONTEXTO no-autoritativo:
+    un ORQ aun no relevado o un WS simple no reciben bloque). CONTEXTO no-autoritativo:
     la lista es el fan-out de discovery; la obligatoriedad (mandatory vs best-effort)
     NO sale de aca, sale del `RETURN FALSE` del ESQL legacy.
     """

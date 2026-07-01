@@ -8,7 +8,6 @@ from capamedia_cli.core import ola2_catalog as cat
 def test_catalog_loads_meta() -> None:
     c = cat.load_catalog()
     assert c["meta"]["ola"] == 2
-    assert c["meta"]["entrega"] == 1
     assert len(c["services"]) >= 25
     assert c["meta"]["n_relations"] >= 30
 
@@ -69,14 +68,14 @@ def test_resolve_migrated_name_form() -> None:
 
 def test_resolve_case_insensitive_no_mangling() -> None:
     """Lookup por minusculas contra los keys reales: robusto al case sin reconstruir
-    el nombre (no rompe camelCase interno tipo WSCuentaCorriente de entrega 2+)."""
+    el nombre (no rompe camelCase interno tipo WSCuentaCorriente en futuros relevamientos)."""
     assert cat.get_service("ORQPRODUCTOS0019")["name"] == "ORQProductos0019"
     assert cat.get_service("orqproductos0019")["name"] == "ORQProductos0019"
 
 
 def test_known_distinguishes_absent_from_empty_downstreams() -> None:
     """is_known separa 'ausente del catalogo' de 'servicio sin downstreams'."""
-    assert not cat.is_known("ORQProductos9999")  # ausente (entrega 2+)
+    assert not cat.is_known("ORQProductos9999")  # ausente del catalogo
     assert cat.get_downstreams("ORQProductos9999") == []
     # WS conocido no-orquestador: downstreams vacio pero is_known True
     assert cat.is_known("WSProductos0033")
