@@ -36,6 +36,13 @@ def test_analisis_orq_delegation_map_forbids_catalog_mandatory_column() -> None:
     assert "Do NOT add a mandatory/best-effort column" in t
 
 
+def test_analisis_orq_in_ola1_anti_skip_guardrail() -> None:
+    """El prompt define in_ola1 como informativo y prohibe saltear delegaciones (M2)."""
+    t = _analisis_orq()
+    assert "in_ola1" in t
+    assert "NEVER skip" in t
+
+
 def test_check_5_13_not_coupled_to_ola2_catalog() -> None:
     """El Check 5.13 (run_block_5) NO importa ola2_catalog: el ESQL legacy sigue
     siendo el arbitro unico del RETURN FALSE (guardrail anti-reacople, leccion v0.28.10)."""

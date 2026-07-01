@@ -33,7 +33,10 @@ def canon(name: str) -> str:
     m = _NAME_RE.match(s)
     if not m:
         return s
-    return f"{m.group(1).upper()}{m.group(2).capitalize()}{m.group(3)}"
+    # Preserva el camelCase interno (WSCuentaCorriente0033 -> igual); solo normaliza
+    # el prefijo (WS/ORQ) y la inicial. `.capitalize()` destruiria el camelCase.
+    mid = m.group(2)
+    return f"{m.group(1).upper()}{mid[:1].upper()}{mid[1:]}{m.group(3)}"
 
 
 def truthy(v: str) -> bool:
@@ -159,8 +162,14 @@ def build(numbers_path: str) -> dict:
             }
         )
 
+    if not relations:
+        raise SystemExit(
+            "ERROR: 0 relaciones orquestador->downstream parseadas. ¿Cambio el header "
+            "'nombre'/'servicios' de la sub-tabla en la hoja 'Servicios'?"
+        )
+
     services: dict[str, dict] = {}
-    for name in sorted(set(catalog) | set(discovery)):
+    for name in sorted(set(catalog) | set(discovery) | set(downs_by_orch)):
         entry = dict(catalog.get(name, {"name": name}))
         entry.setdefault("name", name)
         if name in discovery:
@@ -168,6 +177,20 @@ def build(numbers_path: str) -> dict:
         if name in downs_by_orch:
             entry["downstreams"] = downs_by_orch[name]
         services[name] = entry
+
+    # Filtrar integraciones_codes (regex del texto libre) a los nombres realmente
+    # conocidos: descarta codigos espurios capturados de URLs (ej. WSOR845.asmx).
+    known = (
+        set(services)
+        | {r["downstream"] for r in relations}
+        | {r["orchestrator"] for r in relations}
+    )
+    for entry in services.values():
+        disc = entry.get("discovery")
+        if disc:
+            disc["integraciones_codes"] = [
+                c for c in disc.get("integraciones_codes", []) if c in known
+            ]
 
     orchestrators = sorted(
         n

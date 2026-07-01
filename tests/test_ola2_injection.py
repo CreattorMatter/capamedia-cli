@@ -7,6 +7,7 @@ from pathlib import Path
 from capamedia_cli.core.catalog_injector import (
     _CATALOG_MARKER,
     _OLA2_DOWNSTREAMS_MARKER,
+    _cell,
     contains_ola2_downstreams_block,
     format_ola2_downstreams_block,
 )
@@ -76,3 +77,37 @@ def test_build_prompt_does_not_duplicate_block(tmp_path: Path) -> None:
     pre = format_ola2_downstreams_block("ORQProductos0019")
     out = _build_batch_migrate_prompt("ORQProductos0019", tmp_path, tmp_path / "mig", pre)
     assert out.count(_OLA2_DOWNSTREAMS_MARKER) == 1
+
+
+# -- fixes del review: escape de pipe (M1) + guardrail anti-skip in_ola1 (M2) --
+
+
+def test_cell_escapes_pipe_and_collapses_whitespace() -> None:
+    assert _cell("a | b") == r"a \| b"  # pipe escapado -> no rompe la tabla
+    assert _cell("x\n  y\tz") == "x y z"  # colapsa \n/tabs/espacios
+    assert _cell("") == "-"
+    assert _cell(None) == "-"
+
+
+def test_pipe_in_field_does_not_break_table(monkeypatch) -> None:
+    """Un metodo con '|' se escapa en el bloque (M1): no inyecta columnas espurias."""
+    import capamedia_cli.core.ola2_catalog as ola2
+
+    real = ola2.get_discovery
+
+    def fake(name: str):
+        fic = dict(real(name) or {})
+        fic["metodos_expone"] = "m1 | m2"
+        return fic
+
+    monkeypatch.setattr(ola2, "get_discovery", fake)
+    block = format_ola2_downstreams_block("ORQProductos0015")
+    assert r"m1 \| m2" in block  # el pipe quedo escapado
+
+
+def test_block_note_forbids_skipping_by_in_ola1() -> None:
+    """La NOTA DURA prohibe saltear una delegacion por in_ola1=si (M2)."""
+    block = format_ola2_downstreams_block("ORQProductos0015")
+    low = block.lower()
+    assert "in_ola1" in low
+    assert "nunca saltees" in low

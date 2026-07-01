@@ -969,9 +969,7 @@
         "link_icepanel": "https://app.icepanel.io/landscapes/w71QNHgfDvF79GrSuA3r/versions/latest/diagrams/editor?diagram=XzmQZAjoEG&model=bId55LEoUM&overlay_tab=tags&x1=-487.6&y1=-192&x2=1511.6&y2=832",
         "link_wsdl": "https://dev.azure.com/BancoPichinchaEC/adi-especificaciones-tecnicas/_git/adi-doc-tecspec-tribu-integracion-apis?version=GBmaster&path=/sp%20-%20Soporte/tpr-msa-sp-wsproductos0041",
         "link_codigo": "https://dev.azure.com/BancoPichinchaEC/tpl-bus-omnicanal/_git/sqb-msa-wsproductos0041",
-        "integraciones_codes": [
-          "WSOr845"
-        ]
+        "integraciones_codes": []
       }
     },
     "WSProductos0044": {

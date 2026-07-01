@@ -194,6 +194,10 @@ MANDATORY or BEST-EFFORT. The short-circuit classification lives ONLY in Section
 Step D (from the ESQL `RETURN FALSE` scan). Do NOT add a mandatory/best-effort column
 sourced from the catalog.
 
+**`in_ola1` is history only (INFORMATIONAL):** it means the downstream already
+existed / was migrated in Ola1. The migrated ORQ MUST still delegate to ALL its
+downstreams — NEVER skip, drop or stub a delegation because `in_ola1=yes`.
+
 ### 4. Field Forwarding
 For each operation: which input fields go to which downstream call; which downstream response fields come back.
 

@@ -480,6 +480,13 @@ def contains_ola2_downstreams_block(text: str) -> bool:
     return _OLA2_DOWNSTREAMS_MARKER in (text or "")
 
 
+def _cell(value: str | None) -> str:
+    """Sanea un valor para una celda de tabla markdown: colapsa todo whitespace
+    (incluido `\\n`/`\\r`/tabs), escapa `|` para no romper la tabla, y devuelve `-`
+    si queda vacio."""
+    return " ".join((value or "").split()).replace("|", r"\|") or "-"
+
+
 def format_ola2_downstreams_block(service: str) -> str:
     """Bloque markdown con el mapa de downstreams del catalogo Ola2 para un ORQ.
 
@@ -490,9 +497,10 @@ def format_ola2_downstreams_block(service: str) -> str:
     """
     from capamedia_cli.core import ola2_catalog as _ola2  # lazy: evita PyYAML en import
 
-    if not _ola2.is_orchestrator(service):
+    svc = _ola2.get_service(service)
+    if not svc or not _ola2.is_orchestrator(service):
         return ""
-    canonical = _ola2.get_service(service)["name"]  # forma canonica, no la pasada
+    canonical = svc.get("name") or service  # forma canonica; nunca crashea
     lines = [
         f"{_OLA2_DOWNSTREAMS_MARKER} ({canonical})",
         "",
@@ -504,13 +512,11 @@ def format_ola2_downstreams_block(service: str) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for d in _ola2.get_downstreams(service):
-        name = d["service"]
-        fic = _ola2.get_discovery(name) or {}
-        tec = (fic.get("tecnologia") or "").replace("\n", " ").strip() or "-"
-        met = (fic.get("metodos_expone") or "").replace("\n", " ").strip() or "-"
+        fic = _ola2.get_discovery(d["service"]) or {}
         lines.append(
-            f"| {name} | {'si' if d['in_discovery'] else 'no'} | "
-            f"{'si' if d['in_ola1'] else 'no'} | {tec} | {met} |"
+            f"| {_cell(d['service'])} | {'si' if d['in_discovery'] else 'no'} | "
+            f"{'si' if d['in_ola1'] else 'no'} | {_cell(fic.get('tecnologia'))} | "
+            f"{_cell(fic.get('metodos_expone'))} |"
         )
     lines += [
         "",
@@ -518,5 +524,9 @@ def format_ola2_downstreams_block(service: str) -> str:
         "> es mandatory o best-effort. La obligatoriedad se determina SOLO leyendo el",
         "> `RETURN FALSE` del PROCEDURE del ESQL legacy de cada llamada; no la derives",
         "> de esta tabla ni de `in_ola1`/`in_discovery`/tecnologia.",
+        ">",
+        "> `in_ola1` es solo historial (el downstream ya existia/migro en Ola1); es",
+        "> INFORMATIVO. El ORQ migrado DEBE seguir delegando a TODOS sus downstreams:",
+        "> NUNCA saltees ni elimines una delegacion por `in_ola1=si`.",
     ]
     return "\n".join(lines).rstrip() + "\n"

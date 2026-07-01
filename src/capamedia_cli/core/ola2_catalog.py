@@ -46,7 +46,7 @@ def _resolve(name: str) -> str | None:
     migrado (pela el prefijo `tpr-msa-sp-`). `ORQProductos0019`, `orqproductos0019`
     y `tpr-msa-sp-orqproductos0019` resuelven todos al mismo servicio.
     """
-    if not name:
+    if not isinstance(name, str) or not name.strip():
         return None
     idx = _name_index()
     stripped = _MIGRATED_PREFIX_RE.sub("", name.strip())
