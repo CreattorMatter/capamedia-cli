@@ -6,6 +6,51 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-06-17
+
+### Added — Catálogos del banco embebidos: Discovery OLA 2 + adaptadores BANCS
+
+El CLI deja de adivinar el contexto de cada servicio: embebe los relevamientos del
+banco y los inyecta automáticamente al prompt de migración (`ai migrate` / `batch
+migrate` / `pipeline`). Principio rector en todos: **catálogo = CONTEXTO, no
+ÁRBITRO** (el ESQL/código legacy manda; ningún check deriva veredictos de los
+catálogos — `checklist_rules` no los importa, con tests que lo verifican).
+
+**Catálogo Discovery OLA 2** (`data/catalog/ola2.json`, 25 servicios / 5
+orquestadores / 37 relaciones; generador `tools/build_ola2_catalog.py` +
+`.numbers` versionado en `tools/ola2/`):
+- **Ficha de discovery por servicio**: al migrar CUALQUIER servicio del catálogo
+  (ORQ o WS) el prompt recibe nuevo nombre, complejidad, tribu, tecnología+backend,
+  protocolos, métodos que expone, descripción y links IcePanel/WSDL/Código (repo
+  Azure del legacy).
+- **Mapa de downstreams por orquestador**: al migrar un ORQ, tabla
+  `downstream | in_discovery | in_ola1 | tecnología | métodos`. `analisis-orq.md`
+  la usa como fuente PRIMARIA con reconciliación 3-way
+  (`MISSING_IN_ARTIFACTS`/`EXTRA_NOT_IN_CATALOG`) y guardrails: mandatory/best-effort
+  SOLO del `RETURN FALSE` del ESQL; `in_ola1` es informativo (NUNCA saltear una
+  delegación por eso).
+- Loader `core/ola2_catalog.py` robusto al case y a la forma migrada
+  (`tpr-msa-sp-orqproductos0019`). NO existen "entregas 1/2" (error de naming del
+  banco): es un solo catálogo OLA 2 que se regenera cuando el banco actualice.
+
+**Catálogo de adaptadores BANCS** (`data/catalog/bancs_adapters.json`, 8
+adaptadores Core Adapter / 55 TX; generador `tools/build_bancs_adapters.py`):
+- Al detectar TX BANCS del servicio, el prompt recibe la tabla
+  `TX | adaptador | URL interna pod-a-pod | operación` — lo que el migrador
+  necesita para configurar el WebClient. Ante conflicto prevalece
+  `prompts/tx-adapter-catalog.json` (fuente autoritativa); patrón oficial
+  `bancs.webclients.<suffix>.base-url` + `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL`
+  (nunca hardcodear URLs).
+- **Sanitización**: el `.numbers` fuente trae curls con cookies y datos de prueba —
+  NO se versiona; el generador tiene guardia estructural (cookies/hex32/cédulas/
+  auth/emails) que aborta señalando el campo, espejada en un test de CI.
+- `bancs.md`: sección "Adaptadores relevados" (8 adaptadores por dominio + regla de
+  rutas https-local vs http-service pod-a-pod), sync bidireccional doc↔JSON.
+
+Ambos pasaron revisión adversarial ejecutando el código (Ola2: cero HIGH; BANCS:
+veredicto seguro + 3 MEDIUM corregidos, incl. typo del banco TX067728→067228
+auditado en obs, pendiente validar). +57 tests. Suite **1009 verde**.
+
 ## [0.29.0] - 2026-06-10
 
 ### Changed — Netty `4.1.133.Final` → `4.1.135.Final` + árbol con `unix-common`

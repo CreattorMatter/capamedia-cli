@@ -483,6 +483,14 @@ capamedia-cli/
 - [x] v0.26.3 - `log-transaccional-orq.md` reconciliado con PDF 2026-05-26: LT-1 (Spring Boot 3.5.12 agnostico), LT-4 (patron real Azure `sqb-cfg-<TipoTransaccion>-plantillasTransaccional`), fallback con `bodyIn`/`bodyOut` en `null`
 - [x] v0.26.4 - Diagnostico de `capamedia clone` cuando el PAT esta OK pero git no lo aplica (git <2.31 sin `GIT_CONFIG_COUNT`, credential helper macOS interfiriendo)
 
+### Release 0.30.0 — Catálogos del banco embebidos (Discovery OLA 2 + adaptadores BANCS)
+
+- [x] v0.30.0 - **Discovery OLA 2 embebido** (`data/catalog/ola2.json`: 25 servicios, 5 ORQ, 37 relaciones): al migrar cualquier servicio del catálogo el prompt recibe su **ficha** (tribu, tecnología, métodos, links IcePanel/WSDL/código); un ORQ recibe además su **mapa de downstreams** (`in_discovery`/`in_ola1`) que `analisis-orq.md` usa como fuente primaria con reconciliación 3-way. **Adaptadores BANCS embebidos** (`data/catalog/bancs_adapters.json`: 8 adaptadores Core Adapter, 55 TX): el prompt recibe la tabla TX→adaptador→URL interna; prevalece `prompts/tx-adapter-catalog.json`; patrón `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL`. Guardrails en todo: **catálogo=contexto NO árbitro** (el ESQL manda; los checks no los importan), sanitización estructural (el `.numbers` de adaptadores trae cookies/PII y NO se versiona). Generadores reproducibles `tools/build_*.py`. +57 tests, suite 1009. (2 revisiones adversariales ejecutando el código)
+
+### Release 0.29.0 — Netty 4.1.135 + Check 8.10 (Snyk 2026-06)
+
+- [x] v0.29.0 - Netty `4.1.133.Final` → `4.1.135.Final` (árbol completo + `unix-common`), Check/autofix 8.10 pins WebFlux Snyk 2026-06, baseline Spring Boot 3.5.15 en doublecheck
+
 ### Release 0.28.10 — Revert del parser por-rama del 5.13 + señal 2b (3ª revisión)
 
 - [x] v0.28.10 - **Revert de heurísticas frágiles**: tras 3 rondas de regresiones (el mini-tokenizer de v0.28.9 fallaba con text blocks Java/`<` relacional/TX en comillas dobles), el **Check 5.13 vuelve al conteo agregado conservador** validado en v0.28.7 (homogéneo→HIGH, mixto→LOW, **sin parsear Java**). **Señal 2b revertida** (reabría el falso positivo de WSReglas0010). **8.9** conserva submódulos con early-return estricto. Se conserva: gate ORQ por token, exclusión test, F11, docs, mensajeNegocio, Helm, netty. Suite 952. (lección: parsear Java a mano no escala — el 5.13 prefiere LOW manual a un veredicto fuerte incorrecto)
