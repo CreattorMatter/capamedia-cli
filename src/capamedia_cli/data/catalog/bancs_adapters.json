@@ -1,0 +1,339 @@
+{
+  "meta": {
+    "ola": 2,
+    "scope": "Relevado para OLA 2; los adaptadores sirven para cualquier ola",
+    "n_adapters": 8,
+    "n_tx": 55,
+    "notes": [
+      "Usar la ruta https para pruebas en entornos locales, por esta ruta se hace un acceso a OCP4 a traves de F5.",
+      "Usar la ruta http (service) para despliegue en las plataformas, esta ruta es únicamente visible entre pods dentro del cluster de OCP4."
+    ]
+  },
+  "adapters": {
+    "taa-msa-ad-bnc-products-compliance": {
+      "name": "taa-msa-ad-bnc-products-compliance",
+      "url_dev": "https://taa-msa-ad-bnc-products-compliance.apps.ocpdev.uiotest.bpichinchatest.test",
+      "url_test": "https://taa-msa-ad-bnc-products-compliance.apps.ocptest.uiotest.bpichinchatest.test",
+      "url_internal": "http://service-taa-msa-ad-bnc-products-compliance.arq-adaptadores.svc.cluster.local"
+    },
+    "tct-msa-ad-bnc-payments-parameters": {
+      "name": "tct-msa-ad-bnc-payments-parameters",
+      "url_dev": "",
+      "url_test": "",
+      "url_internal": "http://service-tct-msa-ad-bnc-payments-parameters.arq-adaptadores.svc.cluster.local"
+    },
+    "tia-msa-ad-bnc-catalogs": {
+      "name": "tia-msa-ad-bnc-catalogs",
+      "url_dev": "",
+      "url_test": "",
+      "url_internal": "http://service-tia-msa-ad-bnc-catalogs.arq-adaptadores.svc.cluster.local"
+    },
+    "tnd-msa-ad-bnc-customers-profile": {
+      "name": "tnd-msa-ad-bnc-customers-profile",
+      "url_dev": "",
+      "url_test": "",
+      "url_internal": "http://service-tnd-msa-ad-bnc-customers-profile.arq-adaptadores.svc.cluster.local"
+    },
+    "tpr-msa-ad-bnc-products-details": {
+      "name": "tpr-msa-ad-bnc-products-details",
+      "url_dev": "",
+      "url_test": "",
+      "url_internal": "http://service-tpr-msa-ad-bnc-products-details.arq-adaptadores.svc.cluster.local"
+    },
+    "tpr-msa-ad-bnc-products-insurances": {
+      "name": "tpr-msa-ad-bnc-products-insurances",
+      "url_dev": "https://tpr-msa-ad-bnc-products-insurances-enp.apps.ocpdev.uiotest.bpichinchatest.test",
+      "url_test": "https://tpr-msa-ad-bnc-products-insurances-enp.apps.ocptest.uiotest.bpichinchatest.test",
+      "url_internal": "http://service-tpr-msa-ad-bnc-products-insurances.arq-adaptadores.svc.cluster.local"
+    },
+    "tpr-msa-ad-bnc-products-ownership": {
+      "name": "tpr-msa-ad-bnc-products-ownership",
+      "url_dev": "",
+      "url_test": "",
+      "url_internal": "http://service-tpr-msa-ad-bnc-products-ownership.arq-adaptadores.svc.cluster.local"
+    },
+    "tpr-msa-ad-bnc-products-transactions": {
+      "name": "tpr-msa-ad-bnc-products-transactions",
+      "url_dev": "https://tpr-msa-ad-bnc-products-transactions-enp.apps.ocpdev.uiotest.bpichinchatest.test",
+      "url_test": "https://tpr-msa-ad-bnc-products-transactions-enp.apps.ocptest.uiotest.bpichinchatest.test",
+      "url_internal": "http://service-tpr-msa-ad-bnc-products-transactions.arq-adaptadores.svc.cluster.local"
+    }
+  },
+  "tx_map": {
+    "000899": {
+      "adapter": "tct-msa-ad-bnc-payments-parameters",
+      "operation": "",
+      "obs": "OK"
+    },
+    "000901": {
+      "adapter": "tct-msa-ad-bnc-payments-parameters",
+      "operation": "",
+      "obs": "OK"
+    },
+    "002000": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "",
+      "obs": ""
+    },
+    "007050": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "009600": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Responde por la trx 009607"
+    },
+    "031560": {
+      "adapter": "tia-msa-ad-bnc-catalogs",
+      "operation": "CONSULTA",
+      "obs": "OK"
+    },
+    "050240": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "060442": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Creacion",
+      "obs": "OK"
+    },
+    "060480": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "060602": {
+      "adapter": "tpr-msa-ad-bnc-products-ownership",
+      "operation": "CONSULTA",
+      "obs": ""
+    },
+    "060605": {
+      "adapter": "tpr-msa-ad-bnc-products-ownership",
+      "operation": "ACTUALIZACION",
+      "obs": ""
+    },
+    "061400": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "061401": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "061402": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "061406": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "062001": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Ingresar idNumber no registrado"
+    },
+    "062038": {
+      "adapter": "tct-msa-ad-bnc-payments-parameters",
+      "operation": "",
+      "obs": ""
+    },
+    "062066": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Creacion",
+      "obs": "Data pendiente: WSProductos0144 --> UMPProductos0193--> CrearSeguros21"
+    },
+    "062120": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "064015": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "064019": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "064020": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "064023": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "064030": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "067000": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067001": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Sin casos de uso en los repos"
+    },
+    "067010": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067050": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067067": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Eliminacion",
+      "obs": "Data pendiente: WSProductos0151 --> UMPProductos0203--> EliminarSeguroDesgravamen41"
+    },
+    "067071": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067076": {
+      "adapter": "tpr-msa-ad-bnc-products-insurances",
+      "operation": "Consulta",
+      "obs": "OK"
+    },
+    "067100": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067101": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067102": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067103": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067108": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "[postcode1] eliminado del xml trx"
+    },
+    "067116": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067118": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067125": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067126": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067127": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Se agrego \"instanceA\": \"S\""
+    },
+    "067145": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067151": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067153": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067155": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067156": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": "Los archivos xml no existen en los repos"
+    },
+    "067159": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067219": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067225": {
+      "adapter": "taa-msa-ad-bnc-products-compliance",
+      "operation": "CONSULTA",
+      "obs": "OK"
+    },
+    "067227": {
+      "adapter": "taa-msa-ad-bnc-products-compliance",
+      "operation": "CONSULTA",
+      "obs": "OK"
+    },
+    "067230": {
+      "adapter": "taa-msa-ad-bnc-products-compliance",
+      "operation": "CONSULTA",
+      "obs": "OK"
+    },
+    "067510": {
+      "adapter": "tnd-msa-ad-bnc-customers-profile",
+      "operation": "",
+      "obs": ""
+    },
+    "067728": {
+      "adapter": "taa-msa-ad-bnc-products-compliance",
+      "operation": "CONSULTA",
+      "obs": "OK"
+    },
+    "079006": {
+      "adapter": "tia-msa-ad-bnc-catalogs",
+      "operation": "CONSULTA",
+      "obs": ""
+    },
+    "079008": {
+      "adapter": "tpr-msa-ad-bnc-products-details",
+      "operation": "Consulta",
+      "obs": "OK"
+    }
+  }
+}

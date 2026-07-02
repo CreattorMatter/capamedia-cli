@@ -44,6 +44,29 @@ del banco (pendiente de validar).
 - Siempre usar Core Adapter via REST: POST /bancs/trx/{trxId}
 - WebClient con timeout y retry configurables via ${CCC_*} env vars
 
+### Adaptadores relevados (OLA 2 — sirven para cualquier ola)
+
+El Core Adapter esta particionado en adaptadores por dominio funcional. El CLI
+embebe el relevamiento del banco en `data/catalog/bancs_adapters.json` (mapa
+TX→adaptador, generado con `tools/build_bancs_adapters.py`) y lo inyecta al prompt
+de migracion cuando detecta las TX del servicio:
+
+- `tnd-msa-ad-bnc-customers-profile` — perfil/datos de cliente
+- `tpr-msa-ad-bnc-products-details` — detalle de productos/cuentas
+- `tpr-msa-ad-bnc-products-transactions` — transacciones de productos
+- `tpr-msa-ad-bnc-products-insurances` — seguros
+- `tpr-msa-ad-bnc-products-ownership` — titularidad
+- `taa-msa-ad-bnc-products-compliance` — listas/compliance
+- `tct-msa-ad-bnc-payments-parameters` — parametros de pagos
+- `tia-msa-ad-bnc-catalogs` — catalogos BANCS
+
+Rutas (relevamiento dev/test): la `https` externa (`*-enp.apps.ocp*`) es SOLO para
+pruebas locales (entra a OCP4 via F5); la interna
+`http://service-<adaptador>.arq-adaptadores.svc.cluster.local` es la visible
+pod-a-pod dentro del cluster y es la que corresponde al despliegue. En el servicio
+migrado la URL va SIEMPRE via `${CCC_*}` env vars (NUNCA hardcodear estas URLs; son
+referenciales del relevamiento, contexto no configuracion).
+
 ## Formato CIF (CRITICO)
 - Puede variar entre servicios downstream del MISMO servicio
 - Algunos UMPs requieren CIF zero-padded a 16 chars: String.format("%016d", Long.parseLong(cif))

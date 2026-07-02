@@ -532,6 +532,66 @@ def format_ola2_downstreams_block(service: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+# -- Adaptadores BANCS (Core Adapter): que adaptador sirve cada TX -----------
+
+_BANCS_ADAPTERS_MARKER = "## Adaptadores BANCS (Core Adapter)"
+
+
+def contains_bancs_adapters_block(text: str) -> bool:
+    """True si el texto ya trae el bloque de adaptadores BANCS (dedup)."""
+    return _BANCS_ADAPTERS_MARKER in (text or "")
+
+
+def format_bancs_adapters_block(tx_codes: list[str]) -> str:
+    """Bloque markdown que mapea las TX BANCS del servicio a su adaptador del
+    Core Adapter (con la URL interna pod-a-pod). Devuelve `""` si ninguna TX del
+    servicio esta relevada (degradacion graciosa). Relevado en OLA 2; sirve para
+    cualquier ola. CONTEXTO: las URLs reales de cada ambiente van via `${CCC_*}`.
+    """
+    from capamedia_cli.core import bancs_adapters as _ba  # lazy
+
+    hits: list[dict] = []
+    misses: list[str] = []
+    seen: set[str] = set()
+    for tx in tx_codes or []:
+        info = _ba.get_adapter_for_tx(tx)
+        key = (info or {}).get("tx") or str(tx)
+        if key in seen:
+            continue
+        seen.add(key)
+        if info:
+            hits.append(info)
+        else:
+            misses.append(str(tx))
+    if not hits:
+        return ""
+    lines = [
+        f"{_BANCS_ADAPTERS_MARKER} para las TX de este servicio",
+        "",
+        "Que adaptador del Core Adapter sirve cada TX BANCS detectada (relevamiento",
+        "OLA 2 del banco; los adaptadores sirven para cualquier ola).",
+        "",
+        "| TX | Adaptador | URL interna (pod-a-pod) | Operacion |",
+        "| --- | --- | --- | --- |",
+    ]
+    for h in sorted(hits, key=lambda x: x["tx"]):
+        lines.append(
+            f"| {h['tx']} | {_cell(h['adapter'])} | {_cell(h['url_internal'])} | "
+            f"{_cell(h['operation'])} |"
+        )
+    if misses:
+        lines += ["", f"TX detectadas SIN adaptador relevado aun: {', '.join(sorted(misses))}."]
+    lines += [
+        "",
+        "> NOTA: contexto del relevamiento, no configuracion final. La URL del",
+        "> Core Adapter de cada ambiente va SIEMPRE via `${CCC_*}` env vars en",
+        "> application.yml/Helm (NUNCA hardcodear estas URLs). La ruta `https`",
+        "> externa es solo para pruebas locales (F5); la ruta `http service-*`",
+        "> es la visible pod-a-pod dentro del cluster OCP4.",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 # -- Ficha de discovery de un servicio (contexto para migrar CUALQUIER servicio) --
 
 _OLA2_CARD_MARKER = "## Ficha de discovery Ola2"

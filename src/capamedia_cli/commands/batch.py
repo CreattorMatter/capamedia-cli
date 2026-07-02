@@ -581,10 +581,12 @@ def _build_batch_migrate_prompt(
     prompt_body: str,
 ) -> str:
     from capamedia_cli.core.catalog_injector import (
+        contains_bancs_adapters_block,
         contains_catalog_block,
         contains_ola2_downstreams_block,
         contains_ola2_service_card,
         detect_relevant_tx,
+        format_bancs_adapters_block,
         format_for_prompt,
         format_ola2_downstreams_block,
         format_ola2_service_card,
@@ -597,12 +599,19 @@ def _build_batch_migrate_prompt(
     # Inyeccion de catalogos oficiales: evitar que la AI alucine TX-BANCS,
     # codigos de backend o reglas de error. Si el prompt_body ya trae el
     # bloque (viene del FABRICS_PROMPT_<svc>.md), no duplicamos.
+    tx_codes = detect_relevant_tx(workspace, service)
     if contains_catalog_block(prompt_body):
         catalog_block = ""
     else:
-        tx_codes = detect_relevant_tx(workspace, service)
         snapshot = load_catalogs(workspace)
         catalog_block = format_for_prompt(snapshot, relevant_tx=tx_codes)
+
+    # Adaptadores BANCS (Core Adapter): mapea las TX detectadas del servicio a su
+    # adaptador (URL interna pod-a-pod). "" si ninguna TX esta relevada.
+    if contains_bancs_adapters_block(prompt_body):
+        adapters_block = ""
+    else:
+        adapters_block = format_bancs_adapters_block(tx_codes)
 
     # Downstreams del catalogo Ola2: solo si `service` es un orquestador conocido
     # (el helper devuelve "" para no-ORQ o entrega 2+). Contexto, no arbitro.
@@ -688,6 +697,8 @@ def _build_batch_migrate_prompt(
         parts.append(card_block.rstrip())
     if ola2_block:
         parts.append(ola2_block.rstrip())
+    if adapters_block:
+        parts.append(adapters_block.rstrip())
     return "\n\n".join(parts)
 
 
