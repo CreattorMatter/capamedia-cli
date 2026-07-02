@@ -554,22 +554,24 @@ def format_bancs_adapters_block(tx_codes: list[str]) -> str:
     misses: list[str] = []
     seen: set[str] = set()
     for tx in tx_codes or []:
-        info = _ba.get_adapter_for_tx(tx)
-        key = (info or {}).get("tx") or str(tx)
+        key = _ba.norm_tx(str(tx)) or str(tx).strip()  # misses tambien normalizados
         if key in seen:
             continue
         seen.add(key)
+        info = _ba.get_adapter_for_tx(str(tx))
         if info:
             hits.append(info)
         else:
-            misses.append(str(tx))
+            misses.append(key)
     if not hits:
         return ""
     lines = [
         f"{_BANCS_ADAPTERS_MARKER} para las TX de este servicio",
         "",
-        "Que adaptador del Core Adapter sirve cada TX BANCS detectada (relevamiento",
-        "OLA 2 del banco; los adaptadores sirven para cualquier ola).",
+        "Posibles TX BANCS detectadas y el adaptador del Core Adapter que las sirve",
+        "(relevamiento OLA 2 del banco; los adaptadores sirven para cualquier ola).",
+        "VERIFICAR contra el ESQL legacy (arbitro) que cada codigo sea realmente una",
+        "TX usada por este servicio.",
         "",
         "| TX | Adaptador | URL interna (pod-a-pod) | Operacion |",
         "| --- | --- | --- | --- |",
@@ -580,14 +582,21 @@ def format_bancs_adapters_block(tx_codes: list[str]) -> str:
             f"{_cell(h['operation'])} |"
         )
     if misses:
-        lines += ["", f"TX detectadas SIN adaptador relevado aun: {', '.join(sorted(misses))}."]
+        lines += [
+            "",
+            f"Codigos detectados SIN adaptador relevado aca (pueden no ser TX): "
+            f"{', '.join(sorted(misses))}. Antes de dejar TBD, consultar "
+            "`prompts/tx-adapter-catalog.json` (fuente AUTORITATIVA del workspace).",
+        ]
     lines += [
         "",
-        "> NOTA: contexto del relevamiento, no configuracion final. La URL del",
-        "> Core Adapter de cada ambiente va SIEMPRE via `${CCC_*}` env vars en",
-        "> application.yml/Helm (NUNCA hardcodear estas URLs). La ruta `https`",
-        "> externa es solo para pruebas locales (F5); la ruta `http service-*`",
-        "> es la visible pod-a-pod dentro del cluster OCP4.",
+        "> NOTA: contexto del relevamiento, no configuracion final. Ante conflicto",
+        "> prevalece `prompts/tx-adapter-catalog.json`. La URL del Core Adapter de",
+        "> cada ambiente va SIEMPRE via env vars — patron oficial:",
+        "> `bancs.webclients.<suffix>.base-url` en application.yml +",
+        "> `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL` en Helm (NUNCA hardcodear estas",
+        "> URLs). La ruta `https` externa es solo para pruebas locales (F5); la",
+        "> ruta `http service-*` es la visible pod-a-pod dentro del cluster OCP4.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 

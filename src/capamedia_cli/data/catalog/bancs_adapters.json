@@ -198,7 +198,7 @@
     "067050": {
       "adapter": "tnd-msa-ad-bnc-customers-profile",
       "operation": "",
-      "obs": ""
+      "obs": "[postcode1] eliminado del xml trx"
     },
     "067067": {
       "adapter": "tpr-msa-ad-bnc-products-insurances",
@@ -310,6 +310,11 @@
       "operation": "CONSULTA",
       "obs": "OK"
     },
+    "067228": {
+      "adapter": "taa-msa-ad-bnc-products-compliance",
+      "operation": "CONSULTA",
+      "obs": "(label decia TX067728) OK"
+    },
     "067230": {
       "adapter": "taa-msa-ad-bnc-products-compliance",
       "operation": "CONSULTA",
@@ -319,11 +324,6 @@
       "adapter": "tnd-msa-ad-bnc-customers-profile",
       "operation": "",
       "obs": ""
-    },
-    "067728": {
-      "adapter": "taa-msa-ad-bnc-products-compliance",
-      "operation": "CONSULTA",
-      "obs": "OK"
     },
     "079006": {
       "adapter": "tia-msa-ad-bnc-catalogs",

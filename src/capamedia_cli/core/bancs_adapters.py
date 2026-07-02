@@ -24,13 +24,16 @@ _CATALOG_PATH = (
 _TX_RE = re.compile(r"(?i)^(?:T(?:RX|X))?\s*(\d{1,6})$")
 
 
-def _norm_tx(tx: str) -> str | None:
+def norm_tx(tx: str) -> str | None:
     """Normaliza una TX a 6 digitos: acepta `060480`, `TX060480`, `TRX 60480`,
     `60480` (zero-pad). None si no parece una TX."""
     if not isinstance(tx, str):
         return None
     m = _TX_RE.match(tx.strip())
     return m.group(1).zfill(6) if m else None
+
+
+_norm_tx = norm_tx  # alias retro-compatible
 
 
 @lru_cache(maxsize=1)
@@ -42,13 +45,15 @@ def load_adapters_catalog() -> dict[str, Any]:
 
 
 def list_adapters() -> list[dict[str, Any]]:
-    """Todos los adaptadores relevados (name, url_dev, url_test, url_internal)."""
-    return list(load_adapters_catalog()["adapters"].values())
+    """Todos los adaptadores relevados (name, url_dev, url_test, url_internal).
+    Devuelve copias: mutar el resultado no envenena el cache."""
+    return [dict(v) for v in load_adapters_catalog()["adapters"].values()]
 
 
 def get_adapter(name: str) -> dict[str, Any] | None:
-    """Entrada de un adaptador por nombre exacto, o None."""
-    return load_adapters_catalog()["adapters"].get((name or "").strip())
+    """Entrada de un adaptador por nombre exacto (copia defensiva), o None."""
+    entry = load_adapters_catalog()["adapters"].get((name or "").strip())
+    return dict(entry) if entry else None
 
 
 def get_adapter_for_tx(tx: str) -> dict[str, Any] | None:
