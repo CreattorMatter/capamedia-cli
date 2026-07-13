@@ -396,7 +396,7 @@ def setup(
         )
 
 
-NAMESPACE_OPTIONS = ["tnd", "tpr", "csg", "tmp", "tia", "tct"]
+NAMESPACE_OPTIONS = ["tnd", "tpr", "csg", "tmp", "tia", "tct", "tmi"]
 
 # Params del MCP que nuestro CLI sabe proveer. Usado para validacion de schema en runtime.
 KNOWN_MCP_PARAMS = frozenset(
