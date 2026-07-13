@@ -29,6 +29,6 @@ paths:
 - Pinear versiones de Jackson, Netty, commons-lang3 si hay CVEs conocidos
 
 ## Helm
-- Capacity baseline oficial (`resources` + `hpa`): ver `bank-official-rules.md` Regla 9h.1.
+- Capacity + autoscaling baseline oficial (`resources` + **KEDA** + `servicemonitor`; HPA derogado 2026-07): ver `bank-official-rules.md` Regla 9h.1 / 9h.3.
 - `CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"` (valor exacto, no `"CAPA_COMUN"` viejo).
 - Route (OpenShift), NUNCA Ingress (Kubernetes).

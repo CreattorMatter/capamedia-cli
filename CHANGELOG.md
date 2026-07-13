@@ -6,6 +6,53 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-07-13
+
+### Changed — Autoscaling HPA → KEDA + baseline `JAVA_OPTIONS` 2026-07 + deps Prometheus
+
+Directiva de capacity del Banco Pichincha (2026-07): el autoscaling deja de usar
+**HPA** y pasa a **KEDA** (Kubernetes Event-Driven Autoscaling) disparado por
+métricas Prometheus, y se ajusta el baseline de `JAVA_OPTIONS`. Aplica a **todos
+los tipos** (WAS, BUS/IIB, ORQ y SOAP). Valores iniciales referenciales; se afinan
+tras las pruebas de rendimiento/carga.
+
+**`JAVA_OPTIONS` (Regla 9h.2):** nuevo valor
+`-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC` — se baja
+`MaxRAMPercentage` 70→60 y se elimina `-XX:InitialRAMPercentage=70.0`.
+`HELM_JAVA_OPTIONS_BASELINE` (check 7.5f) y `HELM_JAVA_OPTIONS_BASELINE_FIX`
+(autofix `fix_helm_java_options`) actualizados.
+
+**HPA derogado → KEDA (Regla 9h.1, ex `resources` + `hpa`):**
+- **Check 7.4** repurposeado: la presencia de un bloque `hpa:` en cualquier helm
+  por-entorno es **FAIL HIGH** (antes validaba `averageValue=100m`).
+- **Check 7.5d** repurposeado: exige el bloque `keda:` con `enabled: true`,
+  `minReplicaCount`, `maxReplicaCount` y `triggers` (antes `hpa.minReplicas`/
+  `maxReplicas`).
+- **Check 7.5g** nuevo: exige `servicemonitor:` con `enabled: true` y
+  `path: '/actuator/prometheus'` (fuente de métricas del trigger de KEDA).
+- Autofix `fix_helm_capacity_baseline`: sigue alineando `resources` y ahora
+  **elimina el bloque `hpa:`** derogado (cambio seguro). **No** inyecta
+  `keda:`/`servicemonitor:` — esos los generan las plantillas de migración
+  (cirugía YAML con contexto). Resultado: 7.4/7.5f/8.11 se autoresuelven; 7.5d y
+  7.5g quedan como HIGH hasta que la migración genere los bloques.
+- Regla 9h (SOAP): el `hpa:` de `values-dev.yml` también se reemplaza por
+  `keda:` + `servicemonitor:` (se mantiene `pdb.minAvailable: 1`).
+
+**Deps de métricas Prometheus (Regla 9h.3 nueva / Check 8.11):** `build.gradle`
+debe declarar `io.micrometer:micrometer-registry-prometheus`,
+`io.prometheus:simpleclient_hotspot:0.16.0` y
+`io.prometheus:simpleclient_common:0.16.0`. Autofix nuevo `fix_add_prometheus_deps`
+las inyecta en el `build.gradle` raíz si faltan (idempotente).
+
+**Plantillas y docs canónicas** sincronizadas: `bank-official-rules.md`
+(9h/9h.1/9h.2/9h.3), `migrate-rest-full.md`, `migrate-soap-full.md`,
+`checklist-rules.md`, `doublecheck.md`, `CLAUDE.md`, `security.md`, `check.md` y
+`validador-hex` (context + agents).
+
+Tests actualizados (`test_block_7_java_options`, `test_block_7_capacity` reescrito
+para KEDA, `test_checklist_rules`, `test_bank_autofix`) + nuevos casos de KEDA,
+ServiceMonitor y deps Prometheus.
+
 ## [0.30.0] - 2026-06-17
 
 ### Added — Catálogos del banco embebidos: Discovery OLA 2 + adaptadores BANCS

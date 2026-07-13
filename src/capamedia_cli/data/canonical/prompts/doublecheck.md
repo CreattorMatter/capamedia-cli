@@ -109,6 +109,19 @@ happy-path JSON son error salvo evidencia legacy explicita.
   placeholders `<...>` ni marcadores `TODO/TBD/PENDIENTE/VALIDAR/REVISAR`
   en lineas activas. Los comentarios inline en lineas `name:`/`value:` de env
   vars tambien son error.
+- Autoscaling via **KEDA** (HPA derogado 2026-07): los 3 Helm deben tener
+  `keda:` (`enabled: true`, `minReplicaCount`, `maxReplicaCount`, `triggers`)
+  + `servicemonitor:` (`enabled: true`, `path: '/actuator/prometheus'`) y
+  NINGUN bloque `hpa:`. El `namespace` del trigger y el `job=service-<app>` del
+  `query` se resuelven del componente migrado (no dejar placeholders). Checks
+  7.4/7.5d/7.5g. El autofix quita el `hpa:` pero NO inyecta `keda:` — si falta,
+  generarlo desde la plantilla de migracion.
+- `JAVA_OPTIONS` en los 3 Helm debe ser exactamente
+  `-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC`
+  (ajuste 2026-07: sin `InitialRAMPercentage`, MaxRAM 60). Check 7.5f.
+- `build.gradle` debe declarar las 3 deps de metricas Prometheus para KEDA
+  (`micrometer-registry-prometheus`, `simpleclient_hotspot:0.16.0`,
+  `simpleclient_common:0.16.0`). Check 8.11 (autofix `fix_add_prometheus_deps`).
 - `application*.yml` no puede definir `CCC_*: valor` ni usar defaults inline
   en placeholders `CCC_*`. Si referencia `${CCC_*}`, el valor concreto debe
   vivir en los 3 Helm (`dev/test/prod`).
@@ -159,6 +172,11 @@ Eso dispara internamente:
      del OLA del servicio (`1.1.0` OLA 1, `2.0.0` OLA 2) y Resilience4j debe
      usar el starter compatible con Spring Boot 3 (`resilience4j-spring-boot3`)
    - Regla 9: esqueleto inicial de `catalog-info.yaml`
+   - Regla 9h.1: `resources` al baseline + eliminar el bloque `hpa:` derogado
+     (el `keda:`/`servicemonitor:` lo genera la plantilla de migracion)
+   - Regla 9h.2: `JAVA_OPTIONS` al baseline
+     (`-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC`)
+   - Regla 9h.3 / 8.11: inyectar las 3 deps de metricas Prometheus para KEDA
    - Block 19: inyectar valores de `.capamedia/inputs/*.properties` a
      `application.yml` (si el owner ya entrego los archivos)
 

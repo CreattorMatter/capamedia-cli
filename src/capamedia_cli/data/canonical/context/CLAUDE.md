@@ -85,7 +85,7 @@ infrastructure/
 - Todo el codigo en INGLES
 - Config via ${CCC_*} env vars, NUNCA hardcodear
 - livenessProbe + readinessProbe en TODOS los Helm values
-- Capacity baseline oficial Helm (`resources` + `hpa`): ver `bank-official-rules.md` Regla 9h.1. Aplica a TODOS los entornos (dev/test/prod). Valores referenciales — definitivos tras performance tests.
+- Capacity + autoscaling baseline oficial Helm (`resources` + **KEDA** + `servicemonitor`): ver `bank-official-rules.md` Regla 9h.1. HPA quedo **derogado** (2026-07); usar `keda:` + `servicemonitor: path /actuator/prometheus` y las 3 deps Prometheus en `build.gradle` (Regla 9h.3). Aplica a TODOS los entornos (dev/test/prod) y tipos. Valores referenciales — definitivos tras performance/load tests.
 - **`lib-bnc-api-client` solo si BUS+invocaBancs:** declarar `com.pichincha.bnc:lib-bnc-api-client` (y las 3 `spring.autoconfigure.exclude` BANCS) SOLO si el servicio es `source_kind ∈ {bus,iib}` Y `invoca_bancs: true`. Para BUS sin BANCS (UMPs de Cyxtera/`UMPSeguridad`, ODM, autorizadores) NO va la lib — el PR-gate del banco la rechaza. Una referencia a `UMP*` NO implica BANCS. Validado por Check 8.9.
 - **`.capamedia/fabrics.json` mandatorio:** todo proyecto migrado declara `source_kind`, `tecnologia` e `invoca_bancs` en la raiz del workspace. Es la fuente de verdad del PR-gate oficial (`validate_hexagonal.py`).
 - **Service Purity:** services SOLO contienen @Override de la interfaz del input port. CERO metodos privados (validaciones, normalizaciones, formateos). Extraer a `application/util/<Domain>*Helper.java`

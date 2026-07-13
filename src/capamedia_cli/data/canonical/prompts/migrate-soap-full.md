@@ -189,10 +189,22 @@ Allowed common dependencies:
 
 - `spring-boot-starter-web`
 - `spring-boot-starter-web-services`
+- `spring-boot-starter-actuator`
 - `wsdl4j`
 - JAXB/WSDL generation dependencies produced by MCP
 - `lib-trace-logger`
 - JPA/Hikari/Oracle only when DB usage is proven
+
+**MANDATORY (Prometheus metrics for KEDA — Regla 9h.3 / Check 8.11):** add these
+3 dependencies so the `servicemonitor` can expose `/actuator/prometheus` and KEDA
+can scale by `http_server_requests_seconds_count`:
+
+```gradle
+// Prometheus metrics for KEDA autoscaling
+implementation 'io.micrometer:micrometer-registry-prometheus'
+implementation 'io.prometheus:simpleclient_hotspot:0.16.0'
+implementation 'io.prometheus:simpleclient_common:0.16.0'
+```
 
 Forbidden dependencies:
 
@@ -213,8 +225,8 @@ Forbidden dependencies:
 - Helm env var `name:` / `value:` lines must not contain inline comments.
 - No unresolved placeholders: `<pendiente_validar>`, `TODO`, `TBD`,
   `VALIDAR`, `REVISAR`, or `not_probed`.
-- Helm capacity baseline (Banco Pichincha official, 2026-05): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` + `hpa` baseline. Values are **referential** to let pods start; refined after performance tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required values: `resources.requests` (cpu=`50m`, memory=`100Mi`), `resources.limits` (cpu=`200m`, memory=`400Mi`), `hpa.minReplicas=1`, `hpa.maxReplicas=1`, HPA CPU `averageValue=100m`.
-- Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05, Alexis Padilla / Kyndryl): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Use ASCII only and separate flags with normal space `U+0020`; never paste `U+00A0` or invisible separators. Lets the JVM adapt heap to the pod's memory limit and use G1 with string deduplication. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
+- Helm capacity + KEDA baseline (Banco Pichincha official; capacity ajuste 2026-07): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` baseline plus **KEDA** autoscaling — `hpa:` is **deprecated**. Values are **referential** to let pods start; refined after performance/load tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required: `resources.requests` (cpu=`50m`, memory=`100Mi`), `resources.limits` (cpu=`200m`, memory=`400Mi`); `keda.enabled=true` with `minReplicaCount=1`/`maxReplicaCount=1` and a prometheus trigger on `http_server_requests_seconds_count`; `servicemonitor.enabled=true` with `path='/actuator/prometheus'`; **no `hpa:` block**. Validated by checklist 7.4/7.5d/7.5e/7.5g (HIGH).
+- Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official; capacity ajuste 2026-07): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Use ASCII only and separate flags with normal space `U+0020`; never paste `U+00A0` or invisible separators. The 2026-07 adjustment lowered `MaxRAMPercentage` 70→60 and dropped `InitialRAMPercentage`. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
 
 ## Peer Review Gate
 

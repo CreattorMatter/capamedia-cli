@@ -993,11 +993,13 @@ def fix_extract_inner_records_to_model(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
-# Regla 9h.1 — Helm capacity baseline oficial (capacity Banco Pichincha). Ajuste
-# 2026-05-29 (kevin armas): requests.memory 350Mi->100Mi, limits.memory
-# 500Mi->400Mi (cpu y hpa sin cambios). Aplica a helm/dev.yml, helm/test.yml,
-# helm/prod.yml. Valores referenciales hasta que pruebas de rendimiento definan
-# definitivos.
+# Regla 9h.1 — Helm capacity baseline oficial (capacity Banco Pichincha).
+# Ajuste 2026-05-29 (kevin armas): requests.memory 350Mi->100Mi, limits.memory
+# 500Mi->400Mi. Ajuste 2026-07: HPA derogado, el autoscaling pasa a KEDA. El
+# autofix ELIMINA el bloque `hpa:` (cambio seguro); la inyeccion de
+# `keda:`/`servicemonitor:` la hacen las plantillas de migracion. Aplica a
+# helm/dev.yml, helm/test.yml, helm/prod.yml. Valores referenciales hasta que
+# pruebas de rendimiento definan definitivos.
 # ---------------------------------------------------------------------------
 
 
@@ -1008,22 +1010,50 @@ HELM_CAPACITY_BASELINE_FIX: dict[str, str] = {
     "limits.memory": "400Mi",
 }
 
-_HELM_REPLICAS_FIX_RE = re.compile(
-    r"(?P<lead>^(?P<indent>\s*)(?P<key>minReplicas|maxReplicas)\s*:\s*)"
-    r"['\"]?(?P<value>[^'\"\s#]+)['\"]?",
-    re.MULTILINE,
-)
+
+def _strip_top_block(text: str, key: str) -> str:
+    """Elimina el bloque mapping top-level `key:` (la linea `key:` mas todas las
+    lineas mas indentadas que le siguen) de un YAML helm. Conserva la linea en
+    blanco separadora que quede tras el bloque. Idempotente si `key:` no existe.
+    """
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        m = re.match(rf"^(\s*){re.escape(key)}\s*:\s*(#.*)?$", line.rstrip("\n"))
+        if m:
+            key_indent = len(m.group(1))
+            i += 1
+            pending_blanks: list[str] = []
+            while i < n:
+                nxt = lines[i]
+                if not nxt.strip():
+                    pending_blanks.append(nxt)
+                    i += 1
+                    continue
+                indent = len(nxt) - len(nxt.lstrip(" "))
+                if indent <= key_indent:
+                    break
+                pending_blanks = []  # blanks pertenecian al interior del bloque
+                i += 1
+            out.extend(pending_blanks)  # re-emitir la separacion tras el bloque
+            continue
+        out.append(line)
+        i += 1
+    return "".join(out)
 
 
 def fix_helm_capacity_baseline(project_root: Path) -> BankAutofixResult:
-    """Aplica el baseline oficial de capacity en los 3 Helm:
-       - hpa.minReplicas = 1, hpa.maxReplicas = 1
+    """Aplica el baseline oficial de capacity/scaling en los 3 Helm:
        - resources.requests.cpu/memory y resources.limits.cpu/memory exactos.
+       - Elimina el bloque `hpa:` (derogado 2026-07; lo reemplaza KEDA).
 
     Idempotente. Si un archivo helm/<env>.yml no existe, lo saltea sin tocar.
-    Si declara `hpa:` pero faltan min/max, NO los inyecta (eso es bug de
-    scaffold y debe corregirse manualmente para evitar formato inconsistente).
-    Solo reescribe los valores que YA existen y difieren del baseline.
+    NO inyecta `keda:`/`servicemonitor:` (cirugia YAML con contexto que hacen
+    las plantillas de migracion); solo hace los cambios seguros: reescribir los
+    valores de `resources` que difieren y quitar el `hpa:` derogado.
     """
     result = BankAutofixResult(rule="9h.1", applied=False)
 
@@ -1048,14 +1078,10 @@ def fix_helm_capacity_baseline(project_root: Path) -> BankAutofixResult:
             continue
         original = text
 
-        # Fix hpa.minReplicas / hpa.maxReplicas -> "1"
-        def _replace_replicas(m: re.Match) -> str:
-            value = m.group("value").strip()
-            if value == "1":
-                return m.group(0)
-            return f"{m.group('lead')}1"
-
-        text = _HELM_REPLICAS_FIX_RE.sub(_replace_replicas, text)
+        # HPA derogado (2026-07): el autoscaling pasa a KEDA. Eliminar el bloque
+        # `hpa:` si existe (cambio seguro). El bloque `keda:` + `servicemonitor:`
+        # lo generan las plantillas de migracion, no el autofix.
+        text = _strip_top_block(text, "hpa")
 
         # Fix resources.requests/limits.cpu/memory
         # Procesamos el bloque resources: como un texto compuesto. Buscamos
@@ -1312,13 +1338,14 @@ def fix_bve_not_fatal(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
-# Regla 9h.2 — JAVA_OPTIONS baseline oficial en Helm env. Mail Alexis Padilla
-# (Kyndryl) / capacity Banco Pichincha 2026-05. Aplica a los 3 helms.
+# Regla 9h.2 — JAVA_OPTIONS baseline oficial en Helm env. Capacity Banco
+# Pichincha; ajuste 2026-07: MaxRAMPercentage 70->60 y sin InitialRAMPercentage.
+# Aplica a los 3 helms.
 # ---------------------------------------------------------------------------
 
 
 HELM_JAVA_OPTIONS_BASELINE_FIX: str = (
-    "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 "
+    "-XX:MaxRAMPercentage=60.0 "
     "-XX:+UseStringDeduplication -XX:+UseG1GC"
 )
 
@@ -1421,6 +1448,91 @@ def fix_helm_java_options(project_root: Path) -> BankAutofixResult:
             "JAVA_OPTIONS ya alineado al baseline o no declarado en ningun helm "
             "(si falta, declararlo manualmente en env: — el autofix no la inyecta)"
         )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Regla 8.11 — Deps de metricas Prometheus para KEDA. Directiva capacity Banco
+# Pichincha 2026-07: KEDA escala por http_server_requests_seconds_count via el
+# ServiceMonitor que expone /actuator/prometheus. Aplica a todos los tipos.
+# ---------------------------------------------------------------------------
+
+
+# (nombre de artefacto -> linea gradle a inyectar si falta). El nombre se usa
+# para deteccion idempotente; robusto a la version que fije el BOM.
+_PROMETHEUS_GRADLE_DEPS: list[tuple[str, str]] = [
+    (
+        "micrometer-registry-prometheus",
+        "    implementation 'io.micrometer:micrometer-registry-prometheus'",
+    ),
+    (
+        "simpleclient_hotspot",
+        "    implementation 'io.prometheus:simpleclient_hotspot:0.16.0'",
+    ),
+    (
+        "simpleclient_common",
+        "    implementation 'io.prometheus:simpleclient_common:0.16.0'",
+    ),
+]
+
+
+def fix_add_prometheus_deps(project_root: Path) -> BankAutofixResult:
+    """Inyecta las 3 deps de metricas Prometheus que KEDA necesita, si faltan.
+
+    Deteccion por nombre de artefacto (idempotente). Solo toca el build.gradle
+    raiz del microservicio (donde viven sus dependencias). Si no hay bloque
+    `dependencies {`, lo crea al final del archivo.
+    """
+    result = BankAutofixResult(rule="8.11", applied=False)
+
+    root_gradle = project_root / "build.gradle"
+    root_gradle_kts = project_root / "build.gradle.kts"
+    if root_gradle.exists():
+        target = root_gradle
+    elif root_gradle_kts.exists():
+        target = root_gradle_kts
+    else:
+        result.notes = "no se encontro build.gradle en la raiz"
+        return result
+
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError:
+        result.notes = "no se pudo leer build.gradle"
+        return result
+
+    missing = [(name, line) for name, line in _PROMETHEUS_GRADLE_DEPS if name not in text]
+    if not missing:
+        result.notes = "deps de metricas Prometheus ya presentes"
+        return result
+
+    block = "\n".join(line for _, line in missing)
+    m = re.search(r"dependencies\s*\{", text)
+    if not m:
+        new_text = (
+            text.rstrip()
+            + "\n\ndependencies {\n"
+            + "    // Prometheus metrics for KEDA autoscaling\n"
+            + block
+            + "\n}\n"
+        )
+    else:
+        insert_pos = m.end()
+        new_text = (
+            text[:insert_pos]
+            + "\n    // Prometheus metrics for KEDA autoscaling\n"
+            + block
+            + text[insert_pos:]
+        )
+
+    target.write_text(new_text, encoding="utf-8")
+    result.applied = True
+    result.files_modified = [target]
+    result.changes.append(
+        f"{target.relative_to(project_root)}: +"
+        + ", ".join(name for name, _ in missing)
+        + " (metricas Prometheus para KEDA)"
+    )
     return result
 
 
@@ -1958,7 +2070,7 @@ def run_bank_autofix(
         if rules
         else {
             "4", "6", "7", "8", "8b", "9", "9j", "5.6.5",
-            "9h.1", "9h.2", "8.7", "8.8", "8.10",
+            "9h.1", "9h.2", "8.7", "8.8", "8.10", "8.11",
         }
     )
     if requires_bancs is None:
@@ -1999,4 +2111,6 @@ def run_bank_autofix(
         results.append(fix_netty_full_tree_pin(project_root))
     if "8.10" in wanted:
         results.append(fix_webflux_security_pins(project_root))
+    if "8.11" in wanted:
+        results.append(fix_add_prometheus_deps(project_root))
     return results

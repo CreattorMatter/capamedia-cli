@@ -7,10 +7,9 @@ Cubre el check nuevo 7.5f en run_block_7:
 
 Tambien cubre el autofix fix_helm_java_options.
 
-Fuente: mail Alexis Padilla (Kyndryl) / capacity Banco Pichincha 2026-05.
-Valor exacto:
-  -XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0
-  -XX:+UseStringDeduplication -XX:+UseG1GC
+Fuente: capacity Banco Pichincha; ajuste 2026-07 (MaxRAMPercentage 70->60 y sin
+InitialRAMPercentage). Valor exacto:
+  -XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC
 """
 
 from __future__ import annotations
@@ -115,7 +114,7 @@ def test_7_5f_wrong_value_is_high(tmp_path: Path) -> None:
     """JAVA_OPTIONS con un flag distinto al baseline -> HIGH."""
     root = _make_minimal_project(tmp_path)
     bad = _baseline_helm_with_java_opts().replace(
-        "-XX:MaxRAMPercentage=70.0", "-XX:MaxRAMPercentage=80.0"
+        "-XX:MaxRAMPercentage=60.0", "-XX:MaxRAMPercentage=80.0"
     )
     _write_helm(root, "dev", bad)
     _write_helm(root, "test", _baseline_helm_with_java_opts())
@@ -146,12 +145,12 @@ def test_7_5f_missing_flag_is_high(tmp_path: Path) -> None:
 
 
 def test_7_5f_flag_order_does_not_matter(tmp_path: Path) -> None:
-    """Si los 4 flags estan presentes pero en otro orden -> PASS (es un set)."""
+    """Si los 3 flags estan presentes pero en otro orden -> PASS (es un set)."""
     root = _make_minimal_project(tmp_path)
     reordered_body = """\
 env:
   - name: "JAVA_OPTIONS"
-    value: "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxRAMPercentage=70.0 -XX:InitialRAMPercentage=70.0"
+    value: "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxRAMPercentage=60.0"
 """
     for env in ("dev", "test", "prod"):
         _write_helm(root, env, reordered_body)
@@ -166,7 +165,7 @@ def test_7_5f_non_breaking_space_is_high(tmp_path: Path) -> None:
     """U+00A0 parece espacio, pero OpenShift/Java no lo separa como flag."""
     root = _make_minimal_project(tmp_path)
     bad_value = HELM_JAVA_OPTIONS_BASELINE.replace(
-        " -XX:MaxRAMPercentage", "\u00a0-XX:MaxRAMPercentage"
+        " -XX:+UseStringDeduplication", "\u00a0-XX:+UseStringDeduplication"
     )
     body = f"""\
 env:
@@ -207,7 +206,7 @@ def test_autofix_replaces_wrong_value(tmp_path: Path) -> None:
         root,
         "dev",
         _baseline_helm_with_java_opts().replace(
-            "-XX:MaxRAMPercentage=70.0", "-XX:MaxRAMPercentage=80.0"
+            "-XX:MaxRAMPercentage=60.0", "-XX:MaxRAMPercentage=80.0"
         ),
     )
 
@@ -239,7 +238,7 @@ def test_autofix_replaces_non_breaking_space(tmp_path: Path) -> None:
     """Si JAVA_OPTIONS tiene U+00A0, el autofix reescribe con espacios ASCII."""
     root = _make_minimal_project(tmp_path)
     bad_value = HELM_JAVA_OPTIONS_BASELINE.replace(
-        " -XX:MaxRAMPercentage", "\u00a0-XX:MaxRAMPercentage"
+        " -XX:+UseStringDeduplication", "\u00a0-XX:+UseStringDeduplication"
     )
     f = _write_helm(
         root,

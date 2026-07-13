@@ -375,38 +375,52 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 **Rule 15 — `CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"`** (exact value) in the pipeline.
 
-**Rule 16 — Helm capacity baseline (Banco Pichincha official, 2026-05).** Every environment (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) must carry the official capacity baseline as published by the bank's capacity team (Dario Simbaña, 2026-05). Values are **referential** to let pods start; the bank refines them after performance tests.
+**Rule 16 — Helm capacity + KEDA baseline (Banco Pichincha official; capacity ajuste 2026-07).** Every environment (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) must carry the official `resources` baseline plus **KEDA** autoscaling (`hpa:` is deprecated) and a `servicemonitor`. Values are **referential** to let pods start; the bank refines them after performance/load tests.
 
 ```yaml
 resources:
   requests: { cpu: 50m,  memory: 100Mi }
   limits:   { cpu: 200m, memory: 400Mi }
 
-hpa:
-  minReplicas: 1
-  maxReplicas: 1
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: AverageValue
-          averageValue: 100m
+keda:
+  enabled: true
+  minReplicaCount: 1
+  maxReplicaCount: 1
+  triggers:
+    - authenticationRef:
+        kind: ClusterTriggerAuthentication
+        name: keda-trigger-auth-prometheus
+      metadata:
+        authModes: bearer
+        metricName: http_server_requests_seconds_count
+        namespace: tnd-middleware
+        query: 'sum(rate(http_server_requests_seconds_count{job="service-tnd-msa-sp-wsclientes0024"}[1m]))'
+        serverAddress: 'https://thanos-querier.openshift-monitoring.svc.cluster.local:9092'
+        threshold: '5'
+      type: prometheus
+  fallback:
+    failureThreshold: 3
+    replicas: 1
+servicemonitor:
+  enabled: true
+  path: '/actuator/prometheus'
 ```
 
-The MCP Fabrics from version `1.0.0-alpha.20260511172128` already generates these values. Earlier scaffolds (or hand edits) must be aligned. Any deviation from the 8 values above is **HIGH** unless `MIGRATION_REPORT.md` documents the post-performance result. See `bank-official-rules.md` Regla 9h.1 for the canonical source.
+Per-service values (resolve them from the migrated component — they are NOT `<...>` placeholders): `keda.triggers[].metadata.namespace` = the `metadata.namespace` of `catalog-info.yaml` (`tnd-msa-sp-*` → `tnd-middleware`); the `job=service-<spring.application.name>` inside `query` (e.g. `service-tnd-msa-sp-wsclientes0024`); `threshold` is referential (`'5'`, tuned after load tests). `serverAddress` and `authenticationRef` are fixed for the bank's OpenShift.
 
-**Rule 16b — Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official, 2026-05).** Every helm (`dev/test/prod`) must declare the env var `JAVA_OPTIONS` with this exact value (Alexis Padilla / Kyndryl mail, 2026-05):
+`hpa:` is **deprecated (2026-07)** — never leave an `hpa:` block. Any deviation from the `resources` values, a leftover `hpa:`, a missing `keda:` (enabled/min/max/triggers) or `servicemonitor:` is **HIGH** (checklist 7.4/7.5d/7.5e/7.5g) unless `MIGRATION_REPORT.md` documents the post-load result. Expose the actuator `prometheus` endpoint (`management.endpoints.web.exposure.include` including `prometheus`). See `bank-official-rules.md` Regla 9h.1 / 9h.3.
+
+**Rule 16b — Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official; capacity ajuste 2026-07).** Every helm (`dev/test/prod`) must declare the env var `JAVA_OPTIONS` with this exact value:
 
 ```yaml
 env:
   - name: "JAVA_OPTIONS"
-    value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
+    value: "-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
 ```
 
 Use only plain ASCII characters in the value. Separate flags with normal space `U+0020`; never paste non-breaking spaces (`U+00A0`) or invisible characters, because OpenShift/Java will not split them as JVM arguments.
 
-The 4 flags are referential — they let the JVM adapt heap to the pod's memory limit (Rule 16) and use G1 with string deduplication for the typical migration footprint. Values may change after performance tests; until then, deviating is **HIGH** (checklist Block 7.5f). See `bank-official-rules.md` Regla 9h.2.
+The 3 flags are referential — they let the JVM adapt heap to the pod's memory limit (Rule 16, now capped at 60%) and use G1 with string deduplication for the typical migration footprint. The 2026-07 adjustment lowered `MaxRAMPercentage` 70→60 and dropped `InitialRAMPercentage`. Values may change after performance tests; until then, deviating is **HIGH** (checklist Block 7.5f). See `bank-official-rules.md` Regla 9h.2.
 
 **Rule 16c — Helm values must be concrete:** NEVER leave placeholders `<...>` or
 `TODO/TBD/PENDIENTE/VALIDAR/REVISAR` in active Helm lines, and do not add inline
@@ -963,6 +977,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+    // Prometheus metrics for KEDA autoscaling (Regla 9h.3 / Check 8.11)
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'io.prometheus:simpleclient_hotspot:0.16.0'
+    implementation 'io.prometheus:simpleclient_common:0.16.0'
 
     // Corporate libraries
     implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
@@ -3046,7 +3065,7 @@ env:
 
 **Lookup `CCC_BANCS_BASE_URL`** from `prompts/tx-adapter-catalog.json` using the TX code.
 
-**All environments MUST carry the official capacity baseline** (Rule 16): `resources.requests/limits` exact values, `hpa.minReplicas=1`, `hpa.maxReplicas=1`, `averageValue=100m`, probes enabled. The bank refines these values after performance tests; until then, this baseline is mandatory.
+**All environments MUST carry the official capacity + KEDA baseline** (Rule 16): `resources.requests/limits` exact values, `keda.enabled=true` with `minReplicaCount=1`/`maxReplicaCount=1` and a prometheus trigger, `servicemonitor.enabled=true` with `path=/actuator/prometheus`, no `hpa:` block, probes enabled. The bank refines these values after performance/load tests; until then, this baseline is mandatory.
 
 #### GATE 5 — Helm Verification
 
@@ -3055,13 +3074,15 @@ env:
 grep "CCC_BANCS_BASE_URL" helm/values-dev.yaml
 # EXPECTED: present
 
-# CHECK 2: Capacity baseline aligned with bank's official values (Rule 16)
+# CHECK 2: Capacity + KEDA baseline aligned with bank's official values (Rule 16)
 for env in dev test prod; do
   echo "--- helm/$env.yml ---"
-  grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
+  grep -E "cpu:|memory:|minReplicaCount:|maxReplicaCount:|enabled:|/actuator/prometheus" "helm/$env.yml"
+  grep -E "^\s*hpa:" "helm/$env.yml" && echo "  !! hpa: is deprecated — remove it"
 done
 # EXPECTED: requests cpu=50m memory=100Mi; limits cpu=200m memory=400Mi;
-#           hpa min=1 max=1; averageValue=100m
+#           keda enabled=true min=1 max=1; servicemonitor path /actuator/prometheus;
+#           NO hpa: block
 
 # CHECK 3: Probes are configured
 grep "livenessProbe" helm/values-dev.yaml

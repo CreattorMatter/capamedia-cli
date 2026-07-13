@@ -95,7 +95,8 @@ def _by_id(results, check_id: str):
     return next(r for r in results if r.id == check_id)
 
 
-def _write_helm_hpa_file(root: Path, file_name: str, average_value: str) -> None:
+def _write_helm_hpa_file(root: Path, file_name: str) -> None:
+    """Helm con bloque hpa: (derogado 2026-07) — debe fallar el Check 7.4."""
     helm = root / "helm"
     helm.mkdir(exist_ok=True)
     (helm / file_name).write_text(
@@ -104,13 +105,30 @@ def _write_helm_hpa_file(root: Path, file_name: str, average_value: str) -> None
         "readinessProbe:\n"
         "  enabled: true\n"
         "hpa:\n"
-        "  metrics:\n"
-        "    - type: Resource\n"
-        "      resource:\n"
-        "        name: cpu\n"
-        "        target:\n"
-        "          type: AverageValue\n"
-        f"          averageValue: '{average_value}'\n",
+        "  minReplicas: 1\n"
+        "  maxReplicas: 1\n",
+        encoding="utf-8",
+    )
+
+
+def _write_helm_keda_file(root: Path, file_name: str) -> None:
+    """Helm con keda: + servicemonitor: (baseline 2026-07) — pasa el Check 7.4."""
+    helm = root / "helm"
+    helm.mkdir(exist_ok=True)
+    (helm / file_name).write_text(
+        "livenessProbe:\n"
+        "  enabled: true\n"
+        "readinessProbe:\n"
+        "  enabled: true\n"
+        "keda:\n"
+        "  enabled: true\n"
+        "  minReplicaCount: 1\n"
+        "  maxReplicaCount: 1\n"
+        "  triggers:\n"
+        "    - type: prometheus\n"
+        "servicemonitor:\n"
+        "  enabled: true\n"
+        "  path: '/actuator/prometheus'\n",
         encoding="utf-8",
     )
 
@@ -291,7 +309,8 @@ def test_block_7_fails_application_yml_ccc_assignment(tmp_path: Path) -> None:
     assert "helm/dev.yml" in check.suggested_fix
 
 
-def test_block_7_fails_hpa_average_value_400m(tmp_path: Path) -> None:
+def test_block_7_fails_when_hpa_present(tmp_path: Path) -> None:
+    """HPA derogado (2026-07): la presencia del bloque hpa: es HIGH (Check 7.4)."""
     root = _make_migrated(tmp_path)
     (root / "src/main/resources/application.yml").write_text(
         "spring:\n"
@@ -300,7 +319,7 @@ def test_block_7_fails_hpa_average_value_400m(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     for env in ("dev.yml", "test.yml", "prod.yml"):
-        _write_helm_hpa_file(root, env, "400m")
+        _write_helm_hpa_file(root, env)
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_7(ctx)
@@ -308,12 +327,12 @@ def test_block_7_fails_hpa_average_value_400m(tmp_path: Path) -> None:
     hpa_check = _by_id(results, "7.4")
     assert hpa_check.status == "fail"
     assert hpa_check.severity == "high"
-    assert "averageValue: '400m'" in hpa_check.detail
-    assert "debe ser '100m'" in hpa_check.detail
-    assert "helm\\dev.yml" in hpa_check.detail
+    assert "hpa" in hpa_check.detail.lower()
+    assert "derogado" in hpa_check.detail.lower()
 
 
-def test_block_7_passes_hpa_average_value_100m(tmp_path: Path) -> None:
+def test_block_7_passes_with_keda(tmp_path: Path) -> None:
+    """Con keda: + servicemonitor: y sin hpa:, el Check 7.4 pasa."""
     root = _make_migrated(tmp_path)
     (root / "src/main/resources/application.yml").write_text(
         "spring:\n"
@@ -322,13 +341,14 @@ def test_block_7_passes_hpa_average_value_100m(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     for env in ("dev.yml", "test.yml", "prod.yml"):
-        _write_helm_hpa_file(root, env, "100m")
+        _write_helm_keda_file(root, env)
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_7(ctx)
 
-    hpa_check = _by_id(results, "7.4")
-    assert hpa_check.status == "pass"
+    assert _by_id(results, "7.4").status == "pass"
+    assert _by_id(results, "7.5d").status == "pass"
+    assert _by_id(results, "7.5g").status == "pass"
 
 
 def test_block_7_fails_helm_env_placeholder_value(tmp_path: Path) -> None:

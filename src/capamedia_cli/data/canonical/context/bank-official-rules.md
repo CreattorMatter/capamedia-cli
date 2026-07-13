@@ -906,20 +906,24 @@ container:
 pdb:
   minAvailable: 1    # ← MANDATORIO para SOAP dev
 
-hpa:
-  minReplicas: 1
-  maxReplicas: 1
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: AverageValue
-          averageValue: 100m
+keda:
+  enabled: true
+  minReplicaCount: 1
+  maxReplicaCount: 1
+  triggers:
+    - type: prometheus
+      # (ver bloque completo en Regla 9h.1)
+servicemonitor:
+  enabled: true
+  path: '/actuator/prometheus'
 ```
 
 **NEVER**: omitir el `pdb:` block en `values-dev.yml` para SOAP. Es
 requerido por la infra del banco para PodDisruptionBudget.
+
+**HPA derogado (2026-07):** KEDA reemplaza a HPA tambien en SOAP. NO dejar el
+bloque `hpa:` en `values-dev.yml`; usar `keda:` + `servicemonitor:` como
+cualquier otro tipo. El `pdb:` sigue siendo obligatorio.
 
 **NO aplica a REST WebFlux** (el scaffold del MCP ya lo incluye cuando
 aplica).
@@ -932,19 +936,27 @@ banco (Block 16 — Helm & Kubernetes).
 
 ---
 
-## Regla 9h.1 - Capacity baseline oficial Helm (`resources` + `hpa`)
+## Regla 9h.1 - Capacity baseline oficial Helm (`resources` + KEDA)
 
-**Fuente:** mail del area de capacity del Banco Pichincha (Dario Simbaña,
-2026-05). Directiva oficial para garantizar el uso adecuado de recursos
-compartidos (CPU y memoria) en OpenShift.
+**Fuente:** area de capacity del Banco Pichincha (Dario Simbaña, 2026-05;
+ajuste de autoscaling 2026-07). Directiva oficial para garantizar el uso
+adecuado de recursos compartidos (CPU y memoria) en OpenShift.
 
 **Estado:** valores **referenciales**, no definitivos. Permiten que los pods se
 inicien correctamente. Los valores definitivos se definen en funcion de los
-resultados de las pruebas de rendimiento. El MCP Fabrics desde la version
-`1.0.0-alpha.20260511172128` ya genera estos valores por default.
+resultados de las pruebas de rendimiento (y de carga, para el `threshold` de
+KEDA).
+
+**Cambio 2026-07 — HPA derogado, autoscaling con KEDA:** el bloque `hpa:` queda
+**derogado**. El escalado pasa a **KEDA** (Kubernetes Event-Driven Autoscaling)
+disparado por metricas Prometheus, mas un `servicemonitor` que expone
+`/actuator/prometheus`. Aplica a **todos los tipos** (WAS, BUS/IIB y ORQ, y
+tambien SOAP — ver Regla 9h). Requiere las deps de metricas en `build.gradle`
+(Regla 9h.3 / Check 8.11).
 
 **MUST**: en `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`, el bloque
-`resources` y `hpa` deben tener exactamente estos valores:
+`resources` debe tener exactamente estos valores, y el autoscaling debe
+declararse con `keda:` + `servicemonitor:` (sin `hpa:`):
 
 ```yaml
 resources:
@@ -955,33 +967,85 @@ resources:
     cpu: 200m
     memory: 400Mi
 
-hpa:
-  minReplicas: 1
-  maxReplicas: 1
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: AverageValue
-          averageValue: 100m
+keda:
+  enabled: true
+  minReplicaCount: 1
+  maxReplicaCount: 1
+  triggers:
+    - authenticationRef:
+        kind: ClusterTriggerAuthentication
+        name: keda-trigger-auth-prometheus
+      metadata:
+        authModes: bearer
+        metricName: http_server_requests_seconds_count
+        namespace: tnd-middleware
+        query: 'sum(rate(http_server_requests_seconds_count{job="service-tnd-msa-sp-wsclientes0024"}[1m]))'
+        serverAddress: 'https://thanos-querier.openshift-monitoring.svc.cluster.local:9092'
+        threshold: '5'
+      type: prometheus
+  fallback:
+    failureThreshold: 3
+    replicas: 1
+servicemonitor:
+  enabled: true
+  path: '/actuator/prometheus'
 ```
 
+**Valores por-servicio (no son placeholders `<...>`, se resuelven al migrar):**
+- `keda.triggers[].metadata.namespace`: igual a `metadata.namespace` del
+  `catalog-info.yaml` (`tnd-msa-sp-*` -> `tnd-middleware`, etc.).
+- `job=service-<spring.application.name>` dentro del `query`: p. ej.
+  `service-tnd-msa-sp-wsclientes0024`.
+- `threshold`: **referencial** (`'5'`); se ajusta tras las pruebas de carga.
+- `serverAddress` y `authenticationRef`: fijos para OpenShift del banco.
+
 **NEVER**:
-- `replicaCount: 2` (o cualquier valor > 1). El baseline actual es 1 replica
-  hasta que las pruebas de rendimiento indiquen otro valor. Reglas viejas que
-  decian "produccion replicaCount >= 2" estan **derogadas** desde 2026-05.
-- `averageValue: 400m` generado por el scaffold/MCP viejo.
+- Dejar el bloque `hpa:` en cualquier helm (derogado 2026-07).
+- `replicaCount: 2` (o cualquier valor > 1) / `minReplicaCount`/`maxReplicaCount`
+  distintos de `1` mientras no haya resultados de pruebas de carga. Reglas
+  viejas tipo "produccion replicaCount >= 2" estan **derogadas** desde 2026-05.
 
 **Validacion (Block 7 del checklist, HIGH):**
-- 7.5b: `averageValue` distinto de `100m` en cualquier helm.
-- 7.5d: `hpa.minReplicas` o `maxReplicas` distintos de `1`.
+- 7.4: presencia del bloque `hpa:` (derogado) en cualquier helm.
+- 7.5d: `keda:` no declarado, o sin `enabled: true` /
+  `minReplicaCount`/`maxReplicaCount`/`triggers`.
 - 7.5e: cualquier valor de `resources.requests` o `resources.limits` distinto
   del baseline (`50m / 100Mi / 200m / 400Mi`).
+- 7.5g: `servicemonitor:` no declarado, sin `enabled: true`, o `path` distinto
+  de `/actuator/prometheus`.
 
-El autofix `fix_helm_capacity_baseline` aplica los 8 valores en los 3 helms
-si difieren. Es idempotente. Si las pruebas de rendimiento definen otros
-valores, documentar la decision en `MIGRATION_REPORT.md` antes del PR.
+El autofix `fix_helm_capacity_baseline` aplica los 4 valores de `resources` y
+**elimina el bloque `hpa:`** derogado (cambio seguro). La inyeccion de
+`keda:`/`servicemonitor:` la hacen las plantillas de migracion (cirugia YAML con
+contexto), no el autofix. Es idempotente. Si las pruebas de rendimiento/carga
+definen otros valores, documentar la decision en `MIGRATION_REPORT.md` antes del
+PR.
+
+---
+
+## Regla 9h.3 - Deps de metricas Prometheus para KEDA en `build.gradle`
+
+**Fuente:** area de capacity del Banco Pichincha (2026-07), junto con la
+habilitacion de KEDA (Regla 9h.1).
+
+**MUST**: `build.gradle` debe exponer las metricas que consume el trigger
+Prometheus de KEDA. Agregar en `dependencies`:
+
+```gradle
+// Prometheus metrics for KEDA autoscaling
+implementation 'io.micrometer:micrometer-registry-prometheus'
+implementation 'io.prometheus:simpleclient_hotspot:0.16.0'
+implementation 'io.prometheus:simpleclient_common:0.16.0'
+```
+
+Aplica a **todos los tipos** (WAS/MVC, BUS/IIB, ORQ/WebFlux): el
+`servicemonitor` expone `/actuator/prometheus` y KEDA escala por
+`http_server_requests_seconds_count`. El endpoint `prometheus` de actuator debe
+estar habilitado (`management.endpoints.web.exposure.include` con `prometheus`).
+
+**Validacion (Block 8 del checklist, HIGH):** Check 8.11 — falta alguna de las 3
+deps. El autofix `fix_add_prometheus_deps` las inyecta en el `build.gradle` raiz
+si faltan (idempotente).
 
 ---
 
@@ -1002,8 +1066,12 @@ definen en funcion de los resultados de las pruebas de rendimiento.
 ```yaml
 env:
   - name: "JAVA_OPTIONS"
-    value: "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
+    value: "-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"
 ```
+
+**Ajuste 2026-07:** se baja `MaxRAMPercentage` de `70.0` a `60.0` y se elimina
+`-XX:InitialRAMPercentage=70.0`. El heap ya no reserva el limite completo al
+arranque y se deja mas margen para metaspace, stacks nativos y picos.
 
 **MUST adicional:** el `value:` debe ser ASCII puro. Separar flags con espacio
 normal `U+0020`; no usar espacios no separables (`U+00A0`) ni otros caracteres
@@ -1011,9 +1079,8 @@ invisibles copiados desde texto enriquecido, porque OpenShift/Java no los
 separa como argumentos JVM.
 
 **Por que esos flags:**
-- `-XX:InitialRAMPercentage=70.0` y `-XX:MaxRAMPercentage=70.0`: el heap de
-  la JVM ocupa 70% del memory limit del pod, dejando margen para metaspace
-  y stacks nativos.
+- `-XX:MaxRAMPercentage=60.0`: el heap de la JVM ocupa como maximo el 60% del
+  memory limit del pod, dejando margen para metaspace y stacks nativos.
 - `-XX:+UseStringDeduplication`: G1 deduplica strings identicos en heap,
   bajando memory footprint en servicios con muchos textos repetidos
   (validaciones, mensajes de error, mapping).
@@ -1024,7 +1091,8 @@ separa como argumentos JVM.
 - Definir `JAVA_OPTIONS` con `-Xms` / `-Xmx` literales en lugar de los
   porcentajes oficiales. Con porcentajes la JVM se adapta al `memory.limits`
   del pod (que puede cambiar tras pruebas de rendimiento).
-- Omitir alguno de los 4 flags. El conjunto es atomico segun la directiva.
+- Omitir alguno de los 3 flags. El conjunto es atomico segun la directiva.
+- Reintroducir `-XX:InitialRAMPercentage` (removido en el ajuste 2026-07).
 
 **Validacion (Block 7 del checklist, HIGH):**
 - 7.5f: la env var `JAVA_OPTIONS` no esta declarada en algun helm, o su

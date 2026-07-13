@@ -155,11 +155,13 @@ Este prompt consolida de forma compacta y declarativa el checklist ejecutable **
 * **Check 7.3: application.yml variable mapping.** Las propiedades dinámicas de `application.yml` deben leerse desde variables de entorno mapeadas en Helm (`helm/values.yaml` o `helm/dev.yml`).
 * **Check 7.4: Configuración de Clientes.** Validar timeouts, configuración de reintentos y circuit breakers oficiales en la capa de integración de WebClient/SOAP.
 * **Check 7.5: Helm values por entorno.** Helm de `dev.yml`, `test.yml` y `prod.yml` presentes con estructura coherente.
-* **Check 7.5b: Helm HPA averageValue.** El valor `averageValue` en HPA de Helm debe ser exactamente `100m`. Divergencias -> **FAIL HIGH**.
+* **Check 7.4 / 7.5b: HPA derogado (KEDA).** HPA quedo derogado (capacity Banco Pichincha 2026-07). La presencia de un bloque `hpa:` en cualquier helm por-entorno es **FAIL HIGH**; el autoscaling se declara con `keda:` + `servicemonitor:`.
 * **Check 7.5c: Helm variables sin placeholders.** Valores en `dev.yml`, `test.yml` y `prod.yml` no deben contener comentarios inline dentro del par name/value ni placeholders literales `<...>`. Matches -> **FAIL HIGH**.
-* **Check 7.5d: Helm HPA replicas.** `minReplicas` y `maxReplicas` deben ser exactamente `1` en todos los ambientes. Desviaciones -> **FAIL HIGH**.
+* **Check 7.5d: Helm KEDA habilitado.** Cada helm por-entorno debe declarar `keda:` con `enabled: true`, `minReplicaCount`, `maxReplicaCount` y al menos un `triggers`. `minReplicaCount`/`maxReplicaCount` = `1` como baseline. Desviaciones -> **FAIL HIGH**.
 * **Check 7.5e: Helm resources.** Los bloques `resources.requests` y `resources.limits` de CPU y Memoria deben coincidir exactamente con los valores baseline oficiales del banco. Desviaciones -> **FAIL HIGH**.
-* **Check 7.5f: JAVA_OPTIONS baseline.** La variable `JAVA_OPTIONS` en el Helm debe tener exactamente el valor: `"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Desviaciones o caracteres corruptos (no-ASCII) -> **FAIL HIGH**.
+* **Check 7.5f: JAVA_OPTIONS baseline.** La variable `JAVA_OPTIONS` en el Helm debe tener exactamente el valor: `"-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Desviaciones o caracteres corruptos (no-ASCII) -> **FAIL HIGH**.
+* **Check 7.5g: ServiceMonitor Prometheus.** Cada helm por-entorno debe declarar `servicemonitor:` con `enabled: true` y `path: '/actuator/prometheus'` (fuente de metricas del trigger KEDA). Desviaciones -> **FAIL HIGH**.
+* **Check 8.11: Deps Prometheus/KEDA.** `build.gradle` debe declarar `io.micrometer:micrometer-registry-prometheus`, `io.prometheus:simpleclient_hotspot:0.16.0` y `io.prometheus:simpleclient_common:0.16.0`. Faltantes -> **FAIL HIGH** (autofix `fix_add_prometheus_deps`).
 
 ---
 

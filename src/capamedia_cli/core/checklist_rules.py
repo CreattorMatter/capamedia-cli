@@ -283,10 +283,6 @@ HELM_CAPACITY_BASELINE: dict[str, str] = {
     "limits.memory": "400Mi",
 }
 
-_REPLICAS_LINE_RE = re.compile(
-    r"^\s*(?P<key>minReplicas|maxReplicas)\s*:\s*['\"]?(?P<value>[^'\"\s#]+)",
-    re.MULTILINE,
-)
 _RESOURCES_BLOCK_RE = re.compile(
     r"^(?P<indent>\s*)resources\s*:\s*$\n"
     r"(?P<body>(?:(?P=indent)\s+.*\n)*)",
@@ -297,31 +293,110 @@ _RESOURCE_LEAF_RE = re.compile(
 )
 
 
-def _helm_hpa_replicas_issues(helm_files: list[Path], root: Path) -> list[str]:
-    """Check 7.5d helper: minReplicas y maxReplicas deben ser '1' en cada helm."""
+# Helm por-entorno donde aplican los baselines de capacity/scaling: los 3
+# dev/test/prod.yml y sus variantes values-<env>.(yml|yaml) SOAP que existan.
+def _env_helm_files(helm_dir: Path) -> list[Path]:
+    names = (
+        "dev.yml",
+        "test.yml",
+        "prod.yml",
+        "values-dev.yml",
+        "values-test.yml",
+        "values-prod.yml",
+        "values-dev.yaml",
+        "values-test.yaml",
+        "values-prod.yaml",
+    )
+    return [helm_dir / n for n in names if (helm_dir / n).exists()]
+
+
+def _extract_top_block(text: str, key: str) -> str | None:
+    """Devuelve el texto del bloque mapping top-level `key:` (la linea `key:`
+    mas todas las lineas que le siguen con mayor indentacion), o None si el
+    `key:` no aparece como mapping de nivel superior."""
+    lines = text.splitlines()
+    start: int | None = None
+    key_indent = 0
+    for i, line in enumerate(lines):
+        m = re.match(rf"^(\s*){re.escape(key)}\s*:", line)
+        if m:
+            start = i
+            key_indent = len(m.group(1))
+            break
+    if start is None:
+        return None
+    block = [lines[start]]
+    for line in lines[start + 1:]:
+        if not line.strip():
+            block.append(line)
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= key_indent:
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
+# KEDA reemplaza a HPA como estandar de autoscaling (directiva capacity Banco
+# Pichincha 2026-07). El bloque `hpa:` quedo derogado: su presencia es bug.
+def _helm_hpa_present_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.4 helper: el bloque `hpa:` esta derogado (lo reemplaza KEDA).
+    Su presencia en cualquier helm por-entorno es un issue HIGH."""
     issues: list[str] = []
     for f in helm_files:
         text = _read_or_empty(f)
-        if "hpa" not in text.lower():
+        if re.search(r"^\s*hpa\s*:", text, re.MULTILINE):
+            issues.append(
+                f"{_relative_display(f, root)} - bloque `hpa:` presente "
+                "(derogado; reemplazar por `keda:` + `servicemonitor:`)"
+            )
+    return issues
+
+
+def _helm_keda_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.5d helper: cada helm por-entorno debe declarar el bloque `keda:`
+    con `enabled: true`, `minReplicaCount`, `maxReplicaCount` y al menos un
+    trigger. Los valores concretos (threshold, query, namespace) son
+    referenciales y se afinan tras las pruebas de carga: no se validan aca."""
+    issues: list[str] = []
+    for f in helm_files:
+        block = _extract_top_block(_read_or_empty(f), "keda")
+        rel = _relative_display(f, root)
+        if block is None:
+            issues.append(f"{rel} - bloque `keda:` no declarado")
             continue
-        found_min = False
-        found_max = False
-        for m in _REPLICAS_LINE_RE.finditer(text):
-            key = m.group("key")
-            value = m.group("value").strip()
-            if key == "minReplicas":
-                found_min = True
-            elif key == "maxReplicas":
-                found_max = True
-            if value != "1":
-                rel = _relative_display(f, root)
-                issues.append(f"{rel} - hpa.{key}: '{value}' -> debe ser '1'")
-        # Si el archivo declara `hpa:` pero no tiene min/max, eso tambien es bug.
-        if re.search(r"^\s*hpa\s*:\s*$", text, re.MULTILINE):
-            if not found_min:
-                issues.append(f"{_relative_display(f, root)} - hpa.minReplicas no declarado (esperado '1')")
-            if not found_max:
-                issues.append(f"{_relative_display(f, root)} - hpa.maxReplicas no declarado (esperado '1')")
+        if not re.search(r"^\s*enabled\s*:\s*true\b", block, re.MULTILINE):
+            issues.append(f"{rel} - keda.enabled debe ser true")
+        if not re.search(r"^\s*minReplicaCount\s*:", block, re.MULTILINE):
+            issues.append(f"{rel} - keda.minReplicaCount no declarado")
+        if not re.search(r"^\s*maxReplicaCount\s*:", block, re.MULTILINE):
+            issues.append(f"{rel} - keda.maxReplicaCount no declarado")
+        if not re.search(r"^\s*triggers\s*:", block, re.MULTILINE):
+            issues.append(f"{rel} - keda.triggers no declarado")
+    return issues
+
+
+def _helm_servicemonitor_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.5g helper: cada helm por-entorno debe declarar `servicemonitor:`
+    con `enabled: true` y `path: '/actuator/prometheus'` (KEDA escala por las
+    metricas que expone ese endpoint)."""
+    issues: list[str] = []
+    for f in helm_files:
+        block = _extract_top_block(_read_or_empty(f), "servicemonitor")
+        rel = _relative_display(f, root)
+        if block is None:
+            issues.append(f"{rel} - bloque `servicemonitor:` no declarado")
+            continue
+        if not re.search(r"^\s*enabled\s*:\s*true\b", block, re.MULTILINE):
+            issues.append(f"{rel} - servicemonitor.enabled debe ser true")
+        if not re.search(
+            r"^\s*path\s*:\s*['\"]?/actuator/prometheus['\"]?\s*$",
+            block,
+            re.MULTILINE,
+        ):
+            issues.append(
+                f"{rel} - servicemonitor.path debe ser '/actuator/prometheus'"
+            )
     return issues
 
 
@@ -367,11 +442,13 @@ def _helm_resources_baseline_issues(helm_files: list[Path], root: Path) -> list[
     return issues
 
 
-# Baseline oficial de JAVA_OPTIONS — mail Alexis Padilla / Kyndryl, capacity
-# Banco Pichincha 2026-05. Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml.
-# Valores referenciales hasta que las pruebas de rendimiento definan definitivos.
+# Baseline oficial de JAVA_OPTIONS — capacity Banco Pichincha. Ajuste 2026-07:
+# se baja MaxRAMPercentage 70->60 y se elimina InitialRAMPercentage (la JVM ya no
+# reserva el heap completo al arranque; deja mas margen para picos y nativo).
+# Aplica a helm/dev.yml, helm/test.yml, helm/prod.yml. Valores referenciales hasta
+# que las pruebas de rendimiento definan definitivos.
 HELM_JAVA_OPTIONS_BASELINE: str = (
-    "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 "
+    "-XX:MaxRAMPercentage=60.0 "
     "-XX:+UseStringDeduplication -XX:+UseG1GC"
 )
 
@@ -2589,46 +2666,42 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
         else:
             results.append(CheckResult("7.3", "Block 7", "Helm probes en todos los values", "pass"))
 
-        # 7.4 - Helm HPA averageValue oficial del banco
-        hpa_files = [
-            helm_dir / name
-            for name in (
-                "dev.yml",
-                "test.yml",
-                "prod.yml",
-                "values-dev.yml",
-                "values-test.yml",
-                "values-prod.yml",
-                "values-dev.yaml",
-                "values-test.yaml",
-                "values-prod.yaml",
+        # 7.4 - HPA derogado: KEDA es el estandar de autoscaling (directiva
+        # capacity Banco Pichincha 2026-07). El bloque `hpa:` no debe existir en
+        # ningun helm por-entorno; su reemplazo es `keda:` + `servicemonitor:`.
+        env_helm_files = _env_helm_files(helm_dir)
+        if env_helm_files:
+            hpa_present_issues = _helm_hpa_present_issues(
+                env_helm_files, ctx.migrated_path
             )
-            if (helm_dir / name).exists()
-        ]
-        wrong_hpa_values: list[str] = []
-        checked_hpa_values = 0
-        for f in hpa_files:
-            text = _read_or_empty(f)
-            for match in re.finditer(r"(?m)^\s*averageValue\s*:\s*[\"']?([^\"'\s#]+)", text):
-                checked_hpa_values += 1
-                value = match.group(1)
-                if value != "100m":
-                    rel = _relative_display(f, ctx.migrated_path)
-                    wrong_hpa_values.append(f"{rel} - averageValue: '{value}' -> debe ser '100m'")
-        if wrong_hpa_values:
-            results.append(
-                CheckResult(
-                    "7.4",
-                    "Block 7",
-                    "Helm HPA averageValue",
-                    "fail",
-                    severity="high",
-                    detail="; ".join(wrong_hpa_values),
-                    suggested_fix="Cambiar averageValue a 100m en helm/dev.yml, helm/test.yml y helm/prod.yml.",
+            if hpa_present_issues:
+                results.append(
+                    CheckResult(
+                        "7.4",
+                        "Block 7",
+                        "Helm sin HPA (derogado por KEDA)",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(hpa_present_issues[:8]),
+                        suggested_fix=(
+                            "HPA quedo derogado (capacity Banco Pichincha, "
+                            "2026-07). Eliminar el bloque `hpa:` de los 3 helms y "
+                            "declarar `keda:` (enabled/minReplicaCount/"
+                            "maxReplicaCount/triggers) + `servicemonitor:`. El "
+                            "autofix fix_helm_capacity_baseline elimina el hpa; el "
+                            "bloque keda lo generan las plantillas de migracion."
+                        ),
+                    )
                 )
-            )
-        elif checked_hpa_values:
-            results.append(CheckResult("7.4", "Block 7", "Helm HPA averageValue", "pass"))
+            else:
+                results.append(
+                    CheckResult(
+                        "7.4",
+                        "Block 7",
+                        "Helm sin HPA (derogado por KEDA)",
+                        "pass",
+                    )
+                )
 
         # 7.5c - Env vars de Helm sin placeholders documentales ni comentarios
         env_hygiene_issues: list[str] = []
@@ -2662,30 +2735,29 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                 )
             )
 
-        # 7.5d - hpa.minReplicas y maxReplicas = 1 (baseline oficial 2026-05)
-        # 7.5e - resources.requests / resources.limits con valores exactos del banco
-        # Origen: mail Dario Simbaña, area de capacity Banco Pichincha. Aplica a
-        # los 3 helms (dev/test/prod). Ver bank-official-rules.md Regla 9h.1.
-        helm_files = _helm_yaml_files(helm_dir)
-        if helm_files:
-            hpa_replicas_issues = _helm_hpa_replicas_issues(
-                helm_files, ctx.migrated_path
-            )
-            if hpa_replicas_issues:
+        # 7.5d - KEDA habilitado (reemplaza HPA). Directiva capacity Banco
+        # Pichincha 2026-07: el autoscaling pasa a KEDA + ServiceMonitor
+        # Prometheus. Cada helm por-entorno debe declarar el bloque `keda:` con
+        # enabled/minReplicaCount/maxReplicaCount/triggers. Los valores concretos
+        # (threshold, query, namespace) son referenciales.
+        if env_helm_files:
+            keda_issues = _helm_keda_issues(env_helm_files, ctx.migrated_path)
+            if keda_issues:
                 results.append(
                     CheckResult(
                         "7.5d",
                         "Block 7",
-                        "Helm hpa.minReplicas=1 y maxReplicas=1",
+                        "Helm KEDA habilitado",
                         "fail",
                         severity="high",
-                        detail="; ".join(hpa_replicas_issues[:8]),
+                        detail="; ".join(keda_issues[:8]),
                         suggested_fix=(
-                            "Baseline oficial del banco (Dario Simbaña, 2026-05): "
-                            "minReplicas=1, maxReplicas=1 en los 3 helms. Reglas "
-                            "viejas tipo 'produccion replicaCount >= 2' estan "
-                            "derogadas. Si las pruebas de rendimiento definieron "
-                            "otros valores, documentarlo en MIGRATION_REPORT.md."
+                            "Directiva capacity Banco Pichincha (2026-07): el "
+                            "autoscaling se hace con KEDA, no HPA. Declarar el "
+                            "bloque `keda:` con enabled:true, minReplicaCount:1, "
+                            "maxReplicaCount:1 y un trigger prometheus sobre "
+                            "http_server_requests_seconds_count en los 3 helms. "
+                            "Ver bank-official-rules.md Regla 9h.1."
                         ),
                     )
                 )
@@ -2694,11 +2766,16 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     CheckResult(
                         "7.5d",
                         "Block 7",
-                        "Helm hpa.minReplicas=1 y maxReplicas=1",
+                        "Helm KEDA habilitado",
                         "pass",
                     )
                 )
 
+        # 7.5e - resources.requests / resources.limits con valores exactos del
+        # banco. Origen: capacity Banco Pichincha. Aplica a los helms declarados.
+        # Ver bank-official-rules.md Regla 9h.1.
+        helm_files = _helm_yaml_files(helm_dir)
+        if helm_files:
             resources_issues = _helm_resources_baseline_issues(
                 helm_files, ctx.migrated_path
             )
@@ -2730,8 +2807,8 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     )
                 )
 
-            # 7.5f - JAVA_OPTIONS env var baseline oficial (Alexis Padilla,
-            # capacity Banco Pichincha, 2026-05). Aplica a los 3 helms.
+            # 7.5f - JAVA_OPTIONS env var baseline oficial (capacity Banco
+            # Pichincha; ajuste 2026-07). Aplica a los 3 helms.
             # Ver bank-official-rules.md Regla 9h.2.
             java_opts_issues = _helm_java_options_issues(
                 helm_files, ctx.migrated_path
@@ -2746,11 +2823,9 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         severity="high",
                         detail="; ".join(java_opts_issues[:6]),
                         suggested_fix=(
-                            "Baseline oficial del banco (Alexis Padilla, 2026-05) "
+                            "Baseline oficial del banco (capacity, ajuste 2026-07) "
                             "para JAVA_OPTIONS: "
-                            "'-XX:InitialRAMPercentage=70.0 "
-                            "-XX:MaxRAMPercentage=70.0 "
-                            "-XX:+UseStringDeduplication -XX:+UseG1GC'. "
+                            f"'{HELM_JAVA_OPTIONS_BASELINE}'. "
                             "Declarar la env var en los 3 helms (dev/test/prod). "
                             "Si las pruebas de rendimiento definieron otros valores, "
                             "documentarlo en MIGRATION_REPORT.md."
@@ -2767,10 +2842,58 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     )
                 )
 
+        # 7.5g - ServiceMonitor Prometheus habilitado (KEDA escala por las
+        # metricas que expone /actuator/prometheus). Directiva capacity Banco
+        # Pichincha 2026-07. Aplica a los helms por-entorno.
+        if env_helm_files:
+            sm_issues = _helm_servicemonitor_issues(
+                env_helm_files, ctx.migrated_path
+            )
+            if sm_issues:
+                results.append(
+                    CheckResult(
+                        "7.5g",
+                        "Block 7",
+                        "Helm ServiceMonitor Prometheus habilitado",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(sm_issues[:8]),
+                        suggested_fix=(
+                            "Declarar el bloque `servicemonitor:` con "
+                            "enabled:true y path:'/actuator/prometheus' en los 3 "
+                            "helms. Es la fuente de metricas que consume el "
+                            "trigger prometheus de KEDA. Ver Regla 9h.1."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.5g",
+                        "Block 7",
+                        "Helm ServiceMonitor Prometheus habilitado",
+                        "pass",
+                    )
+                )
+
     return results
 
 
 # -- Block 8: Versiones y dependencias -------------------------------------
+
+
+# Deps de metricas Prometheus que KEDA necesita para escalar por
+# http_server_requests_seconds_count (directiva capacity Banco Pichincha
+# 2026-07). Deteccion por nombre de artefacto -> robusta a la version manejada
+# por el BOM de Spring Boot. Aplica a todos los tipos (was/bus/orq): el
+# ServiceMonitor expone /actuator/prometheus para el trigger de KEDA.
+KEDA_METRICS_GRADLE_DEPS: dict[str, str] = {
+    "micrometer-registry-prometheus": (
+        "io.micrometer:micrometer-registry-prometheus"
+    ),
+    "simpleclient_hotspot": "io.prometheus:simpleclient_hotspot:0.16.0",
+    "simpleclient_common": "io.prometheus:simpleclient_common:0.16.0",
+}
 
 
 def run_block_8(ctx: CheckContext) -> list[CheckResult]:
@@ -3140,6 +3263,47 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                         detail="pins de seguridad WebFlux NO-Netty completos",
                     )
                 )
+
+    # 8.11 - Deps de metricas Prometheus para KEDA (directiva capacity Banco
+    # Pichincha 2026-07). Aplica a todos los tipos: KEDA escala por
+    # http_server_requests_seconds_count via el ServiceMonitor que expone
+    # /actuator/prometheus. Deteccion por nombre de artefacto (robusta a version).
+    combined_gradle = "\n".join(_read_or_empty(gf) for gf in gradle_files)
+    missing_prom = [
+        coord
+        for artifact, coord in KEDA_METRICS_GRADLE_DEPS.items()
+        if artifact not in combined_gradle
+    ]
+    title_811 = "Deps Prometheus/KEDA en build.gradle"
+    if missing_prom:
+        results.append(
+            CheckResult(
+                "8.11",
+                "Block 8",
+                title_811,
+                "fail",
+                severity="high",
+                detail="faltan: " + ", ".join(missing_prom),
+                suggested_fix=(
+                    "Agregar en dependencies: implementation "
+                    "'io.micrometer:micrometer-registry-prometheus'; implementation "
+                    "'io.prometheus:simpleclient_hotspot:0.16.0'; implementation "
+                    "'io.prometheus:simpleclient_common:0.16.0'. Exponen las "
+                    "metricas que consume el trigger de KEDA. "
+                    "Autofix: fix_add_prometheus_deps."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "8.11",
+                "Block 8",
+                title_811,
+                "pass",
+                detail="deps de metricas Prometheus para KEDA presentes",
+            )
+        )
 
     return results
 

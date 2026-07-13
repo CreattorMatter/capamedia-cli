@@ -68,13 +68,15 @@ grep -rn "password\|secret\|token" src/main/java/ | grep -iv "TODO\|TBD\|config\
 # Probes en todos los archivos
 grep -c "livenessProbe\|readinessProbe" helm/*.yml
 
-# Capacity baseline oficial (bank-official-rules.md Regla 9h.1)
-# Valores referenciales del banco — definitivos tras performance tests
+# Capacity + KEDA baseline oficial (bank-official-rules.md Regla 9h.1)
+# Valores referenciales del banco — definitivos tras performance/load tests
 for env in dev test prod; do
-  grep -E "cpu:|memory:|minReplicas:|maxReplicas:|averageValue:" "helm/$env.yml"
+  grep -E "cpu:|memory:|minReplicaCount:|maxReplicaCount:|enabled:|/actuator/prometheus" "helm/$env.yml"
+  grep -E "^\s*hpa:" "helm/$env.yml" && echo "  !! hpa: derogado — usar keda:"
 done
 # Expected: requests cpu=50m mem=100Mi; limits cpu=200m mem=400Mi;
-#           hpa min=1 max=1; averageValue=100m
+#           keda enabled=true min=1 max=1; servicemonitor path /actuator/prometheus;
+#           SIN hpa:
 ```
 
 ## Output
