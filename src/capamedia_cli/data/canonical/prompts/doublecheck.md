@@ -122,6 +122,11 @@ happy-path JSON son error salvo evidencia legacy explicita.
 - `build.gradle` debe declarar las 3 deps de metricas Prometheus para KEDA
   (`micrometer-registry-prometheus`, `simpleclient_hotspot:0.16.0`,
   `simpleclient_common:0.16.0`). Check 8.11 (autofix `fix_add_prometheus_deps`).
+- `build.gradle` debe declarar el plugin de peer review del banco en la version
+  vigente: `id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'`.
+  Los scaffolds viejos de Fabrics traen `1.1.0`. Check 8.12 (autofix
+  `fix_peer_review_plugin_version`, que solo actualiza una declaracion ya
+  existente — ver Paso 2.5).
 - `application*.yml` no puede definir `CCC_*: valor` ni usar defaults inline
   en placeholders `CCC_*`. Si referencia `${CCC_*}`, el valor concreto debe
   vivir en los 3 Helm (`dev/test/prod`).
@@ -187,6 +192,23 @@ Eso dispara internamente:
 El doublecheck tambien debe revisar el gate del plugin
 `frm-plugin-peer-review-gradle`, porque Azure ejecuta `gradle build -x test`
 pero el task `architectureReview` sigue corriendo.
+
+**Version del plugin (Check 8.12):** el bloque `plugins {}` de `build.gradle`
+debe declarar la version vigente:
+
+```groovy
+plugins {
+    id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'
+}
+```
+
+Una version menor (los scaffolds viejos de Fabrics traen `1.1.0`) es
+**FAIL HIGH**. El autofix `fix_peer_review_plugin_version` actualiza una
+declaracion existente, pero **NO inyecta el plugin si falta del todo**: el
+plugin se resuelve desde el repo interno del banco declarado en
+`settings.gradle`, y agregar un `id` que Gradle no pueda resolver rompe el build
+entero. Si el check reporta "falta el plugin", agregarlo a mano y verificar que
+`settings.gradle` tenga el repositorio del banco.
 
 ```bash
 cd destino/<namespace>-msa-sp-<svc>

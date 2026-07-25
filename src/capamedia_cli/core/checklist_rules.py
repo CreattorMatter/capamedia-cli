@@ -19,6 +19,8 @@ import yaml
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
+    PEER_REVIEW_PLUGIN_ID,
+    PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
@@ -2896,6 +2898,16 @@ KEDA_METRICS_GRADLE_DEPS: dict[str, str] = {
 }
 
 
+# Plugin de peer review del banco. Acepta las dos sintaxis de Gradle:
+# Groovy `id 'x' version '1.1.2'` y Kotlin DSL `id("x") version "1.1.2"`.
+_PEER_REVIEW_PLUGIN_RE = re.compile(
+    r"id\s*(?:\(\s*[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"']\s*\)"
+    r"|[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"'])"
+    r"\s*version\s*(?:\(\s*)?[\"']([^\"']+)[\"']",
+    re.IGNORECASE,
+)
+
+
 def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     """Block 8: Spring Boot baseline from the live BPTPSRE rules."""
     results: list[CheckResult] = []
@@ -3304,6 +3316,82 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 detail="deps de metricas Prometheus para KEDA presentes",
             )
         )
+
+    # 8.12 - Version del plugin de peer review del banco. Azure corre
+    # `gradle build -x test` pero el task `architectureReview` del plugin sigue
+    # ejecutandose y bloquea el PR; un scaffold viejo de Fabrics trae una
+    # version anterior a la vigente. Se acepta >= (igual criterio que 8.1).
+    title_812 = "Version del plugin peer-review del banco"
+    plugin_versions = [
+        (gf, m.group(1))
+        for gf in gradle_files
+        for m in _PEER_REVIEW_PLUGIN_RE.finditer(_read_or_empty(gf))
+    ]
+    if not plugin_versions:
+        declared = any(PEER_REVIEW_PLUGIN_ID in _read_or_empty(gf) for gf in gradle_files)
+        detail = (
+            f"plugin `{PEER_REVIEW_PLUGIN_ID}` declarado sin version literal"
+            if declared
+            else f"falta el plugin `{PEER_REVIEW_PLUGIN_ID}` en el bloque plugins"
+        )
+        results.append(
+            CheckResult(
+                "8.12",
+                "Block 8",
+                title_812,
+                "fail",
+                severity="high",
+                detail=detail,
+                suggested_fix=(
+                    "Declarar en el bloque plugins de build.gradle: "
+                    f"`id '{PEER_REVIEW_PLUGIN_ID}' version "
+                    f"'{PEER_REVIEW_PLUGIN_VERSION}'`. Es el gate de "
+                    "architectureReview que Azure corre en el PR. "
+                    "Autofix: fix_peer_review_plugin_version (solo actualiza una "
+                    "declaracion existente; si falta del todo hay que agregarla a "
+                    "mano porque el plugin debe resolverse desde el repo del banco)."
+                ),
+            )
+        )
+    else:
+        outdated = [
+            f"{_relative_display(path, ctx.migrated_path)}={version}"
+            for path, version in plugin_versions
+            if is_version_lower(version, PEER_REVIEW_PLUGIN_VERSION)
+        ]
+        if outdated:
+            results.append(
+                CheckResult(
+                    "8.12",
+                    "Block 8",
+                    title_812,
+                    "fail",
+                    severity="high",
+                    detail=(
+                        f"plugin peer-review menor a {PEER_REVIEW_PLUGIN_VERSION}: "
+                        + ", ".join(outdated)
+                    ),
+                    suggested_fix=(
+                        f"Actualizar a `id '{PEER_REVIEW_PLUGIN_ID}' version "
+                        f"'{PEER_REVIEW_PLUGIN_VERSION}'`. "
+                        "Autofix: fix_peer_review_plugin_version."
+                    ),
+                )
+            )
+        else:
+            versions = ", ".join(
+                f"{_relative_display(path, ctx.migrated_path)}={version}"
+                for path, version in plugin_versions
+            )
+            results.append(
+                CheckResult(
+                    "8.12",
+                    "Block 8",
+                    title_812,
+                    "pass",
+                    detail=f"plugin peer-review >= {PEER_REVIEW_PLUGIN_VERSION}: {versions}",
+                )
+            )
 
     return results
 

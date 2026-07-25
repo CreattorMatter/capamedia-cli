@@ -162,6 +162,7 @@ Este prompt consolida de forma compacta y declarativa el checklist ejecutable **
 * **Check 7.5f: JAVA_OPTIONS baseline.** La variable `JAVA_OPTIONS` en el Helm debe tener exactamente el valor: `"-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Desviaciones o caracteres corruptos (no-ASCII) -> **FAIL HIGH**.
 * **Check 7.5g: ServiceMonitor Prometheus.** Cada helm por-entorno debe declarar `servicemonitor:` con `enabled: true` y `path: '/actuator/prometheus'` (fuente de metricas del trigger KEDA). Desviaciones -> **FAIL HIGH**.
 * **Check 8.11: Deps Prometheus/KEDA.** `build.gradle` debe declarar `io.micrometer:micrometer-registry-prometheus`, `io.prometheus:simpleclient_hotspot:0.16.0` y `io.prometheus:simpleclient_common:0.16.0`. Faltantes -> **FAIL HIGH** (autofix `fix_add_prometheus_deps`).
+* **Check 8.12: Version del plugin peer-review del banco.** El bloque `plugins {}` de `build.gradle` debe declarar `id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'` (version vigente 2026-07; los scaffolds viejos de Fabrics traen `1.1.0`). Version menor, o plugin ausente/sin version literal -> **FAIL HIGH**. Se acepta una version mayor (mismo criterio que 8.1). Autofix `fix_peer_review_plugin_version`: actualiza una declaracion existente pero **no inyecta el plugin si falta** — se resuelve desde el repo interno del banco (`settings.gradle`) y un `id` no resoluble rompe el build.
 
 ---
 

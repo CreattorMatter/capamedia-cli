@@ -1050,6 +1050,38 @@ si faltan (idempotente).
 
 ---
 
+## Regla 9h.4 - Version del plugin de peer review del banco
+
+**Fuente:** plugin oficial `com.pichincha.frm-plugin-peer-review-gradle` del
+banco (version vigente `1.1.2`, 2026-07).
+
+**MUST**: el bloque `plugins {}` de `build.gradle` declara el plugin en la
+version vigente:
+
+```gradle
+plugins {
+    id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'
+}
+```
+
+Importa porque el pipeline de Azure corre `gradle build -x test`, pero el task
+`architectureReview` del plugin **sigue ejecutandose y bloquea el merge del PR**.
+Los scaffolds viejos de Fabrics traen `1.1.0`. Se acepta una version mayor
+(mismo criterio que la Regla 8.1 con Spring Boot); una menor no.
+
+**Validacion (Block 8 del checklist, HIGH):** Check 8.12 — version menor a la
+vigente, o plugin ausente / sin version literal. Constantes
+`PEER_REVIEW_PLUGIN_ID` y `PEER_REVIEW_PLUGIN_VERSION` en
+`capamedia_cli.core.version_policy` (fuente unica; el canonical cita el valor).
+
+El autofix `fix_peer_review_plugin_version` **solo actualiza una declaracion
+existente**. Deliberadamente NO inyecta el plugin cuando falta: se resuelve
+desde el repositorio interno del banco declarado en `settings.gradle`, y un `id`
+que Gradle no pueda resolver rompe el build entero — peor que el FAIL del check.
+En ese caso el 8.12 queda HIGH para resolucion manual.
+
+---
+
 ## Regla 9h.2 - `JAVA_OPTIONS` baseline oficial en Helm env
 
 **Fuente:** mail oficial del area de capacity del Banco Pichincha (Alexis

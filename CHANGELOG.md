@@ -6,6 +6,37 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-07-25
+
+### Added — Check 8.12 + autofix: version del plugin de peer review del banco
+
+El doublecheck ya corria `architectureReview`, pero no validaba la **version**
+del plugin que lo provee. Los scaffolds viejos de Fabrics traen `1.1.0` y el
+banco fija hoy `1.1.2`. Como Azure ejecuta `gradle build -x test` pero el task
+`architectureReview` sigue corriendo, una version desactualizada se descubre
+recien en el PR.
+
+- Constantes `PEER_REVIEW_PLUGIN_ID` / `PEER_REVIEW_PLUGIN_VERSION`
+  (`= "1.1.2"`) en `version_policy.py` — fuente unica, igual que Netty.
+- **Check 8.12** (Block 8, HIGH): el bloque `plugins {}` de `build.gradle` debe
+  declarar `id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'`.
+  Version menor, plugin ausente o sin version literal -> FAIL HIGH (el detalle
+  distingue los tres casos). Se acepta una version mayor, mismo criterio que el
+  8.1 de Spring Boot. Detecta Groovy y Kotlin DSL.
+- **Autofix `fix_peer_review_plugin_version`** (clave `"8.12"`, en el set
+  default): reescribe la version de una declaracion existente. **No inyecta el
+  plugin si falta** — se resuelve desde el repo interno del banco declarado en
+  `settings.gradle`, y un `id` que Gradle no pueda resolver rompe el build
+  entero, que es peor que el FAIL del check. Idempotente; no degrada versiones
+  mayores.
+- **Regla 9h.4** nueva en `bank-official-rules.md`; Check 8.12 en
+  `checklist-rules.md`; Paso 2.5 de `doublecheck.md` ampliado con el bloque
+  `plugins {}` y la limitacion del autofix; `migrate-rest-full.md` pasa de
+  `1.1.0` a `1.1.2`.
+- `test_version_policy_sync.py` extendido: la declaracion literal del plugin
+  debe aparecer en los 4 canonicales, y `1.1.0` no puede figurar como vigente.
+- +15 tests (suite 1027).
+
 ## [0.32.0] - 2026-07-25
 
 ### Changed — Netty WebFlux `4.1.135.Final` → `4.1.136.Final` (Snyk 2026-07)

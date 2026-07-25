@@ -26,6 +26,18 @@ SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 # v0.27.2 (codigo y canonical desincronizados).
 NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.136.Final"
 
+# Plugin Gradle de peer review del banco (`architectureReview`). Es el gate que
+# Azure corre en el PR: aunque el pipeline ejecuta `gradle build -x test`, el
+# task `architectureReview` sigue corriendo y bloquea el merge. La version la
+# fija el banco; un scaffold viejo de Fabrics puede traer una anterior.
+#
+# Historial: 1.1.0 (scaffold Fabrics) -> 1.1.2 (2026-07).
+#
+# Fuente unica igual que Netty: el canonical debe citar este mismo valor y el
+# test test_version_policy_sync lo verifica.
+PEER_REVIEW_PLUGIN_ID = "com.pichincha.frm-plugin-peer-review-gradle"
+PEER_REVIEW_PLUGIN_VERSION = "1.1.2"
+
 # Arbol core de Netty que debe quedar pineado a NETTY_WEBFLUX_ALLOWED_VERSION en
 # proyectos WebFlux (el BOM de Spring Boot 3.5.x trae io.netty 4.1.121.Final
 # vulnerable). Pinear solo `netty-codec*` deja transitivos cercanos

@@ -24,13 +24,17 @@ from pathlib import Path
 
 from capamedia_cli.core.bank_autofix import (
     fix_netty_full_tree_pin,
+    fix_peer_review_plugin_version,
     fix_remove_netty_pin,
     fix_webflux_security_pins,
+    run_bank_autofix,
 )
 from capamedia_cli.core.checklist_rules import CheckContext, run_block_8
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
+    PEER_REVIEW_PLUGIN_ID,
+    PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
@@ -1007,3 +1011,184 @@ def test_8_10_check_absent_for_non_webflux(tmp_path: Path) -> None:
         run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.10"
     )
     assert check is None
+
+
+# ---------------------------------------------------------------------------
+# Check 8.12 + autofix fix_peer_review_plugin_version — version del plugin de
+# peer review del banco (Regla 9h.4). Azure corre `gradle build -x test` pero el
+# task `architectureReview` del plugin sigue corriendo y bloquea el merge.
+# ---------------------------------------------------------------------------
+
+_PR_PLUGIN = PEER_REVIEW_PLUGIN_ID
+_PR_VER = PEER_REVIEW_PLUGIN_VERSION
+
+
+def _gradle_with_plugin(version: str | None, *, kotlin: bool = False) -> str:
+    if version is None:
+        plugin_line = ""
+    elif kotlin:
+        plugin_line = f'    id("{_PR_PLUGIN}") version "{version}"\n'
+    else:
+        plugin_line = f"    id '{_PR_PLUGIN}' version '{version}'\n"
+    return (
+        "plugins {\n"
+        "    id 'java'\n"
+        "    id 'org.springframework.boot' version '3.5.14'\n"
+        f"{plugin_line}"
+        "}\n"
+    )
+
+
+def test_8_12_fail_when_version_is_older(tmp_path: Path) -> None:
+    """El 1.1.0 de los scaffolds viejos de Fabrics -> FAIL HIGH."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.1.0"))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check is not None
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "1.1.0" in check.detail
+    assert _PR_VER in check.suggested_fix
+
+
+def test_8_12_pass_on_current_version(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin(_PR_VER))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check.status == "pass"
+
+
+def test_8_12_pass_on_newer_version(tmp_path: Path) -> None:
+    """Se acepta mayor a la vigente (mismo criterio que el 8.1 de Spring Boot)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.2.0"))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check.status == "pass"
+
+
+def test_8_12_fail_when_plugin_absent(tmp_path: Path) -> None:
+    """Sin el plugin no corre architectureReview -> FAIL HIGH, y el detalle lo
+    distingue del caso 'declarado sin version'."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin(None))
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check.status == "fail"
+    assert check.severity == "high"
+    assert "falta el plugin" in check.detail
+
+
+def test_8_12_fail_when_declared_without_literal_version(tmp_path: Path) -> None:
+    """Plugin sin version literal (variable / pluginManagement) -> FAIL con
+    detalle distinto al de 'plugin ausente'."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, f"plugins {{\n    id '{_PR_PLUGIN}'\n}}\n")
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check.status == "fail"
+    assert "sin version literal" in check.detail
+
+
+def test_8_12_detects_kotlin_dsl_syntax(tmp_path: Path) -> None:
+    """El Kotlin DSL `id("x") version "1.1.0"` tambien se detecta."""
+    root = _make_minimal_project(tmp_path)
+    (root / "build.gradle.kts").write_text(
+        _gradle_with_plugin("1.1.0", kotlin=True), encoding="utf-8"
+    )
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+
+    assert check.status == "fail"
+    assert "1.1.0" in check.detail
+
+
+def test_8_12_autofix_bumps_old_version(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.1.0"))
+
+    result = fix_peer_review_plugin_version(root)
+    text = (root / "build.gradle").read_text(encoding="utf-8")
+
+    assert result.applied is True
+    assert result.rule == "8.12"
+    assert f"id '{_PR_PLUGIN}' version '{_PR_VER}'" in text
+    assert "1.1.0" not in text
+    # no toca los otros plugins del bloque
+    assert "id 'org.springframework.boot' version '3.5.14'" in text
+
+
+def test_8_12_autofix_resolves_the_check(tmp_path: Path) -> None:
+    """Contrato check <-> autofix: despues del fix el 8.12 pasa."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.1.0"))
+
+    fix_peer_review_plugin_version(root)
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.12")
+    assert check.status == "pass"
+
+
+def test_8_12_autofix_is_idempotent(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.1.0"))
+
+    fix_peer_review_plugin_version(root)
+    first = (root / "build.gradle").read_text(encoding="utf-8")
+    second_result = fix_peer_review_plugin_version(root)
+    second = (root / "build.gradle").read_text(encoding="utf-8")
+
+    assert second_result.applied is False
+    assert first == second
+
+
+def test_8_12_autofix_does_not_downgrade_newer_version(tmp_path: Path) -> None:
+    """Una version mayor a la vigente se deja como esta (no se degrada)."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.2.0"))
+
+    result = fix_peer_review_plugin_version(root)
+    text = (root / "build.gradle").read_text(encoding="utf-8")
+
+    assert result.applied is False
+    assert "1.2.0" in text
+
+
+def test_8_12_autofix_does_not_inject_missing_plugin(tmp_path: Path) -> None:
+    """Decision deliberada: si el plugin falta NO se inyecta — se resuelve desde
+    el repo interno del banco y un `id` no resoluble rompe el build entero."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin(None))
+
+    result = fix_peer_review_plugin_version(root)
+    text = (root / "build.gradle").read_text(encoding="utf-8")
+
+    assert result.applied is False
+    assert _PR_PLUGIN not in text
+
+
+def test_8_12_autofix_noop_without_build_gradle(tmp_path: Path) -> None:
+    root = _make_minimal_project(tmp_path)
+
+    result = fix_peer_review_plugin_version(root)
+
+    assert result.applied is False
+    assert "build.gradle" in result.notes
+
+
+def test_8_12_autofix_registered_in_default_run(tmp_path: Path) -> None:
+    """8.12 corre en el set default de autofixes del doublecheck."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, _gradle_with_plugin("1.1.0"))
+
+    results = run_bank_autofix(root)
+
+    assert any(r.rule == "8.12" and r.applied for r in results)
+    assert _PR_VER in (root / "build.gradle").read_text(encoding="utf-8")

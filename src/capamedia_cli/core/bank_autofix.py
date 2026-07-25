@@ -25,9 +25,12 @@ from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
+    PEER_REVIEW_PLUGIN_ID,
+    PEER_REVIEW_PLUGIN_VERSION,
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
     WEBFLUX_SECURITY_DEPENDENCY_PINS,
+    is_version_lower,
 )
 
 # ---------------------------------------------------------------------------
@@ -1537,6 +1540,82 @@ def fix_add_prometheus_deps(project_root: Path) -> BankAutofixResult:
 
 
 # ---------------------------------------------------------------------------
+# Regla 8.12 — Version del plugin de peer review del banco. El task
+# `architectureReview` bloquea el PR en Azure y los scaffolds viejos de Fabrics
+# traen una version anterior a la vigente.
+# ---------------------------------------------------------------------------
+
+
+_PEER_REVIEW_PLUGIN_VERSION_RE = re.compile(
+    r"(id\s*(?:\(\s*[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"']\s*\)"
+    r"|[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"'])"
+    r"\s*version\s*(?:\(\s*)?[\"'])([^\"']+)([\"'])",
+)
+
+
+def fix_peer_review_plugin_version(project_root: Path) -> BankAutofixResult:
+    """Actualiza el plugin de peer review a PEER_REVIEW_PLUGIN_VERSION.
+
+    Solo reescribe una declaracion **existente**: si el plugin no esta en el
+    bloque `plugins {}` NO lo inyecta. Agregar un `id` que Gradle no pueda
+    resolver (el plugin vive en el repo interno del banco, declarado en
+    `settings.gradle`) romperia el build entero — peor que el FAIL del check.
+    En ese caso el check 8.12 queda en HIGH para resolucion manual.
+
+    Idempotente: no toca versiones ya iguales o mayores a la vigente.
+    """
+    result = BankAutofixResult(rule="8.12", applied=False)
+
+    targets = [
+        f
+        for f in (project_root / "build.gradle", project_root / "build.gradle.kts")
+        if f.exists()
+    ]
+    if not targets:
+        result.notes = "no se encontro build.gradle en la raiz"
+        return result
+
+    modified: list[Path] = []
+    for target in targets:
+        try:
+            text = target.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        found_old: list[str] = []
+
+        def _bump(match: re.Match[str], _found: list[str] = found_old) -> str:
+            current = match.group(2)
+            if not is_version_lower(current, PEER_REVIEW_PLUGIN_VERSION):
+                return match.group(0)
+            _found.append(current)
+            return f"{match.group(1)}{PEER_REVIEW_PLUGIN_VERSION}{match.group(3)}"
+
+        new_text = _PEER_REVIEW_PLUGIN_VERSION_RE.sub(_bump, text)
+        if not found_old:
+            continue
+
+        target.write_text(new_text, encoding="utf-8")
+        modified.append(target)
+        result.changes.append(
+            f"{target.relative_to(project_root)}: plugin peer-review "
+            + ", ".join(found_old)
+            + f" -> {PEER_REVIEW_PLUGIN_VERSION}"
+        )
+
+    if not modified:
+        result.notes = (
+            f"plugin peer-review ya en {PEER_REVIEW_PLUGIN_VERSION} o superior, "
+            "o no declarado en el bloque plugins (se agrega a mano)"
+        )
+        return result
+
+    result.applied = True
+    result.files_modified = modified
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Regla 8.7 / Snyk 2026-05 — Eliminar pins manuales de io.netty:* del bloque
 # `dependencyManagement { dependencies { ... } }`. Los pins manuales se quedan
 # atras al proximo CVE (era exactamente el bug del template viejo con
@@ -2070,7 +2149,7 @@ def run_bank_autofix(
         if rules
         else {
             "4", "6", "7", "8", "8b", "9", "9j", "5.6.5",
-            "9h.1", "9h.2", "8.7", "8.8", "8.10", "8.11",
+            "9h.1", "9h.2", "8.7", "8.8", "8.10", "8.11", "8.12",
         }
     )
     if requires_bancs is None:
@@ -2113,4 +2192,6 @@ def run_bank_autofix(
         results.append(fix_webflux_security_pins(project_root))
     if "8.11" in wanted:
         results.append(fix_add_prometheus_deps(project_root))
+    if "8.12" in wanted:
+        results.append(fix_peer_review_plugin_version(project_root))
     return results

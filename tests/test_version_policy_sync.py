@@ -17,6 +17,8 @@ from pathlib import Path
 
 from capamedia_cli.core.version_policy import (
     NETTY_WEBFLUX_ALLOWED_VERSION,
+    PEER_REVIEW_PLUGIN_ID,
+    PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
 )
 
@@ -50,6 +52,34 @@ def test_spring_boot_baseline_cited_in_canonicals() -> None:
         f"SPRING_BOOT_BASELINE_VERSION ({SPRING_BOOT_BASELINE_VERSION}) no aparece "
         "en bank-official-rules.md. Mantener canonical y version_policy en sync."
     )
+
+
+def test_peer_review_plugin_version_cited_in_canonicals() -> None:
+    """La version vigente del plugin de peer review debe aparecer literal en el
+    canonical de la regla (9h.4), en el Check 8.12 y en los prompts que el
+    agente lee (doublecheck + migracion REST)."""
+    targets = [
+        "context/bank-official-rules.md",
+        "prompts/checklist-rules.md",
+        "prompts/doublecheck.md",
+        "prompts/migrate-rest-full.md",
+    ]
+    declaration = f"id '{PEER_REVIEW_PLUGIN_ID}' version '{PEER_REVIEW_PLUGIN_VERSION}'"
+    missing = [t for t in targets if declaration not in _read(t)]
+    assert not missing, (
+        f"La declaracion `{declaration}` no aparece en: {missing}. Actualizar el "
+        "canonical al cambiar PEER_REVIEW_PLUGIN_VERSION (mismo drift que v0.27.2)."
+    )
+
+
+def test_old_peer_review_plugin_version_not_declared_as_current() -> None:
+    """`1.1.0` (scaffold viejo) solo puede figurar como version a actualizar,
+    nunca como la declaracion vigente."""
+    stale = f"id '{PEER_REVIEW_PLUGIN_ID}' version '1.1.0'"
+    for target in ("prompts/migrate-rest-full.md", "prompts/doublecheck.md"):
+        assert stale not in _read(target), (
+            f"{target} todavia declara el plugin de peer review en 1.1.0"
+        )
 
 
 def test_old_netty_version_not_allowed_anywhere() -> None:
