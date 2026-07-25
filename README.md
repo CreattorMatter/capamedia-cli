@@ -487,6 +487,10 @@ capamedia-cli/
 
 - [x] v0.30.0 - **Discovery OLA 2 embebido** (`data/catalog/ola2.json`: 25 servicios, 5 ORQ, 37 relaciones): al migrar cualquier servicio del catálogo el prompt recibe su **ficha** (tribu, tecnología, métodos, links IcePanel/WSDL/código); un ORQ recibe además su **mapa de downstreams** (`in_discovery`/`in_ola1`) que `analisis-orq.md` usa como fuente primaria con reconciliación 3-way. **Adaptadores BANCS embebidos** (`data/catalog/bancs_adapters.json`: 8 adaptadores Core Adapter, 55 TX): el prompt recibe la tabla TX→adaptador→URL interna; prevalece `prompts/tx-adapter-catalog.json`; patrón `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL`. Guardrails en todo: **catálogo=contexto NO árbitro** (el ESQL manda; los checks no los importan), sanitización estructural (el `.numbers` de adaptadores trae cookies/PII y NO se versiona). Generadores reproducibles `tools/build_*.py`. +57 tests, suite 1009. (2 revisiones adversariales ejecutando el código)
 
+### Release 0.32.0 — Netty 4.1.136 (Snyk 2026-07)
+
+- [x] v0.32.0 - Netty WebFlux `4.1.135.Final` → `4.1.136.Final` (`NETTY_WEBFLUX_ALLOWED_VERSION`): Checks 8.7/8.8/8.10 y sus autofixes exigen y preservan la nueva version; `4.1.135.Final` pasa a bloqueada. Mismos 13 modulos core y mismo doble pin (`dependency` + `force`); 4.2.x sigue prohibida.
+
 ### Release 0.29.0 — Netty 4.1.135 + Check 8.10 (Snyk 2026-06)
 
 - [x] v0.29.0 - Netty `4.1.133.Final` → `4.1.135.Final` (árbol completo + `unix-common`), Check/autofix 8.10 pins WebFlux Snyk 2026-06, baseline Spring Boot 3.5.15 en doublecheck

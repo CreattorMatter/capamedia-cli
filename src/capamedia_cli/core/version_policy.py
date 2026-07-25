@@ -13,17 +13,18 @@ import re
 SPRING_BOOT_BASELINE_VERSION = "3.5.14"
 
 # Excepcion oficial (v0.27.0): en proyectos WebFlux el pin
-# `io.netty:*:4.1.135.Final` esta permitido porque cierra los CVEs Snyk 2026-05/06
+# `io.netty:*:4.1.136.Final` esta permitido porque cierra los CVEs Snyk 2026-05/07
 # del netty-codec-http sin esperar al proximo BOM. Cualquier otra version
 # manual sigue bloqueada por Check 8.7. MVC/SOAP: ningun pin manual permitido.
 #
-# Historial: 4.1.133.Final (v0.27.0) -> 4.1.135.Final (Snyk 2026-06).
+# Historial: 4.1.133.Final (v0.27.0) -> 4.1.135.Final (Snyk 2026-06) ->
+# 4.1.136.Final (Snyk 2026-07).
 #
 # Fuente unica: el canonical (bank-official-rules.md Regla 8.5, checklist-rules.md
 # Check 8.7, migrate-rest-full.md) debe citar este mismo valor. El test
 # test_version_policy_canonical_sync lo verifica para evitar el drift que causo
 # v0.27.2 (codigo y canonical desincronizados).
-NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.135.Final"
+NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.136.Final"
 
 # Arbol core de Netty que debe quedar pineado a NETTY_WEBFLUX_ALLOWED_VERSION en
 # proyectos WebFlux (el BOM de Spring Boot 3.5.x trae io.netty 4.1.121.Final

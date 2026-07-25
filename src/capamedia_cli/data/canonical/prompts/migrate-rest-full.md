@@ -880,7 +880,7 @@ Parameters:
 1. **Spring Boot version:** Use `3.5.14` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
 2. **Peer Review plugin:** Update to `1.1.0`
 3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.135.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
+4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.136.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, `4.1.135.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -1034,7 +1034,7 @@ dependencyManagement {
         mavenBom 'org.springframework:spring-framework-bom:6.2.19'
     }
     // NOTE: do NOT add `dependency 'io.netty:*:VERSION'` blocks here to "patch
-    // a CVE", EXCEPT for the official WebFlux exception `io.netty:*:4.1.135.Final`
+    // a CVE", EXCEPT for the official WebFlux exception `io.netty:*:4.1.136.Final`
     // (Snyk CVE-fix approved for WebFlux services). Any other version is
     // blocked by Check 8.7. Old scaffolds that pinned `netty-codec-http:4.1.132.Final`
     // became the source of 4 new CVEs — remove them. MVC/SOAP: no manual pin allowed.
@@ -1042,7 +1042,7 @@ dependencyManagement {
     // WebFlux only — security pins of the same Snyk report (Check 8.10), alongside
     // the Netty tree (Check 8.8). `capamedia ai doublecheck` autofixes them.
     dependencies {
-        // Netty tree (13 core modules) at 4.1.135.Final — see Check 8.8.
+        // Netty tree (13 core modules) at 4.1.136.Final — see Check 8.8.
         // NON-Netty WebFlux security pins (Check 8.10):
         dependency 'io.micrometer:micrometer-core:1.15.12'
         dependency 'io.projectreactor.netty:reactor-netty-http:1.2.18'

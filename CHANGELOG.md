@@ -6,6 +6,30 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-07-25
+
+### Changed — Netty WebFlux `4.1.135.Final` → `4.1.136.Final` (Snyk 2026-07)
+
+Bump de la version permitida del arbol Netty en proyectos WebFlux. Sigue siendo
+la **unica** version manual permitida por Check 8.7; `4.1.135.Final` pasa a ser
+version bloqueada como cualquier otra. **No cambia** el resto de la regla: los
+mismos 13 modulos core (`NETTY_CORE_MODULES`), el mismo doble mecanismo
+(`dependencyManagement { dependency }` + `resolutionStrategy { force }`) y la
+prohibicion de bumpear a 4.2.x (rompe Reactor Netty:
+`StacklessClosedChannelException`).
+
+- `NETTY_WEBFLUX_ALLOWED_VERSION` = `4.1.136.Final` (era `4.1.135.Final`).
+- Checks 8.7 / 8.8 / 8.10 y los autofixes `fix_remove_netty_pin` /
+  `fix_netty_full_tree_pin` / `fix_webflux_security_pins` leen la constante, asi
+  que el doublecheck ahora exige (y preserva) `4.1.136.Final`; un pin en
+  `4.1.135.Final` es FAIL HIGH y el autofix lo remueve.
+- Canonicales sincronizados (`bank-official-rules.md` Regla 8.5,
+  `checklist-rules.md` Check 8.7/8.8, `migrate-rest-full.md`, `doublecheck.md`)
+  — lo verifica `test_version_policy_sync.py`.
+- Sin cambios en los pins NO-Netty del Snyk 2026-06 (`micrometer-core 1.15.12`,
+  `reactor-netty-http 1.2.18`, `spring-retry 2.0.13`, `spring-kafka 3.3.16`,
+  `spring-framework-bom 6.2.19`).
+
 ## [0.31.0] - 2026-07-13
 
 ### Changed — Autoscaling HPA → KEDA + baseline `JAVA_OPTIONS` 2026-07 + deps Prometheus
