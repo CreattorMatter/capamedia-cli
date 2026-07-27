@@ -6,6 +6,66 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-07-25
+
+### Added — trace-logger + payload por defecto (orquestador Y microservicio)
+
+Observabilidad por defecto en **todo** servicio migrado: el bloque `trace-logger`
+(con `payload`) deja de aplicarse a mano y queda configurado por defecto tanto en
+orquestadores como en microservicios. Referencia validada: `orqproductos0044`
+rama `feature/dev-BTHCCC-9015` (commit `52ea1a8`). El log transaccional
+(`lib-event-logs`, `spring.kafka`, `logging.event`, `xml.template`) **sigue siendo
+exclusivo de orquestadores** y no se universaliza.
+
+**Fuente unica de version:** `LIB_TRACE_LOGGER_VERSION = "1.4.0"` (+ coord
+`com.pichincha.common:lib-trace-logger`) en `version_policy.py`.
+
+**Checks nuevos (Block 7, ambos HIGH):**
+
+- **Check 7.7** — `application.yml` debe declarar el bloque `trace-logger:` que
+  referencia cada env var via `${CCC_*}` (Regla 7, sin defaults inline) y el
+  sub-bloque `payload.mode`. Ausente o parcial -> FAIL HIGH.
+- **Check 7.8** — cada helm por-entorno (dev/test/prod) debe declarar las 7 env
+  vars `CCC_*` con el valor esperado del ambiente: `CCC_CUSTOM_LEVEL_DEBUG_ENABLED
+  = true` solo en dev (test/prod = false); `CCC_PAYLOAD_MODE = NONE` en los 3
+  (seguridad: no loguear payload/PII, mandatorio en prod). Faltante o valor
+  incorrecto -> FAIL HIGH.
+
+**Autofix nuevos** (registrados en `AUTOFIX_REGISTRY` bajo sus check IDs):
+
+- `fix_trace_logger_application` (7.7): inyecta el bloque en `application.yml`
+  (env-refs) y `application-test.yml` (literales, `enabled: false`) si falta.
+  Conservador: no reescribe un bloque ya presente.
+- `fix_trace_logger_helm` (7.8): inyecta las env vars `CCC_*` que falten en cada
+  helm por-entorno con el valor esperado. Solo agrega las ausentes; los valores
+  incorrectos existentes quedan para revision y preserva las env vars previas
+  (p. ej. `JAVA_OPTIONS`).
+
+**Guards anti-drift** (`test_version_policy_sync.py`):
+`test_lib_trace_logger_version_cited_in_canonicals` exige que la coordenada
+versionada aparezca en los prompts REST y SOAP, y
+`test_trace_logger_env_vars_cited_in_checklist_canonical` exige que las 7 env
+vars que el codigo enforcea esten nombradas en `checklist-rules.md` (tolera la
+forma agrupada `CCC_CUSTOM_LEVEL_ENABLED/INFO/DEBUG/WARN/ERROR_ENABLED`).
+
+**Prompts:** `migrate-rest-full.md` (Rule 17, `payload` agregado a los 2 bloques
+`trace-logger`, `CCC_PAYLOAD_MODE` + nota por-ambiente en el helm),
+`migrate-soap-full.md` (dependencia versionada + politica), `checklist-rules.md`
+(checks 7.7/7.8 espejo) y `agents/migrador.md`.
+
+### Changed — Politica de comentarios y commits (prompts)
+
+Aplicadas como reglas en los prompts de migracion (`migrate-rest-full.md`,
+`migrate-soap-full.md`), el agente `migrador.md` y `context/CLAUDE.md`:
+
+- **Comentarios:** sin JavaDoc ni comentarios triviales/de version/de fix;
+  conservar solo los que documentan una decision no obvia. (Regla de prompt, sin
+  stripper deterministico — no hay check que lo valide.)
+- **Commits:** mensaje breve (Conventional Commits), **nunca** mencionar a
+  Claude/Anthropic (sin `Co-Authored-By`, sin "Generated with").
+
++16 tests (suite 1043).
+
 ## [0.33.0] - 2026-07-25
 
 ### Added — Check 8.12 + autofix: version del plugin de peer review del banco

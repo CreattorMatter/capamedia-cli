@@ -48,6 +48,14 @@ stop and report a blocker instead of changing the archetype.
 7. **No historical reference projects.** Work only from the service workspace:
    `legacy/`, `umps/`, `tx/`, `destino/`, `.capamedia/fabrics.json`, and the
    canonical prompts/context.
+8. **No comment noise.** Do NOT add trivial/redundant comments (version, `fix:`,
+   `removed ...`, cosmetic `TODO`, or anything that restates the code). Do NOT
+   generate JavaDoc and strip legacy JavaDoc. Keep only comments that document a
+   NON-obvious decision (bank catalog literal + source, workaround reason). When
+   in doubt, do not add it. Source code and comments in English.
+9. **Commit messages.** Short Conventional Commit
+   (`feat|fix|refactor|chore: <brief summary>`), no long detail. NEVER mention
+   Claude or Anthropic: no `Co-Authored-By`, no "Generated with", no equivalent.
 
 ## Expected Structure
 
@@ -206,6 +214,14 @@ implementation 'io.prometheus:simpleclient_hotspot:0.16.0'
 implementation 'io.prometheus:simpleclient_common:0.16.0'
 ```
 
+**MANDATORY (trace-logger + payload — Checks 7.7 / 7.8):** default observability for
+EVERY migrated service (orchestrator AND microservice — NOT ORQ-only). Declare the
+dependency:
+
+```gradle
+implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
+```
+
 Forbidden dependencies:
 
 - `spring-boot-starter-webflux`
@@ -227,6 +243,7 @@ Forbidden dependencies:
   `VALIDAR`, `REVISAR`, or `not_probed`.
 - Helm capacity + KEDA baseline (Banco Pichincha official; capacity ajuste 2026-07): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` baseline plus **KEDA** autoscaling — `hpa:` is **deprecated**. Values are **referential** to let pods start; refined after performance/load tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required: `resources.requests` (cpu=`50m`, memory=`100Mi`), `resources.limits` (cpu=`200m`, memory=`400Mi`); `keda.enabled=true` with `minReplicaCount=1`/`maxReplicaCount=1` and a prometheus trigger on `http_server_requests_seconds_count`; `servicemonitor.enabled=true` with `path='/actuator/prometheus'`; **no `hpa:` block**. Validated by checklist 7.4/7.5d/7.5e/7.5g (HIGH).
 - Helm env `JAVA_OPTIONS` baseline (Banco Pichincha official; capacity ajuste 2026-07): every helm must declare `env: - name: "JAVA_OPTIONS"` with value `"-XX:MaxRAMPercentage=60.0 -XX:+UseStringDeduplication -XX:+UseG1GC"`. Use ASCII only and separate flags with normal space `U+0020`; never paste `U+00A0` or invisible separators. The 2026-07 adjustment lowered `MaxRAMPercentage` 70→60 and dropped `InitialRAMPercentage`. See `bank-official-rules.md` Regla 9h.2. Validated by checklist Block 7.5f (HIGH on deviation).
+- trace-logger + payload by default (orchestrator AND microservice — NOT ORQ-only). `application.yml` declares the `trace-logger` block with `enabled: ${CCC_TRACE_LOGGER_ENABLED}`, `custom-level` (enabled/infoEnabled/debugEnabled/warnEnabled/errorEnabled via `${CCC_CUSTOM_LEVEL_*}`) and `payload.mode: ${CCC_PAYLOAD_MODE}` — no inline defaults (Rule 7). `application-test.yml` uses literals with `enabled: false` and `payload.mode: NONE`. The 7 env vars go in all 3 `helm/*.yml`: `CCC_TRACE_LOGGER_ENABLED`, `CCC_CUSTOM_LEVEL_ENABLED/INFO/DEBUG/WARN/ERROR_ENABLED`, `CCC_PAYLOAD_MODE`. Per-environment rule: `CCC_CUSTOM_LEVEL_DEBUG_ENABLED = true` only in `dev` (test/prod = `false`); `CCC_PAYLOAD_MODE = NONE` in the 3 (never log payload/PII, mandatory in prod). The transactional-log block (`lib-event-logs`, `spring.kafka`, `logging.event`, `xml.template`) stays ORQ-only — do NOT add it to microservices. Validated by checklist 7.7 (application.yml) and 7.8 (helm), both HIGH.
 
 ## Peer Review Gate
 

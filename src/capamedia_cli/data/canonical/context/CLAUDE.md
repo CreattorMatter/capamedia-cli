@@ -114,6 +114,10 @@ portable para todas las IA es `capamedia ai migrate` y `capamedia ai doublecheck
 
 ## Commits
 Conventional Commits: `feat|fix|refactor|test|docs|chore|ci|iac: descripcion`
+Mensaje breve, sin detalle largo. NUNCA mencionar a Claude ni a Anthropic en el commit: sin `Co-Authored-By`, sin "Generated with", sin atribucion equivalente.
+
+## Comentarios en el codigo
+Sin comentarios triviales (version, `fix:`, `removed ...`, `TODO` cosmetico) ni redundantes con el codigo. Sin JavaDoc (no generarlo; eliminar el heredado del legacy). Conservar solo comentarios que documentan una decision NO obvia (literal de catalogo del banco + origen, motivo de un workaround). Ante la duda, no agregar.
 
 @src/capamedia_cli/data/canonical/prompts/analisis-servicio.md
 @src/capamedia_cli/data/canonical/prompts/analisis-orq.md

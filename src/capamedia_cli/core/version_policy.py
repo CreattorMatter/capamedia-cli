@@ -88,6 +88,18 @@ SPRING_FRAMEWORK_BOM_COORD = "org.springframework:spring-framework-bom"
 SPRING_FRAMEWORK_BOM_VERSION = "6.2.19"
 
 
+# lib-trace-logger: observabilidad por defecto (trace-logger + payload) en TODO
+# servicio OLA — orquestador Y microservicio (a diferencia del log transaccional
+# lib-event-logs, que sigue siendo exclusivo de orquestadores). Referencia
+# validada: orqproductos0044 rama feature/dev-BTHCCC-9015 (commit 52ea1a8).
+#
+# Fuente unica: el canonical (migrate-rest-full.md, migrate-soap-full.md,
+# checklist-rules.md) y los Checks 7.7/7.8 de checklist_rules deben citar este
+# mismo valor. Coordenada gradle: `com.pichincha.common:lib-trace-logger:<version>`.
+LIB_TRACE_LOGGER_COORD = "com.pichincha.common:lib-trace-logger"
+LIB_TRACE_LOGGER_VERSION = "1.4.0"
+
+
 def parse_numeric_version(version: str) -> tuple[int, ...]:
     """Return numeric version parts, ignoring suffixes such as -SNAPSHOT."""
     parts = re.findall(r"\d+", version)

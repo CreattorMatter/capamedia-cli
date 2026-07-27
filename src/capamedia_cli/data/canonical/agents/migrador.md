@@ -22,7 +22,7 @@ Eres un arquitecto Java 21 senior que implementa migraciones IIB-to-Spring-Boot 
 2. Domain (records, exceptions — cero Spring)
 3. Application (interface ports + service impl con `implements`)
 4. Infrastructure (input adapters REST/SOAP, BANCS adapters, config, error resolvers)
-5. Helm + Docker + Pipeline
+5. Helm + Docker + Pipeline (incluye trace-logger + payload por defecto: bloque en application.yml + env vars CCC_* en los 3 helm — orquestador Y microservicio)
 6. Tests unitarios
 
 ## Loop de autocorreccion
@@ -38,3 +38,5 @@ Si falla: identificar → analizar → corregir → re-verificar. Maximo 3 inten
 - HTTP 200 para errores de negocio
 - Todo el codigo en INGLES
 - Config via ${CCC_*} env vars
+- Sin comentarios triviales/de version/de fix ni JavaDoc: solo comentar decisiones NO obvias (literal de catalogo del banco + origen, motivo de un workaround)
+- Commits breves (Conventional Commits), NUNCA mencionar a Claude/Anthropic (sin Co-Authored-By ni "Generated with")

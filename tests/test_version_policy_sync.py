@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from capamedia_cli.core.version_policy import (
+    LIB_TRACE_LOGGER_COORD,
+    LIB_TRACE_LOGGER_VERSION,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     PEER_REVIEW_PLUGIN_ID,
     PEER_REVIEW_PLUGIN_VERSION,
@@ -80,6 +82,43 @@ def test_old_peer_review_plugin_version_not_declared_as_current() -> None:
         assert stale not in _read(target), (
             f"{target} todavia declara el plugin de peer review en 1.1.0"
         )
+
+
+def test_lib_trace_logger_version_cited_in_canonicals() -> None:
+    """La coordenada versionada de lib-trace-logger debe aparecer literal en los
+    prompts REST y SOAP: el trace-logger es observabilidad por defecto en TODO
+    servicio, y ambos prompts declaran la dependencia."""
+    coord = f"{LIB_TRACE_LOGGER_COORD}:{LIB_TRACE_LOGGER_VERSION}"
+    targets = ["prompts/migrate-rest-full.md", "prompts/migrate-soap-full.md"]
+    missing = [t for t in targets if coord not in _read(t)]
+    assert not missing, (
+        f"La coordenada `{coord}` no aparece en: {missing}. Actualizar el canonical "
+        "al cambiar LIB_TRACE_LOGGER_VERSION (mismo drift que causo v0.27.2)."
+    )
+
+
+def test_trace_logger_env_vars_cited_in_checklist_canonical() -> None:
+    """Las 7 env vars que enforcean los Checks 7.7/7.8 deben estar documentadas
+    en el canonical del checklist. Evita que el codigo exija una env var que el
+    agente nunca leyo en el prompt."""
+    from capamedia_cli.core.checklist_rules import TRACE_LOGGER_ENV_VARS
+
+    rules = _read("prompts/checklist-rules.md")
+    # El canonical abrevia la familia custom-level con barras
+    # (`CCC_CUSTOM_LEVEL_ENABLED/INFO/DEBUG/WARN/ERROR_ENABLED`) en vez de
+    # listar los 5 nombres completos. Una env var cuenta como documentada si
+    # aparece completa o cubierta por esa forma agrupada.
+    grouped = "CCC_CUSTOM_LEVEL_ENABLED/INFO/DEBUG/WARN/ERROR_ENABLED"
+    missing = [
+        var
+        for var in TRACE_LOGGER_ENV_VARS
+        if var not in rules
+        and not (var.startswith("CCC_CUSTOM_LEVEL_") and grouped in rules)
+    ]
+    assert not missing, (
+        f"Env vars del trace-logger sin documentar en checklist-rules.md: "
+        f"{missing}. Los Checks 7.7/7.8 las exigen; el prompt debe nombrarlas."
+    )
 
 
 def test_old_netty_version_not_allowed_anywhere() -> None:

@@ -567,6 +567,117 @@ def _helm_env_value_hygiene_issues(helm_file: Path, root: Path) -> list[str]:
     return issues
 
 
+# -- trace-logger + payload (observabilidad por defecto) -------------------
+#
+# Bloque que debe quedar configurado POR DEFECTO en TODO servicio migrado —
+# orquestador Y microservicio (Referencia: orqproductos0044
+# feature/dev-BTHCCC-9015, commit 52ea1a8). El log transaccional
+# (lib-event-logs, spring.kafka, logging.event, xml.template) sigue siendo
+# EXCLUSIVO de orquestadores y NO se valida aca.
+TRACE_LOGGER_ENV_VARS: tuple[str, ...] = (
+    "CCC_TRACE_LOGGER_ENABLED",
+    "CCC_CUSTOM_LEVEL_ENABLED",
+    "CCC_CUSTOM_LEVEL_INFO_ENABLED",
+    "CCC_CUSTOM_LEVEL_DEBUG_ENABLED",
+    "CCC_CUSTOM_LEVEL_WARN_ENABLED",
+    "CCC_CUSTOM_LEVEL_ERROR_ENABLED",
+    "CCC_PAYLOAD_MODE",
+)
+
+
+def _trace_logger_expected(env: str) -> dict[str, str]:
+    """Valor esperado de cada env var por ambiente. Regla de diferencia:
+    DEBUG_ENABLED = true solo en dev; en test y prod = false. El resto de flags
+    iguales en los 3. CCC_PAYLOAD_MODE = NONE en los 3 (seguridad: no loguear
+    payload/PII, mandatorio en prod)."""
+    return {
+        "CCC_TRACE_LOGGER_ENABLED": "true",
+        "CCC_CUSTOM_LEVEL_ENABLED": "true",
+        "CCC_CUSTOM_LEVEL_INFO_ENABLED": "true",
+        "CCC_CUSTOM_LEVEL_DEBUG_ENABLED": "true" if env == "dev" else "false",
+        "CCC_CUSTOM_LEVEL_WARN_ENABLED": "true",
+        "CCC_CUSTOM_LEVEL_ERROR_ENABLED": "true",
+        "CCC_PAYLOAD_MODE": "NONE",
+    }
+
+
+def _helm_env_of(path: Path) -> str:
+    """dev|test|prod segun el nombre del helm (dev.yml, values-prod.yaml, ...).
+    Cadena vacia si no matchea ninguno."""
+    name = path.name.lower()
+    for env in ("dev", "test", "prod"):
+        if env in name:
+            return env
+    return ""
+
+
+def _helm_env_var_value(text: str, var_name: str) -> str | None:
+    """Devuelve el `value:` de la env var `name: <var_name>` en un helm, o None
+    si la env var no esta declarada. Misma estrategia que JAVA_OPTIONS: localizar
+    `name: <var>` (con o sin comillas) y leer el `value:` en la ventana corta
+    siguiente. Si el name existe pero no hay value, devuelve cadena vacia."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if re.match(
+            rf"^\s*(?:-\s*)?name\s*:\s*['\"]?{re.escape(var_name)}['\"]?\s*(#.*)?$",
+            line,
+        ):
+            for j in range(i + 1, min(len(lines), i + 5)):
+                candidate = lines[j].strip()
+                if not candidate:
+                    continue
+                m = re.match(
+                    r"value\s*:\s*['\"]?(?P<value>[^'\"]*?)['\"]?\s*(#.*)?$",
+                    candidate,
+                )
+                if m:
+                    return m.group("value").strip()
+                if re.match(r"^[-\w].*?:", candidate):
+                    break
+            return ""
+    return None
+
+
+def _application_trace_logger_issues(app_yml_text: str) -> list[str]:
+    """Check 7.7 helper: `application.yml` debe declarar el bloque
+    `trace-logger:` que referencia cada env var via `${CCC_*}` (Regla 7: sin
+    defaults inline) y el sub-bloque `payload:` con `mode:`."""
+    block = _extract_top_block(app_yml_text, "trace-logger")
+    if block is None:
+        return ["bloque `trace-logger:` no declarado en application.yml"]
+    issues: list[str] = []
+    for var in TRACE_LOGGER_ENV_VARS:
+        if f"${{{var}}}" not in block:
+            issues.append(f"trace-logger no referencia ${{{var}}}")
+    if not re.search(r"^\s*payload\s*:", block, re.MULTILINE):
+        issues.append("trace-logger sin sub-bloque `payload:`")
+    if not re.search(r"^\s*mode\s*:", block, re.MULTILINE):
+        issues.append("trace-logger.payload sin `mode:`")
+    return issues
+
+
+def _helm_trace_logger_issues(helm_files: list[Path], root: Path) -> list[str]:
+    """Check 7.8 helper: cada helm por-entorno (dev/test/prod) debe declarar las
+    7 env vars CCC_* del trace-logger con el valor esperado del ambiente."""
+    issues: list[str] = []
+    for f in helm_files:
+        env = _helm_env_of(f)
+        if not env:
+            continue
+        expected = _trace_logger_expected(env)
+        text = _read_or_empty(f)
+        rel = _relative_display(f, root)
+        for var in TRACE_LOGGER_ENV_VARS:
+            value = _helm_env_var_value(text, var)
+            if value is None:
+                issues.append(f"{rel} - env var {var} no declarada")
+            elif value != expected[var]:
+                issues.append(
+                    f"{rel} - {var}: '{value}' -> debe ser '{expected[var]}'"
+                )
+    return issues
+
+
 def _matrix_requires_bancs(ctx: CheckContext) -> bool:
     return (ctx.source_type or "").lower() in {"bus", "iib"} and ctx.has_bancs
 
@@ -2512,6 +2623,40 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
+    # 7.7 - trace-logger + payload en application.yml. Observabilidad por
+    # defecto en TODO servicio (orquestador Y microservicio). Debe referenciar
+    # cada env var CCC_* via ${...} (Regla 7: sin defaults inline).
+    # Ver migrate-rest-full.md / migrate-soap-full.md (bloque trace-logger).
+    trace_app_issues = _application_trace_logger_issues(text)
+    if trace_app_issues:
+        results.append(
+            CheckResult(
+                "7.7",
+                "Block 7",
+                "trace-logger + payload en application.yml",
+                "fail",
+                severity="high",
+                detail="; ".join(trace_app_issues[:10]),
+                suggested_fix=(
+                    "Declarar el bloque `trace-logger:` en application.yml con "
+                    "enabled: ${CCC_TRACE_LOGGER_ENABLED}, custom-level "
+                    "(enabled/infoEnabled/debugEnabled/warnEnabled/errorEnabled "
+                    "via ${CCC_CUSTOM_LEVEL_*}) y payload.mode: ${CCC_PAYLOAD_MODE}. "
+                    "Aplica a orquestador y microservicio. El autofix "
+                    "fix_trace_logger_application lo inyecta si falta."
+                ),
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "7.7",
+                "Block 7",
+                "trace-logger + payload en application.yml",
+                "pass",
+            )
+        )
+
     # 7.6 - KUBERNETES_NAMESPACE alineado con catalog-info.yaml
     pipeline = ctx.migrated_path / "azure-pipelines.yml"
     catalog = ctx.migrated_path / "catalog-info.yaml"
@@ -2874,6 +3019,42 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                         "7.5g",
                         "Block 7",
                         "Helm ServiceMonitor Prometheus habilitado",
+                        "pass",
+                    )
+                )
+
+            # 7.8 - Env vars CCC_* del trace-logger en los 3 helms. Observabilidad
+            # por defecto (orquestador Y microservicio). Regla por-ambiente:
+            # DEBUG_ENABLED=true solo en dev; PAYLOAD_MODE=NONE en los 3.
+            trace_helm_issues = _helm_trace_logger_issues(
+                env_helm_files, ctx.migrated_path
+            )
+            if trace_helm_issues:
+                results.append(
+                    CheckResult(
+                        "7.8",
+                        "Block 7",
+                        "Helm env vars trace-logger + payload",
+                        "fail",
+                        severity="high",
+                        detail="; ".join(trace_helm_issues[:12]),
+                        suggested_fix=(
+                            "Declarar en helm/dev.yml, helm/test.yml y "
+                            "helm/prod.yml las env vars CCC_TRACE_LOGGER_ENABLED, "
+                            "CCC_CUSTOM_LEVEL_ENABLED/INFO/DEBUG/WARN/ERROR_ENABLED "
+                            "y CCC_PAYLOAD_MODE. DEBUG_ENABLED=true solo en dev "
+                            "(test/prod=false); PAYLOAD_MODE=NONE en los 3 "
+                            "(no loguear payload/PII). El autofix "
+                            "fix_trace_logger_helm las inyecta si faltan."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.8",
+                        "Block 7",
+                        "Helm env vars trace-logger + payload",
                         "pass",
                     )
                 )

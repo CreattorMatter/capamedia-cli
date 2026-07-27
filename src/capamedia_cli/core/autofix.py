@@ -857,6 +857,183 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
     )
 
 
+# -- trace-logger + payload (Checks 7.7 / 7.8) ------------------------------
+#
+# Observabilidad por defecto en TODO servicio (orquestador Y microservicio).
+# main: referencia env vars (Regla 7, sin defaults inline). test: literales con
+# enabled=false. El bloque de log transaccional (lib-event-logs) NO se toca: es
+# ORQ-only. Los fixes son conservadores: si `trace-logger:` ya aparece (aunque
+# sea parcial) no se reescribe, queda para revision humana.
+_TRACE_LOGGER_BLOCK_MAIN = (
+    "trace-logger:\n"
+    "  enabled: ${CCC_TRACE_LOGGER_ENABLED}\n"
+    "  custom-level:\n"
+    "    enabled: ${CCC_CUSTOM_LEVEL_ENABLED}\n"
+    "    infoEnabled: ${CCC_CUSTOM_LEVEL_INFO_ENABLED}\n"
+    "    debugEnabled: ${CCC_CUSTOM_LEVEL_DEBUG_ENABLED}\n"
+    "    warnEnabled: ${CCC_CUSTOM_LEVEL_WARN_ENABLED}\n"
+    "    errorEnabled: ${CCC_CUSTOM_LEVEL_ERROR_ENABLED}\n"
+    "  payload:\n"
+    "    mode: ${CCC_PAYLOAD_MODE}\n"
+)
+
+_TRACE_LOGGER_BLOCK_TEST = (
+    "trace-logger:\n"
+    "  enabled: false\n"
+    "  custom-level:\n"
+    "    enabled: true\n"
+    "    infoEnabled: true\n"
+    "    debugEnabled: false\n"
+    "    warnEnabled: true\n"
+    "    errorEnabled: true\n"
+    "  payload:\n"
+    "    mode: NONE\n"
+)
+
+_TRACE_LOGGER_KEY_RE = re.compile(r"^[ \t]*trace-logger[ \t]*:", re.MULTILINE)
+
+
+def _append_top_level_block(text: str, block: str) -> str:
+    """Agrega un bloque top-level YAML al final, con una linea en blanco de
+    separacion si el archivo tenia contenido."""
+    if not text:
+        return block
+    if text.endswith("\n\n"):
+        return text + block
+    if text.endswith("\n"):
+        return text + "\n" + block
+    return text + "\n\n" + block
+
+
+def fix_trace_logger_application(root: Path, violation: Violation) -> AutofixResult:
+    """7.7 - Inyecta el bloque `trace-logger:` en application.yml (env vars) y en
+    application-test.yml (literales, enabled=false) si falta. No reescribe un
+    bloque ya presente."""
+    targets = (
+        (Path("src/main/resources/application.yml"), _TRACE_LOGGER_BLOCK_MAIN),
+        (Path("src/main/resources/application.yaml"), _TRACE_LOGGER_BLOCK_MAIN),
+        (Path("src/test/resources/application-test.yml"), _TRACE_LOGGER_BLOCK_TEST),
+        (Path("src/test/resources/application-test.yaml"), _TRACE_LOGGER_BLOCK_TEST),
+    )
+    modified: list[Path] = []
+    changes: list[str] = []
+    for rel, block in targets:
+        f = root / rel
+        if not f.exists():
+            continue
+        text = _read(f)
+        if _TRACE_LOGGER_KEY_RE.search(text):
+            continue
+        _write(f, _append_top_level_block(text, block))
+        modified.append(f)
+        changes.append(str(rel).replace("\\", "/"))
+    if not modified:
+        return AutofixResult(
+            applied=False,
+            notes="trace-logger ya presente o application.yml no encontrado",
+        )
+    return AutofixResult(
+        applied=True,
+        files_modified=modified,
+        after=", ".join(changes),
+        notes="bloque trace-logger inyectado en application.yml/application-test.yml",
+    )
+
+
+def _inject_helm_env_vars(text: str, missing: dict[str, str]) -> str:
+    """Inserta pares `- name: <var>` / `value: <val>` en la lista de env vars del
+    helm. Si existe `environment:`/`variables:`, los agrega como primeros items
+    (el orden en YAML no importa). Si no existe, crea el bloque `environment:` al
+    final. Solo AGREGA: no reescribe valores existentes."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"^([ \t]*)(environment|variables)[ \t]*:[ \t]*$", line)
+        if not m:
+            continue
+        item_indent = m.group(1) + "  "
+        value_indent = item_indent + "  "
+        block: list[str] = []
+        for var, val in missing.items():
+            block.append(f'{item_indent}- name: "{var}"')
+            block.append(f'{value_indent}value: "{val}"')
+        new_lines = lines[: i + 1] + block + lines[i + 1 :]
+        result = "\n".join(new_lines)
+        return result + "\n" if text.endswith("\n") else result
+    block = ["environment:"]
+    for var, val in missing.items():
+        block.append(f'  - name: "{var}"')
+        block.append(f'    value: "{val}"')
+    suffix = "\n".join(block)
+    if not text:
+        return suffix + "\n"
+    sep = "" if text.endswith("\n") else "\n"
+    return text + sep + suffix + "\n"
+
+
+def fix_trace_logger_helm(root: Path, violation: Violation) -> AutofixResult:
+    """7.8 - Inyecta las env vars CCC_* del trace-logger que falten en cada helm
+    por-entorno (dev/test/prod) con el valor esperado del ambiente
+    (DEBUG_ENABLED=true solo en dev, PAYLOAD_MODE=NONE en los 3). Solo agrega las
+    ausentes; los valores incorrectos existentes quedan para revision."""
+    from capamedia_cli.core.checklist_rules import (
+        TRACE_LOGGER_ENV_VARS,
+        _helm_env_of,
+        _helm_env_var_value,
+        _trace_logger_expected,
+    )
+
+    helm_dir = root / "helm"
+    if not helm_dir.exists():
+        return AutofixResult(applied=False, notes="no hay carpeta helm/")
+
+    helm_names = (
+        "dev.yml",
+        "test.yml",
+        "prod.yml",
+        "values-dev.yml",
+        "values-test.yml",
+        "values-prod.yml",
+        "values-dev.yaml",
+        "values-test.yaml",
+        "values-prod.yaml",
+    )
+    modified: list[Path] = []
+    changes: list[str] = []
+    for name in helm_names:
+        f = helm_dir / name
+        if not f.exists():
+            continue
+        env = _helm_env_of(f)
+        if not env:
+            continue
+        expected = _trace_logger_expected(env)
+        text = _read(f)
+        missing = {
+            var: expected[var]
+            for var in TRACE_LOGGER_ENV_VARS
+            if _helm_env_var_value(text, var) is None
+        }
+        if not missing:
+            continue
+        new_text = _inject_helm_env_vars(text, missing)
+        if new_text == text:
+            continue
+        _write(f, new_text)
+        modified.append(f)
+        changes.append(f"{name}: +{len(missing)} env vars")
+    if not modified:
+        return AutofixResult(
+            applied=False,
+            notes="env vars trace-logger ya presentes o sin helm por-entorno",
+        )
+    return AutofixResult(
+        applied=True,
+        files_modified=modified,
+        after="; ".join(changes),
+        notes="env vars trace-logger inyectadas en helm",
+    )
+
+
 # -- Registry ---------------------------------------------------------------
 
 # La clave es el ID del checklist_rules (NO un slug inventado). Asi calza 1:1
@@ -873,6 +1050,8 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "15.3": [fix_componente_from_catalog],
     "15.4": [fix_backend_from_catalog],
     "16.1": [fix_add_test_annotation],
+    "7.7": [fix_trace_logger_application],
+    "7.8": [fix_trace_logger_helm],
 }
 
 

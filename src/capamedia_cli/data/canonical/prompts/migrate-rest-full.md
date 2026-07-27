@@ -53,6 +53,8 @@ Your expertise includes:
 
 **Code language:** All source code, comments, class/method/variable names, and technical documentation must be in **English**. All documentation, including MIGRATION_REPORT and README, must be in **English**.
 
+**Comment policy (no noise):** do NOT add trivial or redundant comments — no version comments, no `fix:` / `removed ...` / cosmetic `TODO` markers, and no comment that merely restates what the code already says. Do NOT generate JavaDoc, and strip any JavaDoc carried over from legacy. The ONLY comments worth keeping document a NON-obvious decision (e.g. a bank catalog literal with its source, or the reason for a workaround). When in doubt, do not add the comment.
+
 ---
 
 ## HEXAGONAL ARCHITECTURE — VISUAL REFERENCE
@@ -591,6 +593,8 @@ public record CustomerBancsDtoResponse(
 <type>[optional scope]: <description>
 ```
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `perf`, `build`, `iac`
+
+Keep the message short — a brief summary, no long detail. NEVER mention Claude or Anthropic in the commit message: no `Co-Authored-By`, no "Generated with", no equivalent attribution line.
 
 ---
 
@@ -2765,6 +2769,8 @@ trace-logger:
     debugEnabled: ${CCC_CUSTOM_LEVEL_DEBUG_ENABLED}
     warnEnabled: ${CCC_CUSTOM_LEVEL_WARN_ENABLED}
     errorEnabled: ${CCC_CUSTOM_LEVEL_ERROR_ENABLED}
+  payload:
+    mode: ${CCC_PAYLOAD_MODE}
 
 optimus:
   web:
@@ -2862,6 +2868,8 @@ trace-logger:
     debugEnabled: ${CCC_CUSTOM_LEVEL_DEBUG_ENABLED}
     warnEnabled: ${CCC_CUSTOM_LEVEL_WARN_ENABLED}
     errorEnabled: ${CCC_CUSTOM_LEVEL_ERROR_ENABLED}
+  payload:
+    mode: ${CCC_PAYLOAD_MODE}
 
 optimus:
   web:
@@ -3058,10 +3066,13 @@ env:
   CCC_TRACE_LOGGER_ENABLED: "true"
   CCC_CUSTOM_LEVEL_ENABLED: "true"
   CCC_CUSTOM_LEVEL_INFO_ENABLED: "true"
-  CCC_CUSTOM_LEVEL_DEBUG_ENABLED: "false"
+  CCC_CUSTOM_LEVEL_DEBUG_ENABLED: "true"   # dev = true ; test and prod = false
   CCC_CUSTOM_LEVEL_WARN_ENABLED: "true"
   CCC_CUSTOM_LEVEL_ERROR_ENABLED: "true"
+  CCC_PAYLOAD_MODE: "NONE"                 # NONE in all 3 (security: never log payload/PII)
 ```
+
+**Rule 17 — trace-logger + payload by default (orchestrator AND microservice).** The `trace-logger` block (with `payload`) is mandatory in EVERY migrated service — it is NOT ORQ-only. `application.yml` declares it via `${CCC_*}` (no inline defaults, Rule 7); the 7 env vars above go in all 3 `helm/*.yml`. Per-environment rule: `CCC_CUSTOM_LEVEL_DEBUG_ENABLED = true` only in `dev` (test/prod = `false`); every other flag equal in the 3; `CCC_PAYLOAD_MODE = NONE` in the 3 (mandatory in prod: never log payload/PII). The transactional-log block (`lib-event-logs`, `spring.kafka`, `logging.event`, `xml.template`) stays ORQ-only — do NOT add it to microservices. Validated by Checks 7.7 (application.yml) and 7.8 (helm).
 
 **Lookup `CCC_BANCS_BASE_URL`** from `prompts/tx-adapter-catalog.json` using the TX code.
 
