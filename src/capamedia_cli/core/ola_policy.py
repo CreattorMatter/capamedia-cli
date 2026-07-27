@@ -19,6 +19,26 @@ from __future__ import annotations
 
 import re
 
+# Namespaces de catalogo del banco (prefijo del repo migrado
+# `<ns>-msa-sp-<servicio>`). FUENTE UNICA: la elige el usuario en
+# `capamedia fabrics generate` y de ahi salen el `projectName`, la deteccion de
+# repos migrados en `clone`/`adopt` y el `_infer_repo_name` de bank_autofix.
+#
+# Historial: la lista estaba duplicada en 4 modulos y divergio — `tmi` (v0.30.1)
+# se agrego solo al prompt de fabrics, asi que un `tmi-msa-sp-*` no lo detectaba
+# ni `clone --migrated` ni `adopt`. Al sumar un namespace nuevo, tocar SOLO esta
+# constante; el test test_namespace_options_single_source lo verifica.
+BANK_NAMESPACES: tuple[str, ...] = (
+    "tnd",
+    "tpr",
+    "csg",
+    "tmp",
+    "tia",
+    "tct",
+    "tmi",
+    "taa",
+)
+
 # Versiones de lib-bnc-api-client por OLA.
 LIB_BNC_API_CLIENT_OLA1 = "1.1.0"
 LIB_BNC_API_CLIENT_OLA2 = "2.0.0"

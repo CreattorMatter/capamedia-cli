@@ -250,7 +250,11 @@ def pack(
         typer.Option(
             "--namespace",
             "-n",
-            help="Namespace del repo migrado (tnd/tpr/csg/tmp/tia/tct). Si se omite, prueba todos.",
+            help=(
+                "Namespace del repo migrado ("
+                + "/".join(NAMESPACE_OPTIONS)
+                + "). Si se omite, prueba todos."
+            ),
         ),
     ] = None,
     destino_repo: Annotated[

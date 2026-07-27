@@ -42,6 +42,7 @@ from capamedia_cli.core.dossier import (
     write_dossier,
 )
 from capamedia_cli.core.legacy_analyzer import analyze_legacy
+from capamedia_cli.core.ola_policy import BANK_NAMESPACES
 
 console = Console()
 
@@ -348,7 +349,7 @@ class MigratedCloneResult:
     error: str = ""
 
 
-MIGRATED_NAMESPACES = ("tnd", "tpr", "csg", "tmp", "tia", "tct")
+MIGRATED_NAMESPACES = BANK_NAMESPACES
 DEFAULT_BRANCH_NAMES = {"main", "master"}
 
 

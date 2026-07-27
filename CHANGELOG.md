@@ -6,6 +6,38 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-07-27
+
+### Added — Namespace `taa` + fuente unica de namespaces del banco
+
+`taa` se suma a las opciones del prompt de `capamedia fabrics generate`
+(`projectName` resultante: `taa-msa-sp-<servicio>`).
+
+### Fixed — Namespaces elegibles que el resto del CLI no reconocia
+
+La lista de namespaces estaba **duplicada en 4 modulos** y habia divergido: el
+commit `8ab7dc3` agrego `tmi` SOLO al prompt de `fabrics`, asi que se podia
+elegir `tmi` pero `clone --migrated` y `adopt` no reconocian un repo
+`tmi-msa-sp-*`. Agregar `taa` solo ahi habria repetido el mismo bug.
+
+- Fuente unica nueva: `BANK_NAMESPACES` en `core/ola_policy.py` (8 namespaces:
+  `tnd`, `tpr`, `csg`, `tmp`, `tia`, `tct`, `tmi`, `taa`).
+- `fabrics.NAMESPACE_OPTIONS` (que consume tambien `qa.py`),
+  `adopt._DESTINO_NAMESPACES` y `clone.MIGRATED_NAMESPACES` pasan a derivar de
+  ella en vez de redefinirla.
+- **`tmi` queda arreglado de paso**: antes era elegible pero no adoptable.
+- Textos de ayuda de `adopt --help` y `qa prepare --namespace` pasan a ser
+  dinamicos (listaban namespaces desactualizados a mano).
+
+`_infer_repo_name` (`bank_autofix.py`) tiene una 4a lista, pero devuelve `name`
+en ambas ramas del `if` — es codigo muerto y no afecta a ningun namespace; se
+deja como esta y se documenta aca.
+
+**Guard anti-drift** (`tests/test_bank_namespaces.py`, +4 tests, suite 1047):
+verifica que los 3 consumidores deriven de `BANK_NAMESPACES` (falla si alguien
+vuelve a hardcodear la lista) y que `adopt` detecte un proyecto de **cada**
+namespace vigente — el bug concreto que tuvo `tmi`.
+
 ## [0.34.0] - 2026-07-25
 
 ### Added — trace-logger + payload por defecto (orquestador Y microservicio)

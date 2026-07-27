@@ -25,6 +25,7 @@ from rich.table import Table
 
 from capamedia_cli.core.auth import resolve_artifact_token
 from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
+from capamedia_cli.core.ola_policy import BANK_NAMESPACES
 
 console = Console()
 
@@ -396,7 +397,10 @@ def setup(
         )
 
 
-NAMESPACE_OPTIONS = ["tnd", "tpr", "csg", "tmp", "tia", "tct", "tmi"]
+# Re-export de la fuente unica (core.ola_policy.BANK_NAMESPACES). Se mantiene el
+# nombre porque `qa.py` ya lo importa desde aca. NO redefinir la lista: agregar
+# namespaces nuevos en `BANK_NAMESPACES`.
+NAMESPACE_OPTIONS = list(BANK_NAMESPACES)
 
 # Params del MCP que nuestro CLI sabe proveer. Usado para validacion de schema en runtime.
 KNOWN_MCP_PARAMS = frozenset(

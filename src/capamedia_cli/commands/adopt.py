@@ -34,6 +34,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
+from capamedia_cli.core.ola_policy import BANK_NAMESPACES
+
 console = Console()
 
 
@@ -46,7 +48,7 @@ _LEGACY_PATTERNS = [
 ]
 
 # Patterns para detectar subdirectorios que deben ir a destino/
-_DESTINO_NAMESPACES = ("csg", "tnd", "tpr", "tmp", "tia", "tct")
+_DESTINO_NAMESPACES = BANK_NAMESPACES
 _DESTINO_PATTERNS = [
     re.compile(rf"^{ns}-msa-sp-[a-z]+\d{{4}}$", re.IGNORECASE)
     for ns in _DESTINO_NAMESPACES
@@ -117,8 +119,9 @@ def adopt(
     """Adopta un workspace pre-existente al layout del CLI (v0.23.11).
 
     Detecta subdirectorios con patterns conocidos (ws-*-was, sqb-msa-*,
-    csg/tnd/tpr/tmp/tia/tct-msa-sp-*) y los mueve a `legacy/` + `destino/`
-    segun corresponda. Permite luego correr `init` para completar el setup.
+    <namespace>-msa-sp-* para los namespaces de `BANK_NAMESPACES`) y los mueve a
+    `legacy/` + `destino/` segun corresponda. Permite luego correr `init` para
+    completar el setup.
     """
     # v0.20.1: auto-padding del service_name si se paso
     if service_name:
