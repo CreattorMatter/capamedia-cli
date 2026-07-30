@@ -191,7 +191,7 @@ query, DAO/repository, or config file that proves DB usage.
 
 ## Build And Dependencies
 
-Use Java 21 and Spring Boot `3.5.14` or newer approved by the bank.
+Use Java 21 and Spring Boot `3.5.15` or newer approved by the bank.
 
 Allowed common dependencies:
 

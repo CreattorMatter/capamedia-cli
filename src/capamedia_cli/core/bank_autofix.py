@@ -1759,7 +1759,7 @@ def _remove_netty_pins_from_dependency_management(
 # ---------------------------------------------------------------------------
 # Regla 8.8 — Arbol Netty completo pineado a la version permitida en WebFlux.
 #
-# El BOM de Spring Boot 3.5.14 trae `io.netty:*:4.1.121.Final` (vulnerable). En
+# El BOM de Spring Boot 3.5.x trae `io.netty:*:4.1.121.Final` (vulnerable). En
 # WebFlux hay que pinear el arbol core de Netty (NETTY_CORE_MODULES)
 # a NETTY_WEBFLUX_ALLOWED_VERSION con DOBLE mecanismo:
 #   - `dependencyManagement { dependencies { dependency '...' } }`

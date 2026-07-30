@@ -10,7 +10,7 @@ import re
 # compatibilidad con los arquetipos/librerias actuales del banco. La mitigacion
 # de riesgos transitivos se mantiene por reglas especificas: sin Undertow
 # activo (Check 8.2) y sin pins manuales de io.netty:* (Check 8.7).
-SPRING_BOOT_BASELINE_VERSION = "3.5.14"
+SPRING_BOOT_BASELINE_VERSION = "3.5.15"
 
 # Excepcion oficial (v0.27.0): en proyectos WebFlux el pin
 # `io.netty:*:4.1.136.Final` esta permitido porque cierra los CVEs Snyk 2026-05/07

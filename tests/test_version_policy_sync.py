@@ -13,6 +13,7 @@ version_policy.py pero olvide actualizar el canonical".
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from capamedia_cli.core.version_policy import (
@@ -29,6 +30,11 @@ CANON = Path(__file__).resolve().parent.parent / "src" / "capamedia_cli" / "data
 
 def _read(rel: str) -> str:
     return (CANON / rel).read_text(encoding="utf-8")
+
+
+def _canonical_files() -> list[str]:
+    """Todos los .md del canonical, relativos a CANON."""
+    return [str(p.relative_to(CANON)) for p in CANON.rglob("*.md")]
 
 
 def test_netty_webflux_version_cited_in_canonicals() -> None:
@@ -82,6 +88,31 @@ def test_old_peer_review_plugin_version_not_declared_as_current() -> None:
         assert stale not in _read(target), (
             f"{target} todavia declara el plugin de peer review en 1.1.0"
         )
+
+
+def test_no_canonical_promotes_a_different_spring_boot_version() -> None:
+    """Ningun canonical puede proponer un `org.springframework.boot version 'X'`
+    distinto del baseline.
+
+    Drift real detectado en v0.35.0: `doublecheck.md` pedia `3.5.15` mientras el
+    codigo y los prompts de migracion decian `3.5.14`. El agente subia la version
+    en el doublecheck contradiciendo lo que acababa de generar la migracion, y
+    ningun check lo exigia. El guard de "aparece citado" no lo atrapaba porque
+    solo verifica presencia, no exclusividad.
+    """
+    pattern = re.compile(
+        r"org\.springframework\.boot['\"]?\s+version\s+['\"]([0-9][^'\"]*)['\"]"
+    )
+    offenders: list[str] = []
+    for rel in sorted(_canonical_files()):
+        for version in set(pattern.findall(_read(rel))):
+            if version != SPRING_BOOT_BASELINE_VERSION:
+                offenders.append(f"{rel}: {version}")
+    assert not offenders, (
+        f"Canonicales que proponen una version de Spring Boot distinta del "
+        f"baseline ({SPRING_BOOT_BASELINE_VERSION}): {offenders}. Mantener una "
+        "sola version en todo el canonical o el agente recibe ordenes en conflicto."
+    )
 
 
 def test_lib_trace_logger_version_cited_in_canonicals() -> None:

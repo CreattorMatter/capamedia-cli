@@ -8,6 +8,30 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [0.35.0] - 2026-07-27
 
+### Changed — Baseline Spring Boot `3.5.14` → `3.5.15`
+
+`SPRING_BOOT_BASELINE_VERSION` pasa a `3.5.15`. El Check 8.1 sigue aceptando
+versiones **mayores** (`is_version_lower`), asi que solo `< 3.5.15` es FAIL HIGH;
+el autofix `fix_spring_boot_version` ahora reescribe a `3.5.15`.
+
+**Resuelve un drift que hacia que el doublecheck contradijera a la migracion:**
+`doublecheck.md` pedia `3.5.15` desde v0.29.0, pero el codigo y los prompts de
+migracion decian `3.5.14`. El agente generaba `3.5.14` en `migrate` y lo subia a
+`3.5.15` en `doublecheck` — un cambio que ningun check exigia y que contradecia
+el baseline declarado en `bank-official-rules.md`.
+
+Propagado a: `version_policy.py`, `bank-official-rules.md` (Regla 8.5, Check 8.1
+y autofix), `migrate-rest-full.md`, `migrate-soap-full.md`,
+`log-transaccional-orq.md`, y los textos de prompt de `ai.py` / `batch.py`.
+El comentario de `bank_autofix.py` sobre el BOM vulnerable pasa a decir `3.5.x`
+(no se afirma nada sobre el BOM de `3.5.15` sin verificarlo).
+
+**Guard nuevo** `test_no_canonical_promotes_a_different_spring_boot_version`:
+falla si CUALQUIER canonical propone un `org.springframework.boot version 'X'`
+distinto del baseline. El guard anterior solo verificaba que el baseline
+*apareciera* citado, no que fuera el unico — por eso este drift sobrevivio 6
+releases. Validado por mutacion.
+
 ### Added — Namespace `taa` + fuente unica de namespaces del banco
 
 `taa` se suma a las opciones del prompt de `capamedia fabrics generate`
@@ -33,7 +57,7 @@ elegir `tmi` pero `clone --migrated` y `adopt` no reconocian un repo
 en ambas ramas del `if` — es codigo muerto y no afecta a ningun namespace; se
 deja como esta y se documenta aca.
 
-**Guard anti-drift** (`tests/test_bank_namespaces.py`, +4 tests, suite 1047):
+**Guard anti-drift** (`tests/test_bank_namespaces.py`, +4 tests, suite 1048):
 verifica que los 3 consumidores deriven de `BANK_NAMESPACES` (falla si alguien
 vuelve a hardcodear la lista) y que `adopt` detecte un proyecto de **cada**
 namespace vigente — el bug concreto que tuvo `tmi`.

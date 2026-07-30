@@ -541,13 +541,13 @@ def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
 
     assert check.status == "fail"
     assert check.severity == "high"
-    assert "3.5.14" in check.detail
+    assert "3.5.15" in check.detail
 
 
 def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n",
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n",
         encoding="utf-8",
     )
 
@@ -561,7 +561,7 @@ def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
 def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies {\n"
         "  def undertowVersion = '2.4.0.RC4'\n"
         "  implementation 'org.springframework.boot:spring-boot-starter-undertow'\n"
@@ -582,7 +582,7 @@ def test_block_8_rejects_undertow_dependencies(tmp_path: Path) -> None:
 def test_block_8_accepts_default_embedded_server_without_undertow(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n",
         encoding="utf-8",
     )
@@ -608,7 +608,7 @@ def test_autofix_updates_old_spring_boot_plugin(tmp_path: Path) -> None:
     report = run_autofix_loop(root, rerun)
 
     assert report.total_applied == 1
-    assert "version '3.5.14'" in build_gradle.read_text(encoding="utf-8")
+    assert "version '3.5.15'" in build_gradle.read_text(encoding="utf-8")
 
 
 def test_block_0_rejects_bancs_artifacts_for_was(tmp_path: Path) -> None:

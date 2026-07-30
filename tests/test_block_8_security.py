@@ -1,4 +1,4 @@
-"""Tests for Block 8 security baseline (Spring Boot 3.5.14).
+"""Tests for Block 8 security baseline (Spring Boot 3.5.15).
 
 Cubre los cambios de seguridad CVE-driven decididos por el equipo
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla, 2026-05):
@@ -11,7 +11,7 @@ Cubre los cambios de seguridad CVE-driven decididos por el equipo
   build.gradle.
 
 Justificacion:
-- Spring Boot 3.5.14 es el baseline aprobado para los servicios OLA.
+- Spring Boot 3.5.15 es el baseline aprobado para los servicios OLA.
 - Pins manuales (Jackson o Netty) son anti-patron: se quedan atras al
   proximo CVE — exactamente lo que paso con netty-codec-http:4.1.132.Final
   que se metio para parchar un CVE y se transformo en el bug nuevo.
@@ -63,9 +63,9 @@ def _find(results, check_id):
 # ---------------------------------------------------------------------------
 
 
-def test_baseline_is_3_5_14() -> None:
-    """El baseline declarado en version_policy.py debe ser 3.5.14."""
-    assert SPRING_BOOT_BASELINE_VERSION == "3.5.14"
+def test_baseline_is_3_5_15() -> None:
+    """El baseline declarado en version_policy.py debe ser 3.5.15."""
+    assert SPRING_BOOT_BASELINE_VERSION == "3.5.15"
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +74,10 @@ def test_baseline_is_3_5_14() -> None:
 
 
 def test_8_1_severity_is_high_for_old_version(tmp_path: Path) -> None:
-    """Spring Boot < 3.5.14 -> HIGH."""
+    """Spring Boot < 3.5.15 -> HIGH. Usa 3.5.14 (el baseline anterior) para que
+    el test muerda si alguien revierte el bump de v0.35.0."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.13' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -84,7 +85,7 @@ def test_8_1_severity_is_high_for_old_version(tmp_path: Path) -> None:
 
     assert check.status == "fail"
     assert check.severity == "high"
-    assert "3.5.14" in check.detail
+    assert "3.5.15" in check.detail
 
 
 def test_8_1_severity_high_when_version_missing(tmp_path: Path) -> None:
@@ -103,9 +104,13 @@ def test_8_1_severity_high_when_version_missing(tmp_path: Path) -> None:
     assert check.severity == "high"
 
 
-def test_8_1_passes_for_3_5_14(tmp_path: Path) -> None:
+def test_8_1_passes_for_baseline(tmp_path: Path) -> None:
+    """El baseline exacto pasa."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
+    _write_gradle(
+        root,
+        f"plugins {{ id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}' }}\n",
+    )
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -114,10 +119,10 @@ def test_8_1_passes_for_3_5_14(tmp_path: Path) -> None:
     assert check.status == "pass"
 
 
-def test_8_1_passes_for_3_5_15_newer(tmp_path: Path) -> None:
+def test_8_1_passes_for_newer_than_baseline(tmp_path: Path) -> None:
     """Versiones mas nuevas que el baseline tambien pasan."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.15' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.16' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
@@ -138,7 +143,7 @@ def test_8_7_detects_netty_codec_http_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencyManagement {
     dependencies {
@@ -166,7 +171,7 @@ def test_8_7_detects_any_netty_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencyManagement {
     dependencies {
@@ -189,7 +194,7 @@ def test_8_7_passes_without_netty_pin(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencyManagement {
     imports {
@@ -212,7 +217,7 @@ def test_8_7_ignores_netty_in_comments(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencyManagement {
     // NEVER: dependency 'io.netty:netty-codec-http:4.1.132.Final'
@@ -236,7 +241,7 @@ def test_8_7_ignores_netty_dependencies_outside_dependency_management(tmp_path: 
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'io.netty:netty-handler:4.1.132.Final'
@@ -261,7 +266,7 @@ def test_autofix_removes_netty_codec_http_pin(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencyManagement {
     dependencies {
@@ -288,7 +293,7 @@ def test_autofix_idempotent(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 dependencyManagement { imports { mavenBom 'foo:bar:1.0' } }
 """,
     )
@@ -312,7 +317,7 @@ def test_autofix_preserves_other_dependencies(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -347,7 +352,7 @@ def test_autofix_preserves_direct_netty_dependency_outside_dependency_management
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'io.netty:netty-handler:4.1.132.Final'
@@ -379,7 +384,7 @@ def test_8_7_allows_4_1_135_pin_in_webflux(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -409,7 +414,7 @@ def test_8_7_rejects_non_135_pin_in_webflux(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -437,7 +442,7 @@ def test_8_7_rejects_4_1_135_pin_when_not_webflux(tmp_path: Path) -> None:
     _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
@@ -464,7 +469,7 @@ def test_autofix_preserves_4_1_135_pin_in_webflux(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -491,7 +496,7 @@ def test_autofix_removes_non_135_pin_in_webflux(tmp_path: Path) -> None:
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -518,7 +523,7 @@ def test_autofix_mixed_pins_in_webflux_only_removes_non_135(tmp_path: Path) -> N
     f = _write_gradle(
         root,
         """\
-plugins { id 'org.springframework.boot' version '3.5.14' }
+plugins { id 'org.springframework.boot' version '3.5.15' }
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
@@ -558,7 +563,7 @@ def _webflux_gradle(dep_mods, force_mods=None, version=_VER) -> str:
         f"        dependency 'io.netty:{m}:{version}'" for m in dep_mods
     )
     blocks = [
-        "plugins { id 'org.springframework.boot' version '3.5.14' }",
+        "plugins { id 'org.springframework.boot' version '3.5.15' }",
         "",
         "dependencies {",
         "    implementation 'org.springframework.boot:spring-boot-starter-webflux'",
@@ -626,7 +631,7 @@ def test_8_8_not_emitted_without_netty_pin(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
     _write_gradle(
         root,
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies {\n"
         "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
         "}\n",
@@ -717,7 +722,7 @@ def test_autofix_full_tree_skips_without_base_pin(tmp_path: Path) -> None:
     """WebFlux sin ningun pin io.netty -> no forzamos pins (skip)."""
     root = _make_minimal_project(tmp_path)
     gradle = (
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies {\n"
         "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
         "}\n"
@@ -736,14 +741,14 @@ def test_autofix_full_tree_skips_without_base_pin(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 _GRADLE_WITH_LIBBNC = (
-    "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+    "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
     "dependencies {\n"
     "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
     "    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'\n"
     "}\n"
 )
 _GRADLE_NO_LIBBNC = (
-    "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+    "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
     "dependencies {\n"
     "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
     "}\n"
@@ -835,7 +840,7 @@ def test_8_9_ignores_libbnc_in_comment(tmp_path: Path) -> None:
     root = _make_minimal_project(tmp_path)
     _write_gradle(
         root,
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies {\n"
         "    // NEVER add com.pichincha.bnc:lib-bnc-api-client here\n"
         "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
@@ -874,7 +879,7 @@ def test_8_9_parity_with_vendor_is_bus_bancs() -> None:
 def test_8_9_libbnc_in_submodule_detected(tmp_path: Path) -> None:
     """La lib en un submodulo (no en el gradle raiz) se detecta (rglob, L4)."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.14' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.15' }\n")
     sub = root / "modulo-app"
     sub.mkdir(parents=True, exist_ok=True)
     (sub / "build.gradle").write_text(
@@ -930,7 +935,7 @@ def test_8_10_autofix_skips_when_netty_not_pinned(tmp_path: Path) -> None:
     """WebFlux pero sin pin base de Netty -> gate cierra (8.7/8.8 primero)."""
     root = _make_minimal_project(tmp_path)
     gradle = (
-        "plugins { id 'org.springframework.boot' version '3.5.14' }\n"
+        "plugins { id 'org.springframework.boot' version '3.5.15' }\n"
         "dependencies {\n"
         "    implementation 'org.springframework.boot:spring-boot-starter-webflux'\n"
         "}\n"
@@ -1033,7 +1038,7 @@ def _gradle_with_plugin(version: str | None, *, kotlin: bool = False) -> str:
     return (
         "plugins {\n"
         "    id 'java'\n"
-        "    id 'org.springframework.boot' version '3.5.14'\n"
+        "    id 'org.springframework.boot' version '3.5.15'\n"
         f"{plugin_line}"
         "}\n"
     )
@@ -1122,7 +1127,7 @@ def test_8_12_autofix_bumps_old_version(tmp_path: Path) -> None:
     assert f"id '{_PR_PLUGIN}' version '{_PR_VER}'" in text
     assert "1.1.0" not in text
     # no toca los otros plugins del bloque
-    assert "id 'org.springframework.boot' version '3.5.14'" in text
+    assert "id 'org.springframework.boot' version '3.5.15'" in text
 
 
 def test_8_12_autofix_resolves_the_check(tmp_path: Path) -> None:

@@ -484,7 +484,7 @@ implican BANCS (caso WSReglas0010: `UMPSeguridad0085` envuelve Cyxtera SOAP).
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla). 10 CVEs HIGH
 activas: 3 Jackson 3.0.1 transitivas, 4 Netty 4.1.132 transitivas, 3 Undertow.
 
-**Decision vigente del equipo:** usar **Spring Boot `3.5.14`** como baseline
+**Decision vigente del equipo:** usar **Spring Boot `3.5.15`** como baseline
 aprobado para servicios OLA. Spring Boot 4.x NO es baseline general por
 compatibilidad con arquetipos/librerias actuales del banco. Undertow se sigue
 bloqueando aparte (Regla 8 + Check 8.2) y los pins manuales de Netty/Jackson
@@ -494,7 +494,7 @@ siguen prohibidos porque se quedan atras al proximo CVE.
 
 ```gradle
 plugins {
-    id 'org.springframework.boot' version '3.5.14'
+    id 'org.springframework.boot' version '3.5.15'
 }
 ```
 
@@ -585,7 +585,7 @@ configurations.all {
 
 ### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
 
-- 8.1: plugin `org.springframework.boot` con version < `3.5.14` → HIGH.
+- 8.1: plugin `org.springframework.boot` con version < `3.5.15` → HIGH.
 - 8.2: cualquier dependencia `undertow` activa → HIGH.
 - 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH,
   **excepto** `io.netty:*:4.1.136.Final` en proyectos WebFlux (ver bloque
@@ -628,7 +628,7 @@ dependencyManagement {
 ### Autofix
 
 `fix_spring_boot_version` (clave `"8.1"`):
-1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'3.5.14'`
+1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'3.5.15'`
    en `build.gradle` y `build.gradle.kts`.
 2. Actualiza `spring_boot_version` en `migration-context.json` si difiere.
 
