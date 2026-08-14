@@ -130,6 +130,16 @@ happy-path JSON son error salvo evidencia legacy explicita.
 - `application*.yml` no puede definir `CCC_*: valor` ni usar defaults inline
   en placeholders `CCC_*`. Si referencia `${CCC_*}`, el valor concreto debe
   vivir en los 3 Helm (`dev/test/prod`).
+- Si el proyecto WebFlux construye `WebClient.builder(` manualmente (ORQ/BUS
+  con downstreams WS), debe seguir el patron oficial: records
+  `HttpClientProperty`/`WebClientProperty` (prefix `webclient`), helper con
+  `ConnectionProvider` + `.responseTimeout(...)` (NUNCA `ReadTimeoutHandler`),
+  bean `WebClient.Builder` `<svc>WebClientBuilder` + bean `<svc>WebClient` por
+  downstream, y bloque `webclient.<svc>` en application.yml con los 5 `${CCC_*}`
+  (url/timeout/read-timeout/max-connections/pending-acquire-max-count).
+  Check 7.9 (sin autofix — cirugia de codigo guiada por LT-3b / prompt REST
+  §4.17). Migrar tambien `services.<svc>.base-url` legacy al prefijo
+  `webclient.` y eliminar los timeouts globales compartidos.
 
 ## Paso 1.7 - error.recurso / error.componente sin nombre legacy
 

@@ -2657,6 +2657,105 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
+    # 7.9 - WebClient oficial para downstream WS (LT-3b / §4.17). Solo aplica
+    # cuando el proyecto WebFlux construye WebClient manualmente (ORQ/BUS que
+    # invoca microservicios WS downstream). BANCS via lib-bnc y Stratio quedan
+    # fuera: sus libs construyen el cliente internamente y no llaman
+    # WebClient.builder( en el codigo del proyecto.
+    block7_gradle_files = [
+        f
+        for f in (
+            ctx.migrated_path / "build.gradle",
+            ctx.migrated_path / "build.gradle.kts",
+        )
+        if f.exists()
+    ]
+    src_main_java = ctx.migrated_path / "src" / "main" / "java"
+    java_sources = list(src_main_java.rglob("*.java")) if src_main_java.exists() else []
+    builder_files = [
+        f for f in java_sources if "WebClient.builder(" in _read_or_empty(f)
+    ]
+    if _project_uses_webflux(block7_gradle_files) and builder_files:
+        webclient_issues: list[str] = []
+        all_java_text = "\n".join(_read_or_empty(f) for f in java_sources)
+        if "ConnectionProvider" not in all_java_text:
+            webclient_issues.append(
+                "sin ConnectionProvider: el pool oficial "
+                "(maxConnections/maxIdleTime/pendingAcquire*) no esta configurado"
+            )
+        legacy_handler = [
+            _relative_display(f, ctx.migrated_path)
+            for f in java_sources
+            if "ReadTimeoutHandler" in _read_or_empty(f)
+        ]
+        if legacy_handler:
+            webclient_issues.append(
+                "ReadTimeoutHandler (patron legacy) en: "
+                + ", ".join(legacy_handler[:4])
+                + " — usar `.responseTimeout(...)` del HttpClient"
+            )
+        webclient_block = _extract_top_block(text, "webclient")
+        if webclient_block is None:
+            webclient_issues.append(
+                "application.yml sin bloque top-level `webclient:` "
+                "(una entrada por downstream con url/timeout/read-timeout/"
+                "max-connections/pending-acquire-max-count via ${CCC_*})"
+            )
+        else:
+            # Cross-ref: cada bean `<svc>WebClient` debe tener su entrada
+            # `webclient.<svc>:`. Atrapa el bloque `webclient:` con timeouts
+            # globales (patron legacy) sin entradas por downstream.
+            bean_re = re.compile(r"WebClient\s+(\w+)WebClient\s*\(")
+            downstreams = sorted(
+                {m.group(1).lower() for m in bean_re.finditer(all_java_text)}
+            )
+            missing_keys = [
+                d
+                for d in downstreams
+                if not re.search(
+                    rf"^\s+{re.escape(d)}\s*:", webclient_block, re.MULTILINE
+                )
+            ]
+            if missing_keys:
+                webclient_issues.append(
+                    "downstream(s) sin entrada `webclient.<svc>:` en "
+                    "application.yml: " + ", ".join(missing_keys[:6])
+                )
+        title_79 = "WebClient oficial (Builder + ConnectionProvider + webclient:)"
+        if webclient_issues:
+            results.append(
+                CheckResult(
+                    "7.9",
+                    "Block 7",
+                    title_79,
+                    "fail",
+                    severity="medium",
+                    detail="; ".join(webclient_issues),
+                    suggested_fix=(
+                        "Aplicar el patron oficial del banco (canonical "
+                        "log-transaccional-orq.md LT-3b / prompt REST §4.17): "
+                        "records HttpClientProperty + WebClientProperty "
+                        "(prefix `webclient`), helper WebClientConfig con "
+                        "ConnectionProvider.builder + responseTimeout, y por "
+                        "cada downstream un bean WebClient.Builder "
+                        "`<svc>WebClientBuilder` + bean WebClient `<svc>WebClient`. "
+                        "En application.yml: bloque `webclient.<svc>` con "
+                        "url/timeout/read-timeout/max-connections/"
+                        "pending-acquire-max-count via ${CCC_*}."
+                    ),
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "7.9",
+                    "Block 7",
+                    title_79,
+                    "pass",
+                    detail=f"{len(builder_files)} config(s) WebClient con patron oficial",
+                )
+            )
+
     # 7.6 - KUBERNETES_NAMESPACE alineado con catalog-info.yaml
     pipeline = ctx.migrated_path / "azure-pipelines.yml"
     catalog = ctx.migrated_path / "catalog-info.yaml"

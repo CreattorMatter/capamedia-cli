@@ -156,6 +156,20 @@ def load_fabrics_metadata(workspace: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _resolved_mcp_package_version(spec) -> str:
+    """Version real del npm package con la que se genero el arquetipo.
+
+    Para el path npx no se sabe de antemano (el tag `latest` lo resuelve npx),
+    pero al terminar la corrida el package quedo en el cache, asi que la version
+    mas alta del cache es la que acaba de correr. Best-effort: "" si no se puede.
+    """
+    from capamedia_cli.core.mcp_launcher import latest_cached_version
+
+    if spec.version and spec.version != "latest":
+        return str(spec.version)
+    return latest_cached_version()
+
+
 def _write_fabrics_metadata(workspace: Path, payload: dict) -> Path:
     path = fabrics_metadata_path(workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -693,6 +707,16 @@ def generate(
         bool,
         typer.Option("--dry-run", help="No invocar el MCP, solo mostrar los parametros que se usarian"),
     ] = False,
+    use_cache: Annotated[
+        bool,
+        typer.Option(
+            "--use-cache",
+            help=(
+                "Modo offline: usa el MCP cacheado por npx en vez de resolver "
+                "@latest contra el registry. NO garantiza la ultima version."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Invoca el MCP Fabrics del banco y genera el arquetipo en ./destino/.
 
@@ -701,6 +725,7 @@ def generate(
     """
     from capamedia_cli.core.legacy_analyzer import analyze_legacy
     from capamedia_cli.core.mcp_client import MCPClient, MCPError
+    from capamedia_cli.core.mcp_launcher import _cache_spec as _cache_spec_for
     from capamedia_cli.core.mcp_launcher import locate as locate_mcp
 
     ws = (workspace or Path.cwd()).resolve()
@@ -879,21 +904,32 @@ def generate(
     # Step 5: Locate + launch MCP
     console.print("\n[bold]Arrancando MCP Fabrics...[/bold]")
     try:
-        spec = locate_mcp(cwd=ws)
+        spec = locate_mcp(cwd=ws, prefer_cache=use_cache)
     except FileNotFoundError as e:
         console.print(f"[red]FAIL[/red] {e}")
         raise typer.Exit(1) from None
     console.print(f"  source: [dim]{spec.source}[/dim]")
+    if spec.source == "cache":
+        console.print(
+            f"  [yellow]WARN[/yellow] corriendo el MCP cacheado "
+            f"(v{spec.version or 'desconocida'}) — puede NO ser la ultima version.\n"
+            "         Para forzar la ultima: 'capamedia fabrics setup --refresh-npmrc' "
+            "y volver a correr sin --use-cache."
+        )
+    else:
+        console.print("  [dim]resolviendo @latest contra el registry (npx)[/dim]")
 
     mcp_error_msg: str | None = None
     result: dict = {}
     server_info: dict = {}
     mcp_source = ""
-    try:
-        with MCPClient(spec.command, env=spec.env, cwd=str(ws)) as client:
+
+    def _launch(spec_to_use):
+        """Corre la sesion MCP completa. Devuelve (server_info, mcp_source, result, error)."""
+        with MCPClient(spec_to_use.command, env=spec_to_use.env, cwd=str(ws)) as client:
             info = client.initialize(client_name="capamedia-cli", client_version="0.2.4")
-            server_info = info.get("serverInfo", {}) if isinstance(info, dict) else {}
-            mcp_source = spec.source
+            session_info = info.get("serverInfo", {}) if isinstance(info, dict) else {}
+            session_error: str | None = None
             console.print(
                 f"  [green]OK[/green] MCP conectado: {info.get('serverInfo', {}).get('name')} "
                 f"v{info.get('serverInfo', {}).get('version')}"
@@ -941,13 +977,36 @@ def generate(
 
             # Step 6: Invoke the tool
             console.print("\n[bold]Invocando create_project_with_wsdl...[/bold]")
+            session_result: dict = {}
             try:
-                result = client.call_tool("create_project_with_wsdl", mcp_args)
+                session_result = client.call_tool("create_project_with_wsdl", mcp_args)
             except MCPError as e:
-                mcp_error_msg = str(e)
+                session_error = str(e)
+            return session_info, spec_to_use.source, session_result, session_error
+
+    try:
+        server_info, mcp_source, result, mcp_error_msg = _launch(spec)
     except MCPError as e:
-        console.print(f"[red]FAIL[/red] error conectando al MCP: {e}")
-        raise typer.Exit(1) from None
+        # npx no pudo bajar @latest (E401 por PAT vencido, sin red, etc.).
+        # Degradar al cache antes de abortar: mejor un arquetipo viejo avisado
+        # que un pipeline bloqueado. Ver .capamedia/fabrics.json para auditarlo.
+        fallback = None if spec.source == "cache" else _cache_spec_for(ws)
+        if fallback is None:
+            console.print(f"[red]FAIL[/red] error conectando al MCP: {e}")
+            raise typer.Exit(1) from None
+        console.print(
+            f"  [yellow]WARN[/yellow] npx no pudo resolver @latest ({e}).\n"
+            f"         Degradando al cache local (v{fallback.version or 'desconocida'}) — "
+            "puede NO ser la ultima version.\n"
+            "         Arregla el token con 'capamedia fabrics setup --scope global "
+            "--token <PAT> --force --refresh-npmrc' y regenera."
+        )
+        try:
+            server_info, mcp_source, result, mcp_error_msg = _launch(fallback)
+        except MCPError as e2:
+            console.print(f"[red]FAIL[/red] error conectando al MCP (cache): {e2}")
+            raise typer.Exit(1) from None
+        spec = fallback
 
     # Step 7: Parse result
     content_items = result.get("content", [])
@@ -1059,6 +1118,9 @@ def generate(
                 "mcp_source": mcp_source,
                 "mcp_server_name": _resolve_env_placeholder(str(server_info.get("name", ""))),
                 "mcp_server_version": str(server_info.get("version", "")),
+                # Version del npm package (serverInfo.version siempre dice "1.0.0",
+                # asi que no sirve para auditar con que build se scaffoldeo).
+                "mcp_package_version": _resolved_mcp_package_version(spec),
             },
         )
 

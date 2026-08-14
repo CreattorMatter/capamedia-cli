@@ -36,7 +36,7 @@ Antes de invocar, verificar:
 
 1. **El tool existe** — `mcp__fabrics__create_project_with_wsdl` debe estar disponible en esta sesión. Si no, avisar al usuario y detenerse.
 
-2. **Versión reciente** — preguntar al usuario: *"¿Actualizaste el MCP esta semana? (`npm view @pichincha/fabrics-project version`)"*. Registrar la respuesta.
+2. **Versión reciente** — `capamedia fabrics generate` resuelve `@latest` contra el registry en cada corrida, así que no hay que "actualizar el MCP" a mano. Lo único a verificar es que la corrida **no** haya caído al cache: si la salida imprime `source: cache` + el `WARN` de versión, el `.npmrc` no está autenticando (PAT vencido) y el arquetipo pudo generarse con una build vieja → correr `capamedia fabrics setup --scope global --token <PAT> --force --refresh-npmrc` y regenerar. Queda auditable en `.capamedia/fabrics.json` (`mcp_source` + `mcp_package_version`).
 
 3. **Schema actualizado** — leer el schema del tool. Si hay parámetros nuevos o renombrados respecto a los conocidos, preguntar antes de invocar.
 

@@ -248,6 +248,88 @@ componentes"):
 - Mezclar múltiples `@EventAudit` en un mismo método (uno por método público).
 - Aparecer en un WAS — solo ORQ. Si aparece, removerlo.
 
+## Regla LT-3b — WebClient oficial por downstream (Builder + ConnectionProvider)
+
+**Fuente**: PDF 2, sección "WebFlux → Configuración". Define CÓMO se construye
+el `WebClient` que inyecta cada adapter de LT-3. No es opcional: el peer-review
+del banco compara contra este patrón.
+
+**MUST**: 4 piezas, siempre con `WebClient.Builder` como bean intermedio:
+
+1. **`HttpClientProperty`** — record en `infrastructure/output/properties/`:
+   `url`, `timeout` (int, connect ms), `readTimeout` (Duration),
+   `maxConnections` (int), `maxIdleTime` (Duration), `pendingAcquireMaxCount`
+   (int), `pendingAcquireTimeout` (Duration).
+2. **`WebClientProperty`** — record `@ConfigurationProperties(prefix =
+   "webclient")` con UN campo `HttpClientProperty` por downstream invocado
+   (ej. `wsclientes0024`, `wsclientes0078`).
+3. **`WebClientConfig`** — helper estático (sin `@Configuration`):
+   - `createConnectionProvider(p)`: `ConnectionProvider.builder("custom")
+     .maxConnections(...).maxIdleTime(...).pendingAcquireMaxCount(...)
+     .pendingAcquireTimeout(...)`, con fallback a los defaults de Reactor
+     Netty cuando `maxConnections <= 0` o los Duration vienen `null`.
+   - `createHttpClient(p)`: `HttpClient.create(provider)
+     .responseTimeout(p.readTimeout())
+     .option(CONNECT_TIMEOUT_MILLIS, p.timeout())
+     .option(SO_KEEPALIVE, true)`.
+4. **Un `<Svc>WebClientConfig` por downstream** — `@Configuration` +
+   `@EnableConfigurationProperties(WebClientProperty.class)` con DOS beans:
+
+```java
+@Bean
+public WebClient.Builder wsclientes0024WebClientBuilder(final WebClientProperty p) {
+    HttpClientProperty cp = p.wsclientes0024();
+    return WebClient.builder()
+            .baseUrl(Objects.requireNonNull(cp.url()))
+            .clientConnector(new ReactorClientHttpConnector(createHttpClient(cp)))
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_XML_VALUE)
+            .defaultHeader(HttpHeaders.ACCEPT, MediaType.TEXT_XML_VALUE);
+}
+
+@Bean
+public WebClient wsclientes0024WebClient(WebClient.Builder wsclientes0024WebClientBuilder) {
+    return wsclientes0024WebClientBuilder.build();
+}
+```
+
+**`application.yml`** — bloque `webclient:` con la entrada de CADA downstream
+(los nombres de las claves = nombres de los campos del record):
+
+```yaml
+webclient:
+  wsclientes0024:
+    url: ${CCC_WSCLIENTES0024_URL}
+    timeout: ${CCC_WSCLIENTES0024_TIMEOUT}
+    read-timeout: ${CCC_WSCLIENTES0024_READ_TIMEOUT}
+    max-connections: ${CCC_WSCLIENTES0024_MAX_CONNECTIONS}
+    pending-acquire-max-count: ${CCC_WSCLIENTES0024_PENDING_ACQUIRE_MAX_COUNT}
+```
+
+**Política de env vars (qué va a Helm y qué no)**:
+- `url`, `timeout`, `read-timeout`, `max-connections`,
+  `pending-acquire-max-count` → **siempre `${CCC_*}`** en los 3 Helm: la URL
+  cambia por ambiente y el resto son knobs de capacity que se afinan tras los
+  load tests (mismo criterio que el baseline KEDA).
+- `max-idle-time` y `pending-acquire-timeout` → **NO se declaran** en el yml:
+  el helper oficial cae a los defaults de Reactor Netty y es muy improbable
+  que cambien. Si un servicio puntual los necesita, se agregan solo a la
+  entrada de ese servicio.
+- Headers (`TEXT_XML` content-type/accept) y `SO_KEEPALIVE` → literales en
+  código, nunca configurables.
+- `read-timeout` es `Duration`: el valor en Helm usa formato Spring
+  (`2s`, `2000ms`), NO un entero pelado.
+
+**NEVER**:
+- `HttpClient.create()` sin `ConnectionProvider` — pool default sin límites
+  configurados.
+- `ReadTimeoutHandler` en vez de `.responseTimeout(...)` (patrón legacy).
+- Un solo bloque global de timeouts compartido por todos los downstreams
+  (`webclient.connect-timeout` a secas): cada downstream tiene su entrada.
+- `services.<svc>.base-url` o cualquier prefijo distinto de `webclient.` para
+  estas propiedades.
+- Inyectar `WebClient.Builder` de Spring sin `baseUrl`/connector propios, o
+  crear el `WebClient` inline en el adapter.
+
 ## Regla LT-4 — Templates XML de transformación
 
 **MUST**: cada tipoTransaccion usado por el ORQ tiene una entrada en

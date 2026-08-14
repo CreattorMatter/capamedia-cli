@@ -1127,13 +1127,10 @@ SOAP-specific dependencies.
 ```java
 package com.pichincha.sp;
 
-import com.pichincha.sp.infrastructure.output.adapter.properties.WebClientProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({WebClientProperties.class})
 public class Application {
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
@@ -1601,7 +1598,8 @@ com.pichincha.sp/
         dto/request/       <- BANCS request DTOs
         dto/response/      <- BANCS response DTOs
         mapper/            <- BancsCustomerMapper
-      properties/          <- WebClientProperties
+      properties/          <- HttpClientProperty + WebClientProperty (prefix `webclient`, §4.17)
+      config/              <- WebClientConfig helper + <Svc>WebClientConfig por downstream (§4.17)
     soap/
       helper/              <- SoapResponseHelper
       mapper/              <- SoapCustomerMapper
@@ -2983,6 +2981,168 @@ If the service can fetch data from two sources (BANCS + OCP/Stratio), implement:
 **The Service uses ONLY `CustomerQueryStrategyPort`** — NOT the individual ports directly. See canonical REST pattern for complete implementation.
 
 ---
+
+#### 4.17 WebClient for downstream WS microservices (ORQ / BUS REST — official bank pattern)
+
+Applies when the service invokes **downstream WS microservices** (e.g. an ORQ
+calling `wsclientes0024`) directly via `WebClient`. Does NOT apply to BANCS
+Core Adapter calls (lib-bnc, §4.7) nor Stratio (the lib builds its own client).
+Source: bank doc "lib-event-logs / WebFlux → Configuración" (mirrored in
+canonical `log-transaccional-orq.md` Regla LT-3b).
+
+**Always through a `WebClient.Builder` bean** — one builder bean + one client
+bean per downstream. Four pieces:
+
+1. `infrastructure/output/properties/HttpClientProperty.java`:
+
+```java
+package com.pichincha.sp.infrastructure.output.properties;
+
+import java.time.Duration;
+
+public record HttpClientProperty(String url,
+                                 int timeout,
+                                 Duration readTimeout,
+                                 int maxConnections,
+                                 Duration maxIdleTime,
+                                 int pendingAcquireMaxCount,
+                                 Duration pendingAcquireTimeout) {
+}
+```
+
+2. `infrastructure/output/properties/WebClientProperty.java` — ONE field per
+   downstream the service invokes:
+
+```java
+package com.pichincha.sp.infrastructure.output.properties;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "webclient")
+public record WebClientProperty(HttpClientProperty wsclientes0024,
+                                HttpClientProperty wsclientes0078) {
+}
+```
+
+3. `infrastructure/output/config/WebClientConfig.java` — static helper, no
+   `@Configuration`:
+
+```java
+package com.pichincha.sp.infrastructure.output.config;
+
+import com.pichincha.sp.infrastructure.output.properties.HttpClientProperty;
+import io.netty.channel.ChannelOption;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
+
+import java.time.Duration;
+import java.util.Objects;
+
+public class WebClientConfig {
+
+    private WebClientConfig() {
+    }
+
+    public static HttpClient createHttpClient(HttpClientProperty httpClientProperty) {
+        return HttpClient.create(createConnectionProvider(httpClientProperty))
+                .responseTimeout(httpClientProperty.readTimeout())
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, httpClientProperty.timeout())
+                .option(ChannelOption.SO_KEEPALIVE, true);
+    }
+
+    private static ConnectionProvider createConnectionProvider(HttpClientProperty httpClientProperty) {
+        int maxConnections = httpClientProperty.maxConnections() > 0
+                ? httpClientProperty.maxConnections()
+                : ConnectionProvider.DEFAULT_POOL_MAX_CONNECTIONS;
+        Duration maxIdleTime = Objects.nonNull(httpClientProperty.maxIdleTime())
+                ? httpClientProperty.maxIdleTime()
+                : Duration.ofMillis(ConnectionProvider.DEFAULT_POOL_MAX_IDLE_TIME);
+        Duration pendingAcquireTimeout = Objects.nonNull(httpClientProperty.pendingAcquireTimeout())
+                ? httpClientProperty.pendingAcquireTimeout()
+                : Duration.ofMillis(ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT);
+        return ConnectionProvider
+                .builder("custom")
+                .maxConnections(maxConnections)
+                .maxIdleTime(maxIdleTime)
+                .pendingAcquireMaxCount(httpClientProperty.pendingAcquireMaxCount())
+                .pendingAcquireTimeout(pendingAcquireTimeout)
+                .build();
+    }
+}
+```
+
+4. One `infrastructure/output/config/<Svc>WebClientConfig.java` PER downstream
+   — builder bean + client bean:
+
+```java
+package com.pichincha.sp.infrastructure.output.config;
+
+import com.pichincha.sp.infrastructure.output.properties.HttpClientProperty;
+import com.pichincha.sp.infrastructure.output.properties.WebClientProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.util.Objects;
+
+import static com.pichincha.sp.infrastructure.output.config.WebClientConfig.createHttpClient;
+
+@Configuration
+@EnableConfigurationProperties(WebClientProperty.class)
+public class WSClientes0024WebClientConfig {
+
+    @Bean
+    public WebClient.Builder wsclientes0024WebClientBuilder(final WebClientProperty webClientProperty) {
+        HttpClientProperty clientProperties = webClientProperty.wsclientes0024();
+        return WebClient.builder()
+                .baseUrl(Objects.requireNonNull(clientProperties.url()))
+                .clientConnector(new ReactorClientHttpConnector(createHttpClient(clientProperties)))
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_XML_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.TEXT_XML_VALUE);
+    }
+
+    @Bean
+    public WebClient wsclientes0024WebClient(WebClient.Builder wsclientes0024WebClientBuilder) {
+        return wsclientes0024WebClientBuilder.build();
+    }
+}
+```
+
+The adapter injects `private final WebClient wsclientes0024WebClient;` and
+carries `@EventAudit` (ORQ only — see `log-transaccional-orq.md` LT-3).
+
+**application.yml** — `webclient:` block with one entry per downstream. Env-var
+policy: `url` + the 4 tuning knobs are ALWAYS `${CCC_*}` (URL changes per env;
+the knobs are capacity values refined after load tests). `max-idle-time` and
+`pending-acquire-timeout` are intentionally omitted — the helper falls back to
+Reactor Netty defaults and they are very unlikely to change:
+
+```yaml
+webclient:
+  wsclientes0024:
+    url: ${CCC_WSCLIENTES0024_URL}
+    timeout: ${CCC_WSCLIENTES0024_TIMEOUT}
+    read-timeout: ${CCC_WSCLIENTES0024_READ_TIMEOUT}
+    max-connections: ${CCC_WSCLIENTES0024_MAX_CONNECTIONS}
+    pending-acquire-max-count: ${CCC_WSCLIENTES0024_PENDING_ACQUIRE_MAX_COUNT}
+```
+
+The 5 `CCC_<SVC>_*` env vars go in ALL 3 helm files. `read-timeout` binds to a
+`Duration`: helm values use Spring format (`2s`, `2000ms`) — a bare integer
+fails at boot.
+
+**NEVER** (legacy patterns the doublecheck flags — Check 7.9):
+- `HttpClient.create()` without `ConnectionProvider` (unbounded default pool).
+- `ReadTimeoutHandler` instead of `.responseTimeout(...)`.
+- One global timeout block shared by every downstream
+  (`webclient.connect-timeout` at top level): each downstream has its own entry.
+- `services.<svc>.base-url` or any prefix other than `webclient.` for these
+  properties.
+- Building the `WebClient` inline in the adapter (no builder bean).
 
 #### GATE 4 — Infrastructure Verification
 

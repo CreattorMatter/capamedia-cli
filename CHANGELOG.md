@@ -6,6 +6,78 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### Fixed — `fabrics generate` corria un MCP viejo del cache en vez de `@latest`
+
+`.mcp.json` siempre dijo `@pichincha/fabrics-project@latest`, pero
+`mcp_launcher.locate()` tenia `prefer_cache=True` por default: antes de mirar el
+`.mcp.json` buscaba el package cacheado por npx y lo lanzaba con `node` directo,
+asi que el tag `latest` **nunca se resolvia**. Peor: entre varios `_npx/<hash>`
+elegia el de **mtime mas reciente**, que no es el de version mas alta — un cache
+viejo "tocado" hace poco le ganaba a un build nuevo. Evidencia: WSSeguridad0025
+se scaffoldeo con `1.0.0-alpha.20260415122504` (abril) teniendo
+`1.0.0-alpha.20260804132641` (agosto) en el mismo cache; su
+`.capamedia/fabrics.json` quedo con `mcp_source: "cache"`.
+
+- **`locate()` default invertido** a `prefer_cache=False`: primero
+  `npx -y @pichincha/fabrics-project@latest` (npx resuelve el tag contra el
+  registry en cada corrida => siempre la ultima publicada). El cache queda como
+  fallback degradado.
+- **`force_latest=True`** nuevo: reescribe a `@latest` cualquier spec pineado en
+  un `.mcp.json` viejo, y asegura `-y` cuando el command es npx.
+- **Fallback de cache ordenado por version** (`_version_key`, semver-ish con
+  desempate por el timestamp del prerelease) en vez de por mtime.
+  `_find_cached_mcp()` ahora devuelve la copia de MAYOR version.
+- **Token placeholder ya no cuenta como valido**: un `${CAPAMEDIA_ARTIFACT_TOKEN}`
+  sin resolver hacia que se lanzara npx con un token basura en vez de degradar al
+  cache (`_is_usable_token`).
+- **Visibilidad**: `fabrics generate` avisa si corrio del cache (con la version) y
+  guarda `mcp_package_version` en `.capamedia/fabrics.json` — `serverInfo.version`
+  siempre reporta `"1.0.0"`, no sirve para auditar con que build se scaffoldeo.
+- **`--use-cache`** nuevo en `fabrics generate` para el modo offline explicito.
+
+Nota operativa: si el PAT del `~/.npmrc` esta vencido, npx tira E401 y el CLI cae
+al cache igual (ahora con WARN visible). Refrescarlo con
+`capamedia fabrics setup --scope global --token <PAT> --force --refresh-npmrc`.
+
+## [0.36.0] - 2026-07-30
+
+### Added — Patron oficial WebClient para downstream WS (LT-3b + Check 7.9)
+
+La doc del banco (lib-event-logs, seccion WebFlux) define COMO construir los
+`WebClient` que un ORQ/BUS usa contra microservicios WS downstream: records
+`HttpClientProperty` + `WebClientProperty` (`@ConfigurationProperties(prefix =
+"webclient")`), helper `WebClientConfig` con `ConnectionProvider.builder` +
+`.responseTimeout(...)` + `SO_KEEPALIVE`, y por cada downstream un bean
+`WebClient.Builder` `<svc>WebClientBuilder` + bean `<svc>WebClient`. El
+canonical no lo cubria, asi que la migracion inventaba su propio patron —
+evidencia: ORQClientes0023 (`HttpClient.create()` sin pool, `ReadTimeoutHandler`,
+timeouts globales compartidos, URLs bajo `services.<svc>.base-url` y sin
+entradas `webclient.<svc>` en application.yml).
+
+- **Regla LT-3b** nueva en `log-transaccional-orq.md`: las 4 piezas, el bloque
+  `webclient.<svc>` del application.yml y la politica de env vars.
+- **Prompt REST §4.17** nuevo con el codigo completo a generar; arbol de
+  estructura actualizado (`output/properties` + `output/config`);
+  `Application.java` del ejemplo queda minimo (el `@EnableConfigurationProperties`
+  vive en cada `<Svc>WebClientConfig`, como en la doc).
+- **Politica de env vars** (decidida aca, criterio: solo queda fuera de Helm lo
+  muy improbable de cambiar): `url` + `timeout`/`read-timeout`/
+  `max-connections`/`pending-acquire-max-count` SIEMPRE `${CCC_<SVC>_*}` en los
+  3 Helm (URL cambia por ambiente; el resto son knobs de capacity que se afinan
+  tras load tests). `max-idle-time` y `pending-acquire-timeout` NO se declaran:
+  el helper cae a los defaults de Reactor Netty. Headers TEXT_XML y
+  `SO_KEEPALIVE` son literales en codigo. `read-timeout` es `Duration` — en
+  Helm va `2s`/`2000ms`, un entero pelado rompe el boot.
+- **Check 7.9** (Block 7, MEDIUM): gated a WebFlux + `WebClient.builder(` manual
+  en `src/main/java` (BANCS via lib-bnc y Stratio no gatillan). Tres señales:
+  sin `ConnectionProvider`, `ReadTimeoutHandler` presente (nombra archivos), y
+  bloque `webclient:` ausente o sin la entrada `webclient.<svc>:` de cada bean
+  `<svc>WebClient` (cross-ref beans↔yml). Sin autofix deterministico — la
+  correccion es cirugia de codigo guiada por §4.17; `doublecheck.md` instruye a
+  la fase AI (incluye migrar `services.<svc>.base-url` al prefijo `webclient.`).
+- Verificado contra ORQClientes0023 real: FAIL MEDIUM con los 3 sintomas
+  exactos. +7 tests (`test_webclient_pattern.py`), suite 1055.
+
 ## [0.35.0] - 2026-07-27
 
 ### Changed — Baseline Spring Boot `3.5.14` → `3.5.15`
