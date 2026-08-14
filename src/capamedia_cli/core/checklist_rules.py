@@ -4176,6 +4176,21 @@ def run_block_16(ctx: CheckContext) -> list[CheckResult]:
 # Canonical: context/log-transaccional-orq.md (7 reglas LT-1..LT-7)
 
 
+# Niveles de log por libreria del banco (ORQ). Referencia: orqproductos0061
+# commit 5e92bfa. Se EXTERNALIZAN via ConfigMap para poder subirlos en runtime
+# sin rebuild: application.yml solo referencia ${CCC_LOG_LEVEL_*} (Regla 7: sin
+# defaults inline) y el valor por defecto vive en los 3 Helm — MISMO valor en
+# dev/test/prod (se ajusta por ambiente desde el ConfigMap al diagnosticar).
+ORQ_LOG_LEVEL_ENV_VARS: dict[str, str] = {
+    # logging.level.org.apache.kafka — suprime logs internos de Kafka (PDF 2)
+    "CCC_LOG_LEVEL_KAFKA": "OFF",
+    # logging.level.com.pichincha.common — logs internos de lib-event-logs
+    "CCC_LOG_LEVEL_EVENT_LOGS": "OFF",
+    # logging.level.com.pichincha.common.trace.logger — lib-trace-logger
+    "CCC_LOG_LEVEL_TRACE_LOGGER": "INFO",
+}
+
+
 # 'orq' como token (left-boundary `(?:^|[-_/.\s])orq`): EXCLUYE substrings
 # embebidos como `mayorque`, pero SI matchea cualquier palabra que empiece con
 # `orq` (incluidos `orquideas`/`orquesta` — colision aceptada: los nombres de
@@ -4212,8 +4227,11 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
     Checks cuando es ORQ:
       17.1 - dependencia lib-event-logs-webflux en build.gradle
       17.2 - bloques spring.kafka + logging.event en application.yml
-      17.3 - logging.level.org.apache.kafka: OFF presente
+      17.3 - logging.level.org.apache.kafka externalizado (${CCC_LOG_LEVEL_KAFKA})
       17.4 - al menos 1 @EventAudit en adapters
+      17.5 - logging.level.com.pichincha.common(.trace.logger) externalizados
+      17.6 - env vars CCC_LOG_LEVEL_* en los 3 Helm con el valor esperado
+      17.7 - @BpLogger junto a @EventAudit en cada adapter
     """
     if not _looks_like_orq(ctx):
         # Skip block entero: el proyecto no es ORQ, las reglas no aplican.
@@ -4272,11 +4290,14 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
     has_spring_kafka = "spring:" in full_yml and "kafka:" in full_yml
     has_logging_event = "logging:" in full_yml and "event:" in full_yml
     # Check 17.3: heuristica lineal (evita catastrophic backtracking del
-    # regex anidado previo). Buscamos `kafka: OFF` y `apache:` en el mismo
-    # yml; asumimos que si ambos aparecen, es la config `logging.level.org.
-    # apache.kafka: OFF` correcta. Caso borde (kafka: OFF fuera de apache:)
-    # es extremadamente raro en configs reales.
-    has_kafka_off = "apache:" in full_yml and "kafka: OFF" in full_yml
+    # regex anidado previo). Buscamos `apache:` + la referencia `kafka:
+    # ${CCC_LOG_LEVEL_KAFKA}` en el mismo yml; asumimos que si ambos aparecen,
+    # es la config `logging.level.org.apache.kafka` correcta. Desde
+    # orqproductos0061 (commit 5e92bfa) el nivel se EXTERNALIZA: el literal
+    # `kafka: OFF` hardcodeado es fail (el valor OFF vive en los 3 Helm via
+    # CCC_LOG_LEVEL_KAFKA — check 17.6).
+    has_kafka_env = "apache:" in full_yml and "kafka: ${CCC_LOG_LEVEL_KAFKA}" in full_yml
+    has_kafka_literal = "apache:" in full_yml and "kafka: OFF" in full_yml
 
     if has_spring_kafka and has_logging_event:
         results.append(
@@ -4303,28 +4324,120 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
             )
         )
 
-    if has_kafka_off:
+    if has_kafka_env:
         results.append(
             CheckResult(
-                "17.3", "Block 17", "logging.level.org.apache.kafka: OFF",
-                "pass", detail="Kafka logs apagados en el pod",
+                "17.3", "Block 17", "logging.level.org.apache.kafka externalizado",
+                "pass", detail="kafka: ${CCC_LOG_LEVEL_KAFKA} (valor OFF en Helm)",
+            )
+        )
+    elif has_kafka_literal:
+        results.append(
+            CheckResult(
+                "17.3", "Block 17", "logging.level.org.apache.kafka externalizado",
+                "fail", severity="medium",
+                detail="`kafka: OFF` hardcodeado — el nivel debe salir del ConfigMap",
+                suggested_fix=(
+                    "Reemplazar por `kafka: ${CCC_LOG_LEVEL_KAFKA}` en "
+                    "application.yml y declarar CCC_LOG_LEVEL_KAFKA: 'OFF' en "
+                    "los 3 Helm (dev/test/prod)"
+                ),
             )
         )
     else:
         results.append(
             CheckResult(
-                "17.3", "Block 17", "logging.level.org.apache.kafka: OFF",
+                "17.3", "Block 17", "logging.level.org.apache.kafka externalizado",
                 "fail", severity="medium",
                 detail="el pod se va a llenar de logs Kafka",
                 suggested_fix=(
-                    "Agregar en application.yml: logging.level.org.apache.kafka: OFF"
+                    "Agregar en application.yml: logging.level.org.apache."
+                    "kafka: ${CCC_LOG_LEVEL_KAFKA} (valor OFF en los 3 Helm)"
                 ),
             )
         )
 
+    # 17.5 - niveles de log de las libs del banco externalizados. Misma
+    # heuristica lineal que 17.3: `pichincha:` + la referencia exacta en el yml.
+    lib_level_entries = {
+        "common: ${CCC_LOG_LEVEL_EVENT_LOGS}": "logging.level.com.pichincha.common",
+        "common.trace.logger: ${CCC_LOG_LEVEL_TRACE_LOGGER}": (
+            "logging.level.com.pichincha.common.trace.logger"
+        ),
+    }
+    missing_levels = [
+        target
+        for needle, target in lib_level_entries.items()
+        if "pichincha:" not in full_yml or needle not in full_yml
+    ]
+    if not missing_levels:
+        results.append(
+            CheckResult(
+                "17.5", "Block 17", "Niveles de log libs banco externalizados",
+                "pass",
+                detail="com.pichincha.common + common.trace.logger via ${CCC_LOG_LEVEL_*}",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "17.5", "Block 17", "Niveles de log libs banco externalizados",
+                "fail", severity="medium",
+                detail=f"faltan en logging.level: {', '.join(missing_levels)}",
+                suggested_fix=(
+                    "Agregar bajo logging.level: `com.pichincha.common: "
+                    "${CCC_LOG_LEVEL_EVENT_LOGS}` y `com.pichincha."
+                    "common.trace.logger: ${CCC_LOG_LEVEL_TRACE_LOGGER}` "
+                    "(valores OFF/INFO en los 3 Helm — check 17.6)"
+                ),
+            )
+        )
+
+    # 17.6 - env vars CCC_LOG_LEVEL_* en los 3 Helm. Mismo valor en
+    # dev/test/prod (referencia orqproductos0061): KAFKA=OFF, EVENT_LOGS=OFF,
+    # TRACE_LOGGER=INFO. Si no hay helm por-entorno, el check se omite (igual
+    # que los 7.x de Helm).
+    env_helm_files = _env_helm_files(root / "helm")
+    if env_helm_files:
+        helm_level_issues: list[str] = []
+        for f in env_helm_files:
+            text = _read_or_empty(f)
+            rel = _relative_display(f, root)
+            for var, expected_value in ORQ_LOG_LEVEL_ENV_VARS.items():
+                value = _helm_env_var_value(text, var)
+                if value is None:
+                    helm_level_issues.append(f"{rel} - env var {var} no declarada")
+                elif value != expected_value:
+                    helm_level_issues.append(
+                        f"{rel} - {var}: '{value}' -> debe ser '{expected_value}'"
+                    )
+        if not helm_level_issues:
+            results.append(
+                CheckResult(
+                    "17.6", "Block 17", "Helm env vars CCC_LOG_LEVEL_*",
+                    "pass",
+                    detail="KAFKA=OFF, EVENT_LOGS=OFF, TRACE_LOGGER=INFO en los 3 Helm",
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "17.6", "Block 17", "Helm env vars CCC_LOG_LEVEL_*",
+                    "fail", severity="medium",
+                    detail="; ".join(helm_level_issues[:10]),
+                    suggested_fix=(
+                        "Declarar en helm/dev.yml, helm/test.yml y helm/prod.yml: "
+                        "CCC_LOG_LEVEL_KAFKA: 'OFF', CCC_LOG_LEVEL_EVENT_LOGS: "
+                        "'OFF', CCC_LOG_LEVEL_TRACE_LOGGER: 'INFO'"
+                    ),
+                )
+            )
+
     # 17.4 @EventAudit en al menos 1 adapter
+    # 17.7 (mismo recorrido): todo adapter auditado lleva tambien @BpLogger
     event_audit_hits = 0
     adapter_files = 0
+    audited_without_bplogger: list[str] = []
     for java in root.rglob("*.java"):
         if "test" in [p.lower() for p in java.parts]:
             continue
@@ -4337,6 +4450,8 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
             continue
         if "@EventAudit" in text:
             event_audit_hits += 1
+            if "@BpLogger" not in text:
+                audited_without_bplogger.append(java.name)
 
     if event_audit_hits > 0:
         results.append(
@@ -4364,6 +4479,44 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
                     'Agregar @EventAudit(service="<SvcName>", '
                     'method="<OpName>", type=AuditType.T) al metodo que invoca '
                     "downstream en cada adapter"
+                ),
+            )
+        )
+
+    # 17.7 @BpLogger junto a @EventAudit. Referencia orqproductos0061
+    # (commit 5e92bfa): el metodo downstream del adapter lleva @BpLogger
+    # (lib-trace-logger) ADEMAS de @EventAudit, para que el trace corporativo
+    # cubra la llamada auditada. Solo evalua adapters ya auditados: la falta
+    # de @EventAudit la reporta 17.4.
+    if event_audit_hits == 0:
+        results.append(
+            CheckResult(
+                "17.7", "Block 17", "@BpLogger junto a @EventAudit",
+                "pass",
+                detail="sin adapters con @EventAudit (17.4 cubre la falta)",
+            )
+        )
+    elif not audited_without_bplogger:
+        results.append(
+            CheckResult(
+                "17.7", "Block 17", "@BpLogger junto a @EventAudit",
+                "pass",
+                detail=f"{event_audit_hits} adapter(s) auditados llevan @BpLogger",
+            )
+        )
+    else:
+        results.append(
+            CheckResult(
+                "17.7", "Block 17", "@BpLogger junto a @EventAudit",
+                "fail", severity="high",
+                detail=(
+                    "adapters con @EventAudit sin @BpLogger: "
+                    + ", ".join(sorted(audited_without_bplogger)[:10])
+                ),
+                suggested_fix=(
+                    "Agregar @BpLogger (import com.pichincha.common.trace."
+                    "logger.annotation.BpLogger) al metodo @EventAudit de "
+                    "cada adapter downstream"
                 ),
             )
         )

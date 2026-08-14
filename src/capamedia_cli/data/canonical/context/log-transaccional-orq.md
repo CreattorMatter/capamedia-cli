@@ -144,7 +144,11 @@ logging:
   level:
     org:
       apache:
-        kafka: OFF                      # OBLIGATORIO: apaga logs de kafka en el pod (Cita PDF 2)
+        kafka: ${CCC_LOG_LEVEL_KAFKA}          # MANDATORY - suprime logs internos de Kafka (PDF lib-event-logs)
+    com:
+      pichincha:
+        common: ${CCC_LOG_LEVEL_EVENT_LOGS}
+        common.trace.logger: ${CCC_LOG_LEVEL_TRACE_LOGGER}
   event:
     mode: 'EXTERNAL'                    # literal — modo externo (publica a kafka, no logs locales)
     kafka:
@@ -180,9 +184,20 @@ xml:
 | `logging.event.executor.isDefault` | `false` | |
 | `logging.event.excluded-paths` | `${EXCLUDE_PATH}` | |
 
+**Niveles de log externalizados** (referencia: orqproductos0061, commit
+`5e92bfa`): los 3 `${CCC_LOG_LEVEL_*}` se declaran en los 3 Helm
+(`dev/test/prod`) con el MISMO valor — `CCC_LOG_LEVEL_KAFKA: "OFF"`,
+`CCC_LOG_LEVEL_EVENT_LOGS: "OFF"`, `CCC_LOG_LEVEL_TRACE_LOGGER: "INFO"` — para
+poder subir la verbosidad en runtime via ConfigMap sin rebuild. En
+`src/test/resources/application-test.yml` se definen en la raíz (ej.
+`CCC_LOG_LEVEL_KAFKA: "OFF"`) para que los tests resuelvan los placeholders.
+
 **NEVER**:
-- Omitir `logging.level.org.apache.kafka: OFF` (el pod se llena de logs Kafka
-  internos — cita textual del PDF 2).
+- Hardcodear `kafka: OFF` en `logging.level` — el nivel sale de
+  `${CCC_LOG_LEVEL_KAFKA}` con valor `OFF` en los 3 Helm (Check 17.3).
+- Omitir los niveles de `com.pichincha.common` y `com.pichincha.common.trace.
+  logger` — sin ellos el pod se llena de logs internos de lib-event-logs /
+  lib-trace-logger (Check 17.5).
 - Hardcodear `KAFKA_SERVER`, `KAFKA_TOPIC_AUDITOR`, `XML_TRANSACCION_*` o los
   tamaños de threadpool.
 - Usar `spring.kafka.*` sin `logging.event.*` — van juntos, el uno sin el otro
@@ -195,6 +210,11 @@ xml:
 **MUST**: en un ORQ, cada adapter outbound (`@Component implements XxxPort`)
 lleva `@EventAudit` en el método que invoca el downstream (WebClient). La
 librería intercepta el request/response y publica el evento a `CE_EVENTOS`.
+
+**MUST**: el mismo método lleva TAMBIÉN `@BpLogger`
+(`com.pichincha.common.trace.logger.annotation.BpLogger`), encima de
+`@EventAudit`, para que el trace corporativo cubra la llamada auditada
+(referencia: orqproductos0061, commit `5e92bfa`; Check 17.7).
 
 **Cliente HTTP en ORQ**: siempre `WebClient` (WebFlux). `RestTemplate` está
 deprecado en Spring Boot 3.x. El PDF 2 muestra también un ejemplo `RestClient`
@@ -211,6 +231,7 @@ public class WSClientes0001Adapter implements Clientes0001Port {
     private static final String ERROR_CODE_OK = "0";
 
     @Override
+    @BpLogger
     @EventAudit(
         service = "WSClientes0001",
         method = "ConsultarCuentasActivas01",
@@ -547,8 +568,15 @@ teller, terminal, institucion, agencia, estacion, aplicacion, canal
   - `17.1`: dependencia `lib-event-logs-*` correcta según framework (fail si
     falta).
   - `17.2`: bloques `spring.kafka` + `logging.event` en el yml.
-  - `17.3`: `logging.level.org.apache.kafka: OFF` presente.
+  - `17.3`: `logging.level.org.apache.kafka: ${CCC_LOG_LEVEL_KAFKA}`
+    externalizado (el literal `OFF` hardcodeado es fail).
   - `17.4`: al menos 1 `@EventAudit` en los adapters del proyecto.
+  - `17.5`: `logging.level.com.pichincha.common` +
+    `com.pichincha.common.trace.logger` externalizados via
+    `${CCC_LOG_LEVEL_EVENT_LOGS}` / `${CCC_LOG_LEVEL_TRACE_LOGGER}`.
+  - `17.6`: las 3 env vars `CCC_LOG_LEVEL_*` en los 3 Helm con el valor
+    esperado (`OFF` / `OFF` / `INFO`, igual en dev/test/prod).
+  - `17.7`: `@BpLogger` junto a `@EventAudit` en cada adapter auditado.
   - Solo se activan si `source_kind == "orq"`. Para BUS/WAS no corre
     (evitar falsos positivos en servicios atómicos sin downstream).
 

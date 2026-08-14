@@ -167,6 +167,52 @@ migrado, lo aplica automaticamente. Validado por checklist Block 15.2 y 15.3.
 
 **Referencia**: ticket QA BTHCCC-6826, mayo 2026.
 
+## Paso 1.8 - Observabilidad ORQ: niveles de log externalizados + @BpLogger
+
+**Solo orquestadores** (proyectos `*orq*`). Referencia: orqproductos0061,
+commit `5e92bfa` (fix: Add logs variables). Checks 17.3 / 17.5 / 17.6 / 17.7
+(sin autofix — el doublecheck aplica la cirugia a mano).
+
+Los niveles de log de las libs del banco se **externalizan via ConfigMap**
+(subir/bajar verbosidad en runtime sin rebuild). `application.yml` debe quedar
+EXACTAMENTE asi bajo `logging.level` (el literal `kafka: OFF` viejo es FAIL):
+
+```yaml
+logging:
+  level:
+    org:
+      apache:
+        kafka: ${CCC_LOG_LEVEL_KAFKA}          # MANDATORY - suprime logs internos de Kafka (PDF lib-event-logs)
+    com:
+      pichincha:
+        common: ${CCC_LOG_LEVEL_EVENT_LOGS}
+        common.trace.logger: ${CCC_LOG_LEVEL_TRACE_LOGGER}
+```
+
+Y los 3 Helm (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) declaran las
+3 env vars con el MISMO valor en los 3 ambientes:
+
+```yaml
+      # NIVELES DE LOG por libreria (externalizados via ConfigMap)
+      - name: "CCC_LOG_LEVEL_KAFKA"
+        value: "OFF"
+      - name: "CCC_LOG_LEVEL_EVENT_LOGS"
+        value: "OFF"
+      - name: "CCC_LOG_LEVEL_TRACE_LOGGER"
+        value: "INFO"
+```
+
+- `src/test/resources/application-test.yml` define los 3 `CCC_LOG_LEVEL_*` en
+  la raiz (ej. `CCC_LOG_LEVEL_KAFKA: "OFF"`) para que los tests resuelvan los
+  placeholders. Esto NO viola la regla "application.yml no define CCC_*" — esa
+  regla aplica a `src/main/resources`, no a los recursos de test.
+- **`@BpLogger` en los adapters downstream**: cada metodo de adapter outbound
+  que lleva `@EventAudit` lleva TAMBIEN `@BpLogger`
+  (`com.pichincha.common.trace.logger.annotation.BpLogger`), encima de
+  `@EventAudit`. Check 17.7 (HIGH si falta).
+- NO aplicar nada de esto a WAS/BUS: `lib-event-logs` y sus niveles son
+  ORQ-only (el trace-logger de los Checks 7.7/7.8 si es universal).
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash

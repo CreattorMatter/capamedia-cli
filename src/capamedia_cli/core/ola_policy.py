@@ -37,6 +37,7 @@ BANK_NAMESPACES: tuple[str, ...] = (
     "tct",
     "tmi",
     "taa",
+    "tca",
 )
 
 # Versiones de lib-bnc-api-client por OLA.

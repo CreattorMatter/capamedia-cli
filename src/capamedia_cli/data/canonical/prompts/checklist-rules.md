@@ -197,8 +197,11 @@ Este prompt consolida de forma compacta y declarativa el checklist ejecutable **
 ## BLOQUE 17: Log Transaccional en Orquestadores (ORQ)
 * **Check 17.1: lib-event-logs presente.** (ORQ) Debe declarar la librería de log transaccional del banco en `build.gradle`. Faltante -> **FAIL HIGH**.
 * **Check 17.2: Configuración en application.yml.** (ORQ) Bloque `logging.event.mode` configurado en `EXTERNAL` y propiedades de kafka activas. Faltante -> **FAIL HIGH**.
-* **Check 17.3: Kafka bootstrap.** (ORQ) Servidores de kafka mapeados a variables de entorno oficiales. Faltante -> **FAIL HIGH**.
+* **Check 17.3: Nivel de log Kafka externalizado.** (ORQ) `logging.level.org.apache.kafka: ${CCC_LOG_LEVEL_KAFKA}` en application.yml (el literal `OFF` hardcodeado también falla). Faltante -> **FAIL MEDIUM**.
 * **Check 17.4: EventAudit en Adapters.** (ORQ) Al menos un adaptador de infraestructura debe usar `@EventAudit`. Faltante -> **FAIL HIGH**.
+* **Check 17.5: Niveles de log libs banco externalizados.** (ORQ) `logging.level.com.pichincha.common: ${CCC_LOG_LEVEL_EVENT_LOGS}` y `com.pichincha.common.trace.logger: ${CCC_LOG_LEVEL_TRACE_LOGGER}` en application.yml. Faltante -> **FAIL MEDIUM**.
+* **Check 17.6: Env vars CCC_LOG_LEVEL_* en Helm.** (ORQ) Los 3 Helm (dev/test/prod) declaran `CCC_LOG_LEVEL_KAFKA: 'OFF'`, `CCC_LOG_LEVEL_EVENT_LOGS: 'OFF'` y `CCC_LOG_LEVEL_TRACE_LOGGER: 'INFO'` (mismo valor en los 3). Faltante o valor distinto -> **FAIL MEDIUM**.
+* **Check 17.7: BpLogger junto a EventAudit.** (ORQ) Cada adapter con `@EventAudit` lleva también `@BpLogger` en el método downstream. Faltante -> **FAIL HIGH**.
 
 ---
 

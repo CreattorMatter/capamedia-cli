@@ -39,6 +39,44 @@ Nota operativa: si el PAT del `~/.npmrc` esta vencido, npx tira E401 y el CLI ca
 al cache igual (ahora con WARN visible). Refrescarlo con
 `capamedia fabrics setup --scope global --token <PAT> --force --refresh-npmrc`.
 
+## [0.38.0] - 2026-08-14
+
+### Added — Observabilidad ORQ: niveles de log externalizados + @BpLogger
+
+Referencia: orqproductos0061 commit `5e92bfa` (fix: Add logs variables). Los
+niveles de log de las libs del banco se externalizan via ConfigMap para poder
+ajustarlos en runtime sin rebuild.
+
+- **Check 17.3 endurecido**: `logging.level.org.apache.kafka` debe referenciar
+  `${CCC_LOG_LEVEL_KAFKA}`; el literal `kafka: OFF` hardcodeado pasa a ser FAIL
+  (antes era el valor esperado).
+- **Check 17.5 nuevo**: `logging.level.com.pichincha.common:
+  ${CCC_LOG_LEVEL_EVENT_LOGS}` + `com.pichincha.common.trace.logger:
+  ${CCC_LOG_LEVEL_TRACE_LOGGER}` en application.yml.
+- **Check 17.6 nuevo**: las 3 env vars `CCC_LOG_LEVEL_*` en los 3 Helm con el
+  valor esperado (`OFF`/`OFF`/`INFO`, mismo valor en dev/test/prod). Fuente
+  unica `ORQ_LOG_LEVEL_ENV_VARS` en `checklist_rules.py`.
+- **Check 17.7 nuevo**: cada adapter con `@EventAudit` lleva tambien
+  `@BpLogger` en el metodo downstream (HIGH si falta).
+- Sin autofix (cirugia guiada): el doublecheck aplica los cambios a mano —
+  nuevo Paso 1.8 en `doublecheck.md` con los bloques exactos de
+  application.yml, Helm y `application-test.yml` (los defaults `CCC_LOG_LEVEL_*`
+  en test resources NO violan la regla 7.2b, que solo lee `src/main`).
+- Canonical `log-transaccional-orq.md` actualizado: bloque LT-2 con los
+  niveles externalizados, LT-3 exige `@BpLogger` sobre `@EventAudit`.
+- Todo ORQ-only (Block 17); WAS/BUS no cambian. +12 tests, suite 1070.
+
+## [0.37.0] - 2026-08-14
+
+### Added — Namespace `tca`
+
+`tca` se suma a las opciones del prompt de `capamedia fabrics generate`
+(`projectName` resultante: `tca-msa-sp-<servicio>`). Gracias a la fuente unica
+`BANK_NAMESPACES` (v0.35.0) el cambio es una sola linea en
+`core/ola_policy.py`: `fabrics`/`qa`, `adopt` y `clone --migrated` lo reconocen
+automaticamente (9 namespaces: `tnd`, `tpr`, `csg`, `tmp`, `tia`, `tct`, `tmi`,
+`taa`, `tca`). +1 test, suite 1060.
+
 ## [0.36.0] - 2026-07-30
 
 ### Added — Patron oficial WebClient para downstream WS (LT-3b + Check 7.9)
