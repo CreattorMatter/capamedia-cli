@@ -31,6 +31,12 @@ def test_tca_is_an_available_namespace() -> None:
     assert "tca" in NAMESPACE_OPTIONS
 
 
+def test_fse_is_an_available_namespace() -> None:
+    """`fse` debe poder elegirse en `capamedia fabrics generate`."""
+    assert "fse" in BANK_NAMESPACES
+    assert "fse" in NAMESPACE_OPTIONS
+
+
 def test_namespace_options_single_source() -> None:
     """Los 3 consumidores derivan de BANK_NAMESPACES, no de copias locales.
 

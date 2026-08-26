@@ -39,6 +39,24 @@ Nota operativa: si el PAT del `~/.npmrc` esta vencido, npx tira E401 y el CLI ca
 al cache igual (ahora con WARN visible). Refrescarlo con
 `capamedia fabrics setup --scope global --token <PAT> --force --refresh-npmrc`.
 
+## [0.39.0] - 2026-08-26
+
+### Added — Namespace `fse`
+
+`fse` se suma a las opciones del prompt de `capamedia fabrics generate`
+(`projectName` resultante: `fse-msa-sp-<servicio>`).
+
+Una sola linea en `BANK_NAMESPACES` (`core/ola_policy.py`): gracias a la fuente
+unica introducida en v0.35.0, `fabrics`/`qa`, `adopt` y `clone --migrated` lo
+reconocen automaticamente y los textos de ayuda se actualizan solos. Es el mismo
+camino que siguio `tca` en v0.37.0.
+
+**Guard anti-drift** (`tests/test_bank_namespaces.py`, +1 test, suite 1071):
+`test_fse_is_an_available_namespace`. Los tests ya existentes
+`test_namespace_options_single_source` y `test_adopt_detects_every_namespace`
+cubren `fse` sin cambios — el segundo verifica que `adopt` mueva a `destino/` un
+`fse-msa-sp-*`, que es el bug que tuvo `tmi`.
+
 ## [0.38.0] - 2026-08-14
 
 ### Added — Observabilidad ORQ: niveles de log externalizados + @BpLogger

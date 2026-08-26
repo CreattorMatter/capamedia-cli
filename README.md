@@ -487,6 +487,10 @@ capamedia-cli/
 
 - [x] v0.30.0 - **Discovery OLA 2 embebido** (`data/catalog/ola2.json`: 25 servicios, 5 ORQ, 37 relaciones): al migrar cualquier servicio del catálogo el prompt recibe su **ficha** (tribu, tecnología, métodos, links IcePanel/WSDL/código); un ORQ recibe además su **mapa de downstreams** (`in_discovery`/`in_ola1`) que `analisis-orq.md` usa como fuente primaria con reconciliación 3-way. **Adaptadores BANCS embebidos** (`data/catalog/bancs_adapters.json`: 8 adaptadores Core Adapter, 55 TX): el prompt recibe la tabla TX→adaptador→URL interna; prevalece `prompts/tx-adapter-catalog.json`; patrón `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL`. Guardrails en todo: **catálogo=contexto NO árbitro** (el ESQL manda; los checks no los importan), sanitización estructural (el `.numbers` de adaptadores trae cookies/PII y NO se versiona). Generadores reproducibles `tools/build_*.py`. +57 tests, suite 1009. (2 revisiones adversariales ejecutando el código)
 
+### Release 0.39.0 — Namespace `fse`
+
+- [x] v0.39.0 - **`fse` disponible en `capamedia fabrics generate`** (`fse-msa-sp-<servicio>`). Una sola línea gracias a la fuente única `BANK_NAMESPACES` (v0.35.0): `fabrics`/`qa`, `adopt` y `clone --migrated` lo reconocen automáticamente. +1 test, suite 1071.
+
 ### Release 0.38.0 — Observabilidad ORQ: niveles de log externalizados + `@BpLogger`
 
 - [x] v0.38.0 - **Niveles de log de las libs del banco externalizados via ConfigMap** (referencia orqproductos0061 `5e92bfa`): `logging.level` referencia `${CCC_LOG_LEVEL_KAFKA}` / `${CCC_LOG_LEVEL_EVENT_LOGS}` / `${CCC_LOG_LEVEL_TRACE_LOGGER}` y el valor vive en los 3 Helm (`OFF`/`OFF`/`INFO`). Check 17.3 endurecido (el literal `kafka: OFF` pasa a FAIL) + Checks 17.5/17.6 nuevos. **Check 17.7 nuevo**: `@BpLogger` junto a `@EventAudit` en cada adapter downstream. Paso 1.8 nuevo en `doublecheck.md` y canonical LT-2/LT-3 actualizados. ORQ-only. +12 tests, suite 1070.
