@@ -665,11 +665,34 @@ def _application_trace_logger_issues(app_yml_text: str) -> list[str]:
     return issues
 
 
+def _helm_yaml_parse_error(path: Path) -> str | None:
+    """Mensaje de error si el helm no parsea como YAML, o None si esta bien.
+
+    Existe por el bug de v0.34.0-v0.41.0 (detectado en WSSeguridad0069,
+    2026-09-03): el autofix de env vars insertaba un item de lista bajo
+    `variables:`, que en los charts del MCP es un mapping (`variables.own.config`).
+    Los 3 helm quedaban con `ParserError` — Helm no los renderiza — y como el
+    resto de los checks lee valores con regex y no con el parser, el Check 7.8
+    seguia dando PASS. Un chart roto nunca mas puede pasar en silencio.
+    """
+    try:
+        yaml.safe_load(_read_or_empty(path))
+    except yaml.YAMLError as exc:
+        return str(exc).splitlines()[0][:160]
+    return None
+
+
 def _helm_trace_logger_issues(helm_files: list[Path], root: Path) -> list[str]:
     """Check 7.8 helper: cada helm por-entorno (dev/test/prod) debe declarar las
     7 env vars CCC_* del trace-logger con el valor esperado del ambiente."""
     issues: list[str] = []
     for f in helm_files:
+        # Un helm que no parsea no puede declarar nada: sin esto el 7.8 daba
+        # PASS sobre un chart que Helm rechaza.
+        parse_error = _helm_yaml_parse_error(f)
+        if parse_error:
+            issues.append(f"{_relative_display(f, root)} - YAML invalido: {parse_error}")
+            continue
         env = _helm_env_of(f)
         if not env:
             continue
@@ -3645,6 +3668,46 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                 )
             else:
                 results.append(CheckResult("7.11", "Block 7", title_711, "pass"))
+
+            # 7.12 - Los helm por-entorno deben parsear como YAML. Es la red de
+            # seguridad estructural: cualquier edicion (autofix o a mano) que
+            # rompa el chart se ve aca, en vez de pasar desapercibida porque los
+            # demas checks leen valores con regex.
+            broken = [
+                f"{_relative_display(f, ctx.migrated_path)}: {err}"
+                for f, err in ((f, _helm_yaml_parse_error(f)) for f in env_helm_files)
+                if err
+            ]
+            title_712 = "Helm por-entorno parsea como YAML"
+            if broken:
+                results.append(
+                    CheckResult(
+                        "7.12",
+                        "Block 7",
+                        title_712,
+                        "fail",
+                        severity="high",
+                        detail="; ".join(broken[:6]),
+                        suggested_fix=(
+                            "Helm no puede renderizar un values file invalido: el deploy "
+                            "falla. Causa tipica: un item `- name:` insertado bajo una "
+                            "clave que es mapping (`variables:` en los charts del MCP tiene "
+                            "`own.config`). Mover las env vars a la lista "
+                            "`variables.own.config` y re-validar con "
+                            "`python -c \"import yaml,sys;yaml.safe_load(open(sys.argv[1]))\" helm/dev.yml`."
+                        ),
+                    )
+                )
+            else:
+                results.append(
+                    CheckResult(
+                        "7.12",
+                        "Block 7",
+                        title_712,
+                        "pass",
+                        detail=f"{len(env_helm_files)} helm(s) parsean correctamente",
+                    )
+                )
 
     return results
 

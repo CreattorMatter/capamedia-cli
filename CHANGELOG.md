@@ -6,6 +6,62 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-09-03
+
+### Fixed — El autofix de env vars rompia el helm y el checklist lo daba por bueno
+
+Reporte: en los helm de un servicio migrado `CCC_PAYLOAD_MODE` quedo en `FULL`
+(dev/test) y `PARTIAL` (prod) cuando la regla del banco es `NONE` en los tres
+(seguridad: nunca loguear payload/PII). Investigando aparecieron **dos fallas
+distintas**, y la segunda era peor que el valor:
+
+**1. `CCC_PAYLOAD_MODE` desviado no se corregia.** `fix_trace_logger_helm` solo
+AGREGABA las env vars ausentes; un valor existente distinto del esperado se
+reportaba como FAIL HIGH (Check 7.8) pero ningun autofix lo tocaba, asi que
+quedaba esperando intervencion manual. Los 7 flags del trace-logger tienen **un
+solo valor valido por ambiente**, y `FULL` significa payload con PII en los
+logs. Ahora el autofix **corrige el valor** (`_set_helm_env_value`), preservando
+la regla por-ambiente de `CCC_CUSTOM_LEVEL_DEBUG_ENABLED` (`true` solo en dev).
+Se encontraron 13 `FULL` y 2 `PARTIAL` en los workspaces locales.
+
+**2. El injector rompia el chart y el Check 7.8 igual daba PASS.** Los helm del
+MCP tienen la lista de env vars en `variables.own.config`, o sea `variables:` es
+un **mapping**. `_inject_helm_env_vars` matcheaba `^variables:$` e insertaba
+`- name: ...` justo debajo, mezclando una **secuencia dentro de un mapping**:
+los 3 helm de WSSeguridad0069 quedaron con `ParserError` — Helm no los renderiza
+y el deploy falla. Y como todos los checks de helm leen valores con regex y no
+con el parser, **el 7.8 seguia dando PASS**: la herramienta rompia el chart y
+despues lo declaraba sano.
+
+- **Injector reescrito**: inserta como **hermano del primer item `- name:` que
+  ya existe**, copiando su indentacion exacta (todo chart del banco trae al
+  menos `JAVA_OPTIONS`). Si no hay items, busca una clave contenedora
+  (`config:`/`environment:`/`env:`) y solo la usa si lo que sigue es una lista;
+  `variables:` quedo fuera de esa lista de anclajes salvo que sea una lista de
+  verdad. Fallback final: crear `environment:` (comportamiento previo para
+  charts sin estructura de env vars).
+- **Auto-sanacion** (`repair_helm_env_structure`): si un chart YA quedo
+  corrompido por la version vieja, se saca la entrada mal ubicada y se
+  re-inserta en la lista correcta. Conservador: si el chart parsea bien no toca
+  nada, asi que no puede danar un chart sano. Lo usan `fix_trace_logger_helm` y
+  `fix_helm_probes_enabled_env`.
+- **Check 7.12 nuevo (HIGH)**: los helm por-entorno deben parsear como YAML.
+  Verificado sin falsos positivos: de 177 charts en los workspaces locales, los
+  177 parsean (los 3 unicos rotos eran los que corrompio el autofix). Ademas el
+  **Check 7.8 ya no puede pasar** sobre un chart que no parsea: reporta
+  `YAML invalido: <error>`.
+- Reparados los 3 helm de WSSeguridad0069 y corregido `CCC_PAYLOAD_MODE` a
+  `NONE` en los dos workspaces afectados. Scan final: 0 charts rotos.
+
+### Tests
+
+Nuevo `tests/test_helm_env_injection.py` (+15): inyeccion en chart con forma MCP
+(YAML valido, la var cae dentro de `variables.own.config`, indentacion copiada
+del hermano), compatibilidad con la forma legacy `environment:`, fallback sin
+estructura, correccion de `FULL`/`PARTIAL` -> `NONE` con idempotencia, flag
+`DEBUG_ENABLED` por-ambiente preservado, auto-sanacion de un chart corrompido,
+y los Checks 7.12 / 7.8 sobre chart roto y sano. Suite 1146.
+
 ## [0.42.0] - 2026-09-03
 
 ### Fixed — Falso negativo al consultar el CSV de configurables
