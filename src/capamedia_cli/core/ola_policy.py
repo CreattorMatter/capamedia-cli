@@ -38,6 +38,7 @@ BANK_NAMESPACES: tuple[str, ...] = (
     "tmi",
     "taa",
     "tca",
+    "tem",
 )
 
 # Versiones de lib-bnc-api-client por OLA (linea Spring Boot 3.5.x).

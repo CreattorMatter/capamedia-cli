@@ -6,6 +6,73 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-09-03
+
+Primera version despues del rollback a `3c26f7c` (v0.38.0): reaplica, con el
+minimo de archivos posible, los cambios que si valen la pena. El salto de
+numero evita reusar `0.39.0`-`0.43.0`, que ya se publicaron con otro contenido.
+
+### Added — Namespace `tem`
+
+`tem` se suma a las opciones del prompt de `capamedia fabrics generate`
+(`projectName` resultante: `tem-msa-sp-<servicio>`).
+
+Una sola linea en `BANK_NAMESPACES` (`core/ola_policy.py`): gracias a la fuente
+unica, `fabrics`/`qa`, `adopt` y `clone --migrated` lo reconocen
+automaticamente y los textos de ayuda se actualizan solos. Mismo camino que
+siguieron `taa` y `tca`.
+
+**Guard anti-drift** (`tests/test_bank_namespaces.py`, +1 test):
+`test_tem_is_an_available_namespace`. Los tests ya existentes
+`test_namespace_options_single_source` y `test_adopt_detects_every_namespace`
+cubren `tem` sin cambios — el segundo verifica que `adopt` mueva a `destino/`
+un `tem-msa-sp-*`, que es el bug que tuvo `tmi`.
+
+> **Pendiente:** el rollback a v0.38.0 dejo fuera el namespace `fse` (agregado
+> en la v0.39.0 original). Un repo `fse-msa-sp-*` hoy no lo reconocen
+> `clone --migrated` ni `adopt`. Es una linea; decidir si se repone.
+
+### Changed — Spring Boot: `3.5.15` es minimo, no tope
+
+El agente bajaba a `3.5.15` un arquetipo que el MCP genero en `4.1.1`, citando
+la Regla 8.5 ("Spring Boot 4.x NO es baseline"). Los checks ejecutables ya
+aceptaban `4.1.1` (Check 8.1 da PASS y el autofix no la toca): el downgrade
+salia solo del texto. Cambio de texto en los 8 canonicals del camino de
+`/migrate` (REST, SOAP/MVC, ORQ, agente migrador, analisis y doublecheck).
+Cero Python.
+
+### Removed — Pins de `io.netty`
+
+`/migrate` mandaba pinear el arbol de 13 modulos a `4.1.136.Final` con doble
+mecanismo (`dependencyManagement` + `resolutionStrategy.force`). Estaba escrito
+para el BOM de Spring Boot 3.5.x; con el arquetipo 4.x que genera el MCP es un
+downgrade, y un pin manual siempre se queda atras al proximo CVE. Se quitaron
+las instrucciones de pinear del prompt REST, la plantilla de `build.gradle`, la
+Regla 8.5, `security.md` y el doublecheck. Netty como **runtime** de WebFlux
+queda intacto (`ConnectionProvider`, `ChannelOption`, logger `reactor.netty`).
+Sin cambios de codigo: un proyecto sin pins da 8.7 PASS y 8.8/8.10 ni se
+evaluan.
+
+### Changed — Librerias del banco compatibles con Spring Boot 4
+
+Requisito del banco: `lib-trace-logger-sb4:1.2.0` (cambia el artifactId),
+`lib-event-logs-mvc` / `-webflux` `2.0.0`, `lib-bnc-api-client:3.0.0` (estable;
+reemplaza a `3.0.0-alpha.20260825120715`).
+
+Los dos unicos cambios de comportamiento son los lugares que peleaban contra
+las versiones nuevas:
+
+- `fix_add_libbnc_dependency` reescribia cualquier version declarada a la del
+  OLA, asi que habria bajado la `3.x` a `1.1.0`. Ahora nunca baja una `3.x` y
+  normaliza una pre-release `3.x` a la estable `3.0.0`.
+- `validate_hexagonal.py` comparaba el literal `lib-bnc-api-client:1.1.0` por
+  substring, lo que **ya rechazaba** a los servicios OLA 2 en `2.0.0`. Ahora
+  compara la coordenada sin version.
+
+El resto son constantes y texto. Los Checks 8.9, 17.1 y 18.1 miran el nombre
+del artefacto, no la version, asi que ningun veredicto cambia.
+
+
 ### Fixed — `fabrics generate` corria un MCP viejo del cache en vez de `@latest`
 
 `.mcp.json` siempre dijo `@pichincha/fabrics-project@latest`, pero

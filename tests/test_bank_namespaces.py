@@ -31,6 +31,12 @@ def test_tca_is_an_available_namespace() -> None:
     assert "tca" in NAMESPACE_OPTIONS
 
 
+def test_tem_is_an_available_namespace() -> None:
+    """`tem` debe poder elegirse en `capamedia fabrics generate`."""
+    assert "tem" in BANK_NAMESPACES
+    assert "tem" in NAMESPACE_OPTIONS
+
+
 def test_namespace_options_single_source() -> None:
     """Los 3 consumidores derivan de BANK_NAMESPACES, no de copias locales.
 
