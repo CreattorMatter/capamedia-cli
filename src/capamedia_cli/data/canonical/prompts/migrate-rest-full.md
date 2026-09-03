@@ -884,7 +884,7 @@ Parameters:
 1. **Spring Boot version — `3.5.15` is the MINIMUM, never a cap. NEVER downgrade what the MCP generated:** if the scaffold came with `4.1.1`, leave it at `4.1.1`. Only raise the literal when it is *below* `3.5.15`.
 2. **Peer Review plugin:** Update to `1.1.2` (Check 8.12 — older scaffolds ship `1.1.0`; the `architectureReview` task gates the PR in Azure)
 3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.136.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, `4.1.135.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
+4. **Netty: do NOT add any `io.netty` pin.** No `dependency 'io.netty:*'` in `dependencyManagement` and no `force 'io.netty:*'` in `resolutionStrategy`. Let the Spring Boot BOM manage it — that is the only thing that does not fall behind on the next CVE. (Check 8.7 still tolerates a pre-existing `io.netty:*:4.1.136.Final` pin on legacy Spring Boot 3.5.x WebFlux projects; never introduce one.)
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -1038,22 +1038,11 @@ dependencyManagement {
         // WebFlux only (Snyk 2026-06): spring-framework-bom override (Check 8.10).
         mavenBom 'org.springframework:spring-framework-bom:6.2.19'
     }
-    // NOTE: do NOT add `dependency 'io.netty:*:VERSION'` blocks here to "patch
-    // a CVE", EXCEPT for the official WebFlux exception `io.netty:*:4.1.136.Final`
-    // (Snyk CVE-fix approved for WebFlux services). Any other version is
-    // blocked by Check 8.7. Old scaffolds that pinned `netty-codec-http:4.1.132.Final`
-    // became the source of 4 new CVEs — remove them. MVC/SOAP: no manual pin allowed.
-    //
-    // WebFlux only — security pins of the same Snyk report (Check 8.10), alongside
-    // the Netty tree (Check 8.8). `capamedia ai doublecheck` autofixes them.
-    dependencies {
-        // Netty tree (13 core modules) at 4.1.136.Final — see Check 8.8.
-        // NON-Netty WebFlux security pins (Check 8.10):
-        dependency 'io.micrometer:micrometer-core:1.15.12'
-        dependency 'io.projectreactor.netty:reactor-netty-http:1.2.18'
-        dependency 'org.springframework.retry:spring-retry:2.0.13'
-        dependency 'org.springframework.kafka:spring-kafka:3.3.16'
-    }
+    // NOTE: do NOT add `dependency 'io.netty:*'` or `force 'io.netty:*'` here to
+    // "patch a CVE". Let the Spring Boot BOM manage it — a manual pin falls behind
+    // on the next CVE (that is what turned the old `netty-codec-http:4.1.132.Final`
+    // pin into 4 new CVEs). Check 8.7 only tolerates a pre-existing
+    // `io.netty:*:4.1.136.Final` on legacy Spring Boot 3.5.x WebFlux projects.
 }
 
 compileJava {

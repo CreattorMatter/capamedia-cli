@@ -395,14 +395,10 @@ o abrir el PR si no hay residuales HIGH.
     `catalog-info.yaml`.
 11. **Gradle seguridad.** No debe quedar `spring-boot-starter-undertow`,
     `io.undertow:*` ni `undertowVersion`; usar default embebido
-    Tomcat para MVC/Spring WS o Netty para WebFlux. **No quitar Netty en
-    WebFlux:** el doublecheck NO debe eliminar el pin `io.netty:*:4.1.136.Final`
-    del `dependencyManagement` en proyectos WebFlux (`spring-boot-starter-webflux`
-    presente). Es el CVE-fix Snyk 2026-05 aprobado (excepcion oficial v0.27.0 del
-    Check 8.7); el autofix `fix_remove_netty_pin` ya lo preserva y el doublecheck
-    manual tampoco debe tocarlo. En MVC/SOAP no se permite pin manual de
-    `io.netty:*` de ninguna version, y en WebFlux cualquier otra version
-    (`4.1.132.Final`, etc.) sigue bloqueada por el Check 8.7.
+    Tomcat para MVC/Spring WS o Netty para WebFlux. **No agregar pins de
+    `io.netty:*`** (ni `dependency` ni `force`): manda el BOM de Spring Boot.
+    Si el proyecto ya trae el pin tolerado `io.netty:*:4.1.136.Final` (legado
+    Spring Boot 3.5.x WebFlux), no hace falta tocarlo.
 12. **WAS Hikari.** Si WAS usa JPA/Hikari, validar query por motor:
     SQL Server=`SELECT 1`; Oracle=`SELECT 1 from dual`.
 10. **Helm env limpio.** En `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`,

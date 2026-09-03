@@ -26,7 +26,7 @@ paths:
 
 ## Dependencias
 - Snyk: 0 critical, 0 high
-- Pinear versiones de Jackson, Netty, commons-lang3 si hay CVEs conocidos
+- NUNCA pinear versiones de Jackson ni `io.netty:*`: manda el BOM de Spring Boot (un pin manual se queda atras al proximo CVE)
 
 ## Helm
 - Capacity + autoscaling baseline oficial (`resources` + **KEDA** + `servicemonitor`; HPA derogado 2026-07): ver `bank-official-rules.md` Regla 9h.1 / 9h.3.

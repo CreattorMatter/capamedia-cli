@@ -514,8 +514,7 @@ fuente unica.
   template no se actualizo. **Dejar que el BOM mande.**
 
 - **NUNCA agregar `dependency 'io.netty:*:VERSION'` en `dependencyManagement`**
-  "para parchar un CVE", **salvo la excepcion WebFlux 4.1.136.Final** (ver
-  abajo):
+  ni `force 'io.netty:*'` en `resolutionStrategy`, "para parchar un CVE":
   ```gradle
   // ✘ NO — esto era el "fix" del CVE viejo, ahora es el bug nuevo
   dependencyManagement {
@@ -531,58 +530,20 @@ fuente unica.
 
 - **NUNCA `replicaCount: 2` en helm** (regla derogada — ver Regla 9h.1).
 
-### Excepcion oficial — arbol Netty `4.1.136.Final` en WebFlux (v0.27.0; arbol completo v0.28.3; version vigente v0.32.0)
+### Pins de `io.netty` — NO agregarlos (v0.44.0)
 
-Proyectos con `spring-boot-starter-webflux` deben pinear el **arbol core de Netty
-(13 modulos)** a `io.netty:*:4.1.136.Final`: el BOM de Spring Boot 3.5.x trae
-Netty en version vulnerable (`4.1.121.Final`). Es la **unica** version permitida;
-cualquier otra (`4.1.132.Final`, `4.1.135.Final`, `4.1.999.Final`, **4.2.x**)
-sigue bloqueada por Check 8.7. **NO bumpear a 4.2.x**: rompe Reactor Netty del Spring Boot 3.5.x
-(`StacklessClosedChannelException` en `AbstractChannel$AbstractUnsafe.ensureOpen`).
+**NUNCA agregar pins de `io.netty:*` a un proyecto migrado**, ni en
+`dependencyManagement` ni en `resolutionStrategy.force`. El BOM de Spring Boot
+manda: es la unica forma que no se queda atras al proximo CVE. El arbol de 13
+modulos con doble pin que se pedia antes quedo sin efecto — el MCP genera
+Spring Boot 4.x, cuyo BOM ya trae Netty al dia, y bajarlo seria un downgrade.
 
-El pin usa **doble mecanismo** (Check 8.8): `dependencyManagement` +
-`configurations.all { resolutionStrategy { force } }`. El `force` es necesario
-porque `dependencyManagement` no siempre gana sobre transitivas (lib-bnc, el
-propio BOM). Pinear solo `netty-codec*` deja transitivos como `netty-handler-proxy`
-vulnerables (WSClientes0013, 2026-05-29: 9 CVEs HIGH/MEDIUM).
-
-Los 13 modulos core: `netty-common`, `netty-buffer`, `netty-transport`,
-`netty-transport-native-unix-common`, `netty-resolver`, `netty-resolver-dns`,
-`netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`,
-`netty-codec-socks`, `netty-handler`, `netty-handler-proxy`.
-`netty-transport-native-unix-common` se incluye porque es el modulo Java puro
-(platform-independent) que comparten los transportes nativos. Se excluyen solo
-los binarios nativos con classifier por SO (`netty-transport-native-epoll`,
-`netty-transport-native-kqueue`) y `netty-tcnative-*`.
-
-```gradle
-// ✔ SI — WebFlux: arbol Netty completo, doble pin (dependency + force)
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-webflux'
-}
-dependencyManagement {
-    dependencies {
-        dependency 'io.netty:netty-common:4.1.136.Final'
-        dependency 'io.netty:netty-buffer:4.1.136.Final'
-        // ... los 13 modulos core ...
-        dependency 'io.netty:netty-handler-proxy:4.1.136.Final'
-    }
-}
-configurations.all {
-    resolutionStrategy {
-        force 'io.netty:netty-common:4.1.136.Final'
-        force 'io.netty:netty-buffer:4.1.136.Final'
-        // ... los 13 modulos core ...
-        force 'io.netty:netty-handler-proxy:4.1.136.Final'
-    }
-}
-```
-
-- Detectado por `_project_uses_webflux(gradle_files)` (presencia de
-  `spring-boot-starter-webflux` en algun `build.gradle` del proyecto).
-- Constantes `NETTY_WEBFLUX_ALLOWED_VERSION = "4.1.136.Final"` y
-  `NETTY_CORE_MODULES` (13 modulos) en `capamedia_cli.core.version_policy`.
-- MVC/SOAP siguen sin pins manuales permitidos (cualquier version).
+Lo unico que sigue vivo es la **tolerancia** del Check 8.7 sobre proyectos
+Spring Boot 3.5.x que YA tienen el pin: `io.netty:*:4.1.136.Final` es la unica
+version que no marca FAIL (`NETTY_WEBFLUX_ALLOWED_VERSION` en
+`capamedia_cli.core.version_policy`). Cualquier otra version sigue bloqueada.
+Los Checks 8.8 y 8.10 solo se evaluan cuando ese pin ya existe: en un proyecto
+sin pins de Netty no emiten resultado.
 
 ### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
 
@@ -597,34 +558,14 @@ configurations.all {
   Snyk report deben estar en `dependencyManagement` → faltantes/version
   distinta HIGH. Solo WebFlux (BUS REST + ORQ).
 
-### Excepcion oficial — pins de seguridad NO-Netty en WebFlux (Snyk 2026-06)
+### Pins de seguridad NO-Netty en WebFlux (Snyk 2026-06) — solo legado
 
-El Snyk report 2026-06 (el que llevo el arbol Netty a `4.1.135.Final`, hoy
-`4.1.136.Final`) exige, **solo en
-WebFlux**, overridear estas dependencias en `dependencyManagement` (gated igual
-que 8.8: aplica cuando Netty ya esta pineado). `reactor-netty-http` y
-`spring-kafka` no existen en MVC/SOAP, por eso es WebFlux-only.
-
-```gradle
-dependencyManagement {
-    imports {
-        mavenBom 'org.springframework:spring-framework-bom:6.2.19'
-    }
-    dependencies {
-        // ... arbol Netty (Check 8.8) ...
-        dependency 'io.micrometer:micrometer-core:1.15.12'
-        dependency 'io.projectreactor.netty:reactor-netty-http:1.2.18'
-        dependency 'org.springframework.retry:spring-retry:2.0.13'
-        dependency 'org.springframework.kafka:spring-kafka:3.3.16'
-    }
-}
-```
-
-- Constantes `WEBFLUX_SECURITY_DEPENDENCY_PINS` (las 4 `dependency`) y
-  `SPRING_FRAMEWORK_BOM_COORD`/`SPRING_FRAMEWORK_BOM_VERSION` (el `mavenBom`)
-  en `capamedia_cli.core.version_policy`. Fuente unica; al cambiar una version
-  CVE se actualiza ahi y el canonical la cita.
-- MVC/SOAP: NO llevan estos pins (reactor-netty/spring-kafka no aplican).
+Los overrides de `micrometer-core`, `reactor-netty-http`, `spring-retry`,
+`spring-kafka` y el `spring-framework-bom` (constantes
+`WEBFLUX_SECURITY_DEPENDENCY_PINS` y `SPRING_FRAMEWORK_BOM_*`) son parte de la
+misma remediacion CVE y estan **gateados al pin de Netty**: el Check 8.10 solo
+los exige cuando el proyecto ya pinea Netty en la version tolerada. En un
+proyecto nuevo, sin pins, no se agregan.
 
 ### Autofix
 
