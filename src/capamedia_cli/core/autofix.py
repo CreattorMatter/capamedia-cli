@@ -940,23 +940,101 @@ def fix_trace_logger_application(root: Path, violation: Violation) -> AutofixRes
     )
 
 
-def _inject_helm_env_vars(text: str, missing: dict[str, str]) -> str:
-    """Inserta pares `- name: <var>` / `value: <val>` en la lista de env vars del
-    helm. Si existe `environment:`/`variables:`, los agrega como primeros items
-    (el orden en YAML no importa). Si no existe, crea el bloque `environment:` al
-    final. Solo AGREGA: no reescribe valores existentes."""
-    lines = text.splitlines()
+# Item existente de la lista de env vars (`- name: "CCC_X"`). Es el anclaje mas
+# confiable para insertar: alcanza con copiar su indentacion y queda como
+# hermano, sin adivinar la forma del chart.
+_HELM_ENV_ITEM_RE = re.compile(
+    r"""^(?P<indent>[ \t]*)-[ \t]+name[ \t]*:[ \t]*['"]?(?P<var>[A-Za-z_][\w.-]*)""",
+)
+# Claves que contienen una LISTA de env vars. `variables:` NO esta: en los charts
+# del MCP es un MAPPING (`variables.own.config`) e insertar ahi un item de lista
+# deja el YAML invalido y Helm no renderiza el chart.
+_HELM_ENV_CONTAINER_RE = re.compile(r"^(?P<indent>[ \t]*)(config|environment|env)[ \t]*:[ \t]*$")
+
+
+def _helm_env_insert_point(lines: list[str]) -> tuple[int, str, str] | None:
+    """(indice donde insertar, indent del `-`, indent del `value:`).
+
+    1. Como hermano del PRIMER item `- name:` existente (todo chart del banco
+       trae al menos `JAVA_OPTIONS`), copiando su indentacion exacta.
+    2. Bajo una clave contenedora cuyo contenido siguiente sea una lista.
+    None si el chart no tiene estructura de env vars reconocible.
+    """
     for i, line in enumerate(lines):
-        m = re.match(r"^([ \t]*)(environment|variables)[ \t]*:[ \t]*$", line)
+        m = _HELM_ENV_ITEM_RE.match(line)
         if not m:
             continue
-        item_indent = m.group(1) + "  "
+        item_indent = m.group("indent")
         value_indent = item_indent + "  "
+        for sibling in lines[i + 1 : i + 4]:
+            vm = re.match(r"^(?P<indent>[ \t]+)value[ \t]*:", sibling)
+            if vm:
+                value_indent = vm.group("indent")
+                break
+        return i, item_indent, value_indent
+
+    for i, line in enumerate(lines):
+        m = _HELM_ENV_CONTAINER_RE.match(line)
+        if not m:
+            continue
+        following = next(
+            (nxt for nxt in lines[i + 1 :] if nxt.strip() and not nxt.lstrip().startswith("#")),
+            None,
+        )
+        # Si lo que sigue es un mapping mas indentado (ej. `own:`), no es una
+        # lista de env vars: insertar un `- item` ahi rompe el YAML.
+        if (
+            following is not None
+            and not following.lstrip().startswith("-")
+            and len(following) - len(following.lstrip()) > len(m.group("indent"))
+        ):
+            continue
+        item_indent = m.group("indent") + "  "
+        return i + 1, item_indent, item_indent + "  "
+    return None
+
+
+def _set_helm_env_value(text: str, var: str, value: str) -> str:
+    """Reescribe el `value:` de una env var ya declarada, preservando indentacion.
+
+    Los 7 flags del trace-logger tienen UN solo valor valido por ambiente y
+    `CCC_PAYLOAD_MODE=NONE` es requisito de seguridad (no loguear payload/PII):
+    dejar el `FULL` que trae el scaffold significa payloads con PII en los logs.
+    """
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if not re.match(
+            rf"^[ \t]*(?:-[ \t]+)?name[ \t]*:[ \t]*['\"]?{re.escape(var)}['\"]?[ \t]*(#.*)?$",
+            line.rstrip("\n"),
+        ):
+            continue
+        for j in range(i + 1, min(len(lines), i + 5)):
+            candidate = lines[j]
+            vm = re.match(r"^(?P<prefix>[ \t]*value[ \t]*:[ \t]*)(?P<quote>['\"]?)", candidate)
+            if vm:
+                newline = "\n" if candidate.endswith("\n") else ""
+                quote = vm.group("quote") or '"'
+                lines[j] = f"{vm.group('prefix')}{quote}{value}{quote}{newline}"
+                return "".join(lines)
+            if re.match(r"^[ \t]*[-\w].*?:", candidate):
+                break
+    return text
+
+
+def _inject_helm_env_vars(text: str, missing: dict[str, str]) -> str:
+    """Inserta pares `- name: <var>` / `value: <val>` como hermanos de los items
+    que ya existen (ver `_helm_env_insert_point`). Si el chart no tiene ninguna
+    estructura de env vars, crea un bloque `environment:` al final. Solo AGREGA:
+    para corregir un valor existente usar `_set_helm_env_value`."""
+    lines = text.splitlines()
+    point = _helm_env_insert_point(lines)
+    if point is not None:
+        index, item_indent, value_indent = point
         block: list[str] = []
         for var, val in missing.items():
             block.append(f'{item_indent}- name: "{var}"')
             block.append(f'{value_indent}value: "{val}"')
-        new_lines = lines[: i + 1] + block + lines[i + 1 :]
+        new_lines = lines[:index] + block + lines[index:]
         result = "\n".join(new_lines)
         return result + "\n" if text.endswith("\n") else result
     block = ["environment:"]
@@ -1008,29 +1086,41 @@ def fix_trace_logger_helm(root: Path, violation: Violation) -> AutofixResult:
             continue
         expected = _trace_logger_expected(env)
         text = _read(f)
-        missing = {
+        current = {var: _helm_env_var_value(text, var) for var in TRACE_LOGGER_ENV_VARS}
+        missing = {var: expected[var] for var, value in current.items() if value is None}
+        # Valores presentes pero distintos del unico valido para el ambiente. Antes
+        # solo se reportaban (Check 7.8 HIGH) y nadie los corregia: el
+        # `CCC_PAYLOAD_MODE=FULL` del scaffold quedaba en los 3 helm.
+        wrong = {
             var: expected[var]
-            for var in TRACE_LOGGER_ENV_VARS
-            if _helm_env_var_value(text, var) is None
+            for var, value in current.items()
+            if value is not None and value != expected[var]
         }
-        if not missing:
+        if not missing and not wrong:
             continue
-        new_text = _inject_helm_env_vars(text, missing)
+        new_text = _inject_helm_env_vars(text, missing) if missing else text
+        for var, value in wrong.items():
+            new_text = _set_helm_env_value(new_text, var, value)
         if new_text == text:
             continue
         _write(f, new_text)
         modified.append(f)
-        changes.append(f"{name}: +{len(missing)} env vars")
+        detail = []
+        if missing:
+            detail.append(f"+{len(missing)} env vars")
+        if wrong:
+            detail.append("corregidas " + ", ".join(f"{v}={wrong[v]}" for v in sorted(wrong)))
+        changes.append(f"{name}: " + "; ".join(detail))
     if not modified:
         return AutofixResult(
             applied=False,
-            notes="env vars trace-logger ya presentes o sin helm por-entorno",
+            notes="env vars trace-logger ya correctas o sin helm por-entorno",
         )
     return AutofixResult(
         applied=True,
         files_modified=modified,
         after="; ".join(changes),
-        notes="env vars trace-logger inyectadas en helm",
+        notes="env vars trace-logger inyectadas/corregidas en helm",
     )
 
 
