@@ -191,7 +191,7 @@ query, DAO/repository, or config file that proves DB usage.
 
 ## Build And Dependencies
 
-Use Java 21 and Spring Boot `3.5.15` or newer approved by the bank.
+Use Java 21 and Spring Boot `3.5.15` **or newer**. `3.5.15` is the minimum, not a cap: **never downgrade the version the MCP generated** (a `4.1.1` scaffold stays at `4.1.1`).
 
 Allowed common dependencies:
 

@@ -484,13 +484,14 @@ implican BANCS (caso WSReglas0010: `UMPSeguridad0085` envuelve Cyxtera SOAP).
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla). 10 CVEs HIGH
 activas: 3 Jackson 3.0.1 transitivas, 4 Netty 4.1.132 transitivas, 3 Undertow.
 
-**Decision vigente del equipo:** usar **Spring Boot `3.5.15`** como baseline
-aprobado para servicios OLA. Spring Boot 4.x NO es baseline general por
-compatibilidad con arquetipos/librerias actuales del banco. Undertow se sigue
-bloqueando aparte (Regla 8 + Check 8.2) y los pins manuales de Netty/Jackson
-siguen prohibidos porque se quedan atras al proximo CVE.
+**Decision vigente del equipo:** `3.5.15` es el **MINIMO** aprobado para
+servicios OLA, **no un tope**. **NUNCA bajar la version que genero el MCP
+Fabrics**: si el arquetipo vino en `4.1.1`, se deja en `4.1.1`. Solo se sube
+una version por debajo del minimo. Undertow se sigue bloqueando aparte
+(Regla 8 + Check 8.2) y los pins manuales de Netty/Jackson siguen prohibidos
+porque se quedan atras al proximo CVE.
 
-### Baseline oficial
+### Baseline oficial (minimo, no tope)
 
 ```gradle
 plugins {

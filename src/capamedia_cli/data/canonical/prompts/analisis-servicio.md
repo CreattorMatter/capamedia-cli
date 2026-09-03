@@ -42,7 +42,7 @@ Your expertise includes:
 - IIB services with ESQL, SOAP/WSDL, msgflow/subflow, and MQ
 - WAS services with Java EE, JAX-WS endpoints, JDBC/JPA against Oracle
 - Banking integration with BANCS (core banking Temenos/TCS) through UMP (Utility Message Pattern) patterns or direct DB access
-- Target architecture: Java 21, Spring Boot 3.5.x, hexagonal OLA1, Gradle, OpenShift on-premise
+- Target architecture: Java 21, Spring Boot (minimum 3.5.15; keep whatever the MCP generates, never downgrade), hexagonal OLA1, Gradle, OpenShift on-premise
 - **When DB access is present:** HikariCP + JPA/JDBC (team standard) — applied as an add-on within the chosen REST/SOAP prompt, NOT as a criterion for picking between them
 - Standards: BIAN 12, RFC 7807, Banco Pichincha Development Chapter guidelines
 

@@ -385,10 +385,11 @@ o abrir el PR si no hay residuales HIGH.
 8. **Config is not an output port.** Si ves `*ConfigOutputPort` o un adapter
    que solo lee env/YAML/properties, reemplazar por `@ConfigurationProperties`
    o bean de config; los output ports son para dependencias externas.
-9. **Spring Boot baseline.** `build.gradle` debe quedar con
-   `id 'org.springframework.boot' version '3.5.15'` o superior aprobado. Si
-   aparece una versión menor, actualizar el literal del plugin sin reemplazar
-   el scaffold del MCP.
+9. **Spring Boot baseline (mínimo, no tope).** `build.gradle` debe quedar con
+   `id 'org.springframework.boot' version '3.5.15'` **o superior**. **NUNCA
+   bajar la versión que generó el MCP** (un `4.1.1` se conserva). Solo si
+   aparece una versión *menor* al mínimo, actualizar el literal del plugin sin
+   reemplazar el scaffold del MCP.
 10. **Pipeline/catalog namespace.** `KUBERNETES_NAMESPACE` en
     `azure-pipelines.yml` debe coincidir con `metadata.namespace` de
     `catalog-info.yaml`.

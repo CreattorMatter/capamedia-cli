@@ -95,9 +95,9 @@ implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
 **Prerrequisitos del proyecto** (PDF 2, sección "Características" / "Prerequisitos"):
 - **Lib compilada contra Spring Boot `3.5.12` y agnóstica a esa versión**
   (cita literal PDF 2026-05-26: _"Librería agnóstica a Spring boot 3.5.12"_).
-  El baseline del proyecto sigue siendo **`3.5.15`**
-  (`SPRING_BOOT_BASELINE_VERSION` en `core/version_policy.py`) — la lib es
-  compatible con cualquier 3.5.x del baseline.
+  El **mínimo** del proyecto es **`3.5.15`**
+  (`SPRING_BOOT_BASELINE_VERSION` en `core/version_policy.py`), no un tope: si
+  el MCP generó `4.x` en el ORQ, **se conserva** — nunca se baja.
 - Java 21.
 
 **Nota sobre la variante MVC**: el PDF 2 documenta también

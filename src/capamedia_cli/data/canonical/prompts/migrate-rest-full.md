@@ -881,7 +881,7 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Use `3.5.15` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
+1. **Spring Boot version — `3.5.15` is the MINIMUM, never a cap. NEVER downgrade what the MCP generated:** if the scaffold came with `4.1.1`, leave it at `4.1.1`. Only raise the literal when it is *below* `3.5.15`.
 2. **Peer Review plugin:** Update to `1.1.2` (Check 8.12 — older scaffolds ship `1.1.0`; the `architectureReview` task gates the PR in Azure)
 3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
 4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.136.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, `4.1.135.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
@@ -917,6 +917,7 @@ WebFlux dependency block to WAS REST/MVC services:
 plugins {
     id 'jacoco'
     id 'java'
+    // Minimo aprobado. Si el MCP genero una version mayor (4.1.1), CONSERVARLA.
     id 'org.springframework.boot' version '3.5.15'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'
