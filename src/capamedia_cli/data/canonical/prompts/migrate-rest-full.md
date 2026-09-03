@@ -989,11 +989,16 @@ dependencies {
     implementation 'io.prometheus:simpleclient_common:0.16.0'
 
     // Corporate libraries
-    implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
-    // lib-bnc-api-client: version segun OLA del servicio — 1.1.0 (OLA 1) o
-    // 2.0.0 (OLA 2; servicios de core/ola_policy.py OLA2_SERVICES). El autofix
-    // de `capamedia ai doublecheck` (Regla 8) la fija a la version correcta.
-    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
+    // Bank libraries compatible with Spring Boot 4 (bank requirement, 2026-09).
+    // The artifactId changed: lib-trace-logger -> lib-trace-logger-sb4.
+    implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'
+    // lib-bnc-api-client: ONLY for BUS/IIB with invocaBancs=true. Spring Boot 4
+    // requires 3.0.0-alpha.20260825120715. Legacy Spring Boot 3.5.x projects keep
+    // the OLA version (1.1.0 OLA 1 / 2.0.0 OLA 2, core/ola_policy.py); the
+    // `capamedia ai doublecheck` autofix (Regla 8) preserves a declared 3.x.
+    implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0-alpha.20260825120715'
+    // ORQ only (deploymentType=orquestador):
+    // implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'
 
     // Logging
     implementation 'net.logstash.logback:logstash-logback-encoder:9.0'

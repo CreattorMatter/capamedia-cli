@@ -21,7 +21,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
+from capamedia_cli.core.ola_policy import (
+    LIB_BNC_API_CLIENT_SB4,
+    lib_bnc_api_client_version,
+    ola_label,
+)
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
@@ -311,9 +315,11 @@ def fix_add_libbnc_dependency(
     requires_bancs: bool | None = None,
     service: str | None = None,
 ) -> BankAutofixResult:
-    """Fija `lib-bnc-api-client` en la version del OLA del servicio.
+    """Fija `lib-bnc-api-client` en la version que corresponde al servicio.
 
     Version (ver `core/ola_policy.py`):
+      - Spring Boot 4: `LIB_BNC_API_CLIENT_SB4` — si ya esta declarada, se
+        CONSERVA (no se reescribe a la version del OLA).
       - OLA 1 (default): 1.1.0
       - OLA 2 (servicios de `OLA2_SERVICES`): 2.0.0
 
@@ -364,10 +370,21 @@ def fix_add_libbnc_dependency(
         # Cubre pre-releases (1.1.0-alpha.*, 2.0.0-SNAPSHOT) y la version de la
         # otra OLA (1.1.0 en un servicio OLA 2, o 2.0.0 en uno OLA 1).
         present_versions = {m.group(2) for m in _LIBBNC_COORD_RE.finditer(text)}
-        wrong_versions = sorted(present_versions - {target_version})
+        # Linea Spring Boot 4 (`3.x`, requisito del banco 2026-09): se CONSERVA.
+        # El split por OLA (1.1.0 / 2.0.0) es de la linea SB3; reescribir un
+        # `3.0.0-alpha.*` a `1.1.0` desharia el requisito.
+        kept_sb4 = sorted(v for v in present_versions if v.split(".")[0] == "3")
+        wrong_versions = sorted(present_versions - {target_version} - set(kept_sb4))
+        if kept_sb4:
+            result.notes = (
+                f"lib-bnc-api-client {', '.join(kept_sb4)} conservada "
+                f"(linea Spring Boot 4; el default del OLA seria {target_version})"
+            )
         if wrong_versions:
+            wrong = set(wrong_versions)
             text = _LIBBNC_COORD_RE.sub(
-                lambda m: m.group(1) + target_version, text
+                lambda m: m.group(1) + (target_version if m.group(2) in wrong else m.group(2)),
+                text,
             )
             result.changes.append(
                 f"{gf.relative_to(project_root)}: lib-bnc-api-client "

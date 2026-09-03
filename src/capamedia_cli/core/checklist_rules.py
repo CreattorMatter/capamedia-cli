@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from capamedia_cli.core.version_policy import (
+    LIB_EVENT_LOGS_VERSION,
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     PEER_REVIEW_PLUGIN_ID,
@@ -4154,7 +4155,7 @@ def run_block_16(ctx: CheckContext) -> list[CheckResult]:
 
 # -- Block 17: Log transaccional (EXCLUSIVO ORQ) ---------------------------
 #
-# Librería `com.pichincha.common:lib-event-logs-webflux:1.0.0` que publica
+# Librería `com.pichincha.common:lib-event-logs-webflux` que publica
 # request/response al topico Kafka de auditoria (CE_EVENTOS). Luego
 # WSTecnicos0038 (servicio tecnico compartido del banco, NO es nuestro)
 # aplica plantillas XML y publica el JSON final en CE_TRANSACCIONAL que
@@ -4258,7 +4259,7 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
             CheckResult(
                 "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
                 "pass",
-                detail=f"lib-event-logs-{variant}:1.0.0 presente",
+                detail=f"lib-event-logs-{variant} presente",
             )
         )
     else:
@@ -4267,12 +4268,12 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
                 "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
                 "fail", severity="high",
                 detail=(
-                    "ORQ sin `com.pichincha.common:lib-event-logs-webflux:1.0.0` "
-                    "(o -mvc) en build.gradle"
+                    "ORQ sin `com.pichincha.common:lib-event-logs-webflux:"
+                    f"{LIB_EVENT_LOGS_VERSION}` (o -mvc) en build.gradle"
                 ),
                 suggested_fix=(
                     "Agregar implementation 'com.pichincha.common:"
-                    "lib-event-logs-webflux:1.0.0' al bloque dependencies"
+                    f"lib-event-logs-webflux:{LIB_EVENT_LOGS_VERSION}' al bloque dependencies"
                 ),
             )
         )

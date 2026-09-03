@@ -387,17 +387,23 @@ optimus:
 libreria BANCS API client del banco. La **version depende del OLA del
 servicio**:
 
-| OLA | Version | Notas |
+| Linea | Version | Notas |
 |-----|---------|-------|
-| OLA 1 | `1.1.0` | Linea base de OLA 1. |
-| OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
+| **Spring Boot 4** | `3.0.0-alpha.20260825120715` | Requisito del banco (2026-09). No depende del OLA: aplica a cualquier servicio compilado contra SB4. |
+| SB 3.5.x / OLA 1 | `1.1.0` | Linea base de OLA 1. |
+| SB 3.5.x / OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
 
 ```gradle
-// servicio OLA 1
+// Spring Boot 4 (proyectos nuevos)
+implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0-alpha.20260825120715'
+// servicio SB 3.5.x OLA 1
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
-// servicio OLA 2
+// servicio SB 3.5.x OLA 2
 implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'
 ```
+
+**El autofix de la Regla 8 CONSERVA una version `3.x` ya declarada**: no la
+reescribe a la del OLA.
 
 **Que servicios son OLA 2**: la lista oficial vive en `core/ola_policy.py`
 (`OLA2_SERVICES`) — fuente de verdad unica del CLI. Un servicio usa `2.0.0`

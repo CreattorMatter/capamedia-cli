@@ -40,9 +40,14 @@ BANK_NAMESPACES: tuple[str, ...] = (
     "tca",
 )
 
-# Versiones de lib-bnc-api-client por OLA.
+# Versiones de lib-bnc-api-client por OLA (linea Spring Boot 3.5.x).
 LIB_BNC_API_CLIENT_OLA1 = "1.1.0"
 LIB_BNC_API_CLIENT_OLA2 = "2.0.0"
+
+# Version compatible con Spring Boot 4 pedida por el banco (2026-09). No depende
+# del OLA. Si un `build.gradle` ya la declara, el autofix de la Regla 8 la
+# CONSERVA en vez de reescribirla a la version del OLA.
+LIB_BNC_API_CLIENT_SB4 = "3.0.0-alpha.20260825120715"
 
 # Servicios OLA 2 — entrega 1 (25). Nombres normalizados a minusculas.
 # Fuente: xlsx oficial `Servicios ola 2 entrega 1`, hoja "Servicios".

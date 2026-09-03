@@ -95,9 +95,19 @@ SPRING_FRAMEWORK_BOM_VERSION = "6.2.19"
 #
 # Fuente unica: el canonical (migrate-rest-full.md, migrate-soap-full.md,
 # checklist-rules.md) y los Checks 7.7/7.8 de checklist_rules deben citar este
-# mismo valor. Coordenada gradle: `com.pichincha.common:lib-trace-logger:<version>`.
-LIB_TRACE_LOGGER_COORD = "com.pichincha.common:lib-trace-logger"
-LIB_TRACE_LOGGER_VERSION = "1.4.0"
+# mismo valor.
+#
+# 2026-09 (requisito del banco): con Spring Boot 4 cambia el artifactId —
+# `lib-trace-logger` (1.4.0) pasa a `lib-trace-logger-sb4` (1.2.0). Los FQCN de
+# extractores y anotaciones (`@BpLogger`, `@BpTraceable`) no cambian, asi que el
+# codigo migrado no se toca: solo la coordenada gradle.
+LIB_TRACE_LOGGER_COORD = "com.pichincha.common:lib-trace-logger-sb4"
+LIB_TRACE_LOGGER_VERSION = "1.2.0"
+
+# lib-event-logs (log transaccional, SOLO ORQ). Version compatible con Spring
+# Boot 4 pedida por el banco. Las dos variantes (`-webflux` y `-mvc`) van en la
+# misma version; en este programa solo aplica `-webflux` (los ORQ son WebFlux).
+LIB_EVENT_LOGS_VERSION = "2.0.0"
 
 
 def parse_numeric_version(version: str) -> tuple[int, ...]:

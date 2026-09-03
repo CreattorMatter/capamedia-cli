@@ -219,7 +219,7 @@ EVERY migrated service (orchestrator AND microservice — NOT ORQ-only). Declare
 dependency:
 
 ```gradle
-implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
+implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'
 ```
 
 Forbidden dependencies:

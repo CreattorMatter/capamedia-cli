@@ -89,7 +89,7 @@ final ni conocer `WSTecnicos0038`. Solo necesita:
 programa de migración no hay ORQs MVC — todos van WebFlux por regla del banco):
 
 ```gradle
-implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
+implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'
 ```
 
 **Prerrequisitos del proyecto** (PDF 2, sección "Características" / "Prerequisitos"):
@@ -101,7 +101,7 @@ implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
 - Java 21.
 
 **Nota sobre la variante MVC**: el PDF 2 documenta también
-`lib-event-logs-mvc:1.0.0`. No la usamos porque:
+`lib-event-logs-mvc:2.0.0`. No la usamos porque:
 - Los ORQs son siempre WebFlux (regla del banco).
 - Los WAS MVC **NO** llevan log transaccional (cita PDF 1: "los eventos se
   generan únicamente en los orquestadores").

@@ -1178,7 +1178,10 @@ def check_application_yml(root: Path) -> CheckResult:
 # VALIDATION 8 — Gradle: librería obligatoria Banco Pichincha
 # ─────────────────────────────────────────────────────────────────────────────
 
-REQUIRED_LIBRARY   = "com.pichincha.bnc:lib-bnc-api-client:1.1.0"
+# Sin version: la fija el OLA (1.1.0 / 2.0.0) o la linea Spring Boot 4. El
+# literal con `:1.1.0` rechazaba por substring a los servicios OLA 2 (2.0.0) y a
+# los de Spring Boot 4.
+REQUIRED_LIBRARY   = "com.pichincha.bnc:lib-bnc-api-client"
 _LIB_BNC_RE        = re.compile(r"com\.pichincha(?:\.bnc)?:(lib-[\w\-]+(?::\S+)?)")
 _GRADLE_DEP_RE     = re.compile(
     r"""(?:implementation|api|compileOnly|runtimeOnly)\s*[('"]([^'")\s]+)['")]"""

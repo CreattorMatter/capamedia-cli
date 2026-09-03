@@ -260,14 +260,24 @@ def test_rest_prompt_has_stack_specific_dependency_guards() -> None:
     ) not in content
 
 
-def test_rest_prompt_uses_stable_bancs_dependency_and_no_ccc_inline_defaults() -> None:
-    """El prompt REST no debe enseñar versiones alpha ni defaults en CCC_*."""
+def test_rest_prompt_uses_the_bank_mandated_bancs_dependency_and_no_ccc_inline_defaults() -> None:
+    """El prompt REST debe enseñar la version de `lib-bnc-api-client` que pide el
+    banco, y nunca defaults inline en `${CCC_*}`.
+
+    Nota (2026-09): el requisito vigente del banco para Spring Boot 4 es
+    `3.0.0-alpha.20260825120715`, una **pre-release**. Antes este test prohibia
+    cualquier alpha; ahora prohibe solo las alphas viejas de la linea 1.x, que
+    si eran drift del scaffold. La version SB4 se afirma contra
+    `LIB_BNC_API_CLIENT_SB4` para que el prompt no se desincronice del codigo.
+    """
+    from capamedia_cli.core.ola_policy import LIB_BNC_API_CLIENT_SB4
+
     content = (CANONICAL_ROOT / "prompts" / "migrate-rest-full.md").read_text(
         encoding="utf-8"
     )
 
     assert "lib-bnc-api-client:1.1.0-alpha" not in content
-    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in content
+    assert f"com.pichincha.bnc:lib-bnc-api-client:{LIB_BNC_API_CLIENT_SB4}" in content
     assert "resilience4j-spring-boot2" not in content
     assert "resilience4j-spring-boot3" in content
     assert not re.search(r"\$\{CCC_[A-Z0-9_]+:[^}]+\}", content)
