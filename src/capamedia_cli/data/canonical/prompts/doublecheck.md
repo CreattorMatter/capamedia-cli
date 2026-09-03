@@ -279,7 +279,8 @@ grep -o "spring-boot-starter-web[a-z-]*" build.gradle | sort -u   # decide la va
 
 Para que quede sin ambiguedad, los casos de la matriz MCP que caen en **WebFlux**
 (variante reactiva) son **tres**: ORQ, BUS/IIB con `invocaBancs=true`, y **BUS/IIB
-sin BANCS con 1 operacion** (la matriz manda 1 op -> REST + WebFlux). Los que caen
+sin BANCS con 1 operacion** (segun `bank-mcp-matrix.md`; en WAS 1 operacion NO
+va WebFlux, va REST + MVC). Los que caen
 en **servlet** son WAS y todo SOAP. Un BUS WebFlux sin BANCS **si lleva la clase**:
 omitirla ahi fue un error real (WSSeguridad0069, 2026-09-03).
 
