@@ -244,6 +244,189 @@ Reglas duras:
 - Valor encontrado -> va a `application.yml`. `url`/host/credenciales como
   `${CCC_*}` + Helm; flags y constantes como literal.
 
+## Paso 1.10 - Sondas de management fuera del `lib-trace-logger`
+
+Aplica a **TODO servicio migrado**. Fuente: `BPTPSRE-SpringBoot4-probes-actuator-logs`
+§4, verificado con build verde en WSPagos0017 (MVC), WSProductos0178, ORQPagos0011,
+ORQPagos0008 y ORQProductos1001 (WebFlux).
+
+**Por que no alcanza con `logging.level`.** Los extractores del `lib-trace-logger`
+no emiten lineas de log: son un `Filter`/`WebFilter` que vuelcan URI, metodo,
+headers y body en `RequestInformationContextHolder`, que es un `@Component`
+**singleton, no request-scoped**. Cada sonda de liveness/readiness/prometheus
+**pisa el contexto compartido**, asi que un trace de negocio `@BpTraceable` puede
+reportar `requestUri=/actuator/health/readiness` en vez del suyo. Es el hallazgo
+del TO del 2026-08-25 (`"type":"TRANSACTIONAL"` con URI de actuator). Un filtro
+adicional no sirve: hay que **reemplazar el bean** con un `BeanPostProcessor`.
+
+**MUST**: `src/main/java/<base>/infrastructure/config/TraceLoggerManagementPathConfig.java`
+(Regla 1: solo 3 capas; nombre `*Config` por code-style). La variante depende del
+stack:
+
+| Stack | Variante | Extractor que envuelve |
+|---|---|---|
+| ORQ / BUS + invocaBancs (WebFlux) | reactiva | `ReactiveRequestInformationExtractor` |
+| SOAP y WAS (Spring MVC, servlet) | servlet | `ServletRequestInformationExtractor` |
+
+Poner la variante equivocada no compila contra el stack del proyecto. Compila
+igual con `lib-trace-logger:1.4.0` y con `lib-trace-logger-sb4:1.2.0`: los FQCN de
+los extractores no cambiaron.
+
+### Variante WebFlux (ORQ, BUS + invocaBancs)
+
+```java
+package com.pichincha.sp.infrastructure.config;
+
+import com.pichincha.common.trace.logger.extractor.request.information.reactive.ReactiveRequestInformationExtractor;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
+import org.springframework.lang.NonNull;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Mono;
+
+@Component
+public class TraceLoggerManagementPathConfig implements BeanPostProcessor, EnvironmentAware {
+
+  private static final String BASE_PATH_PROPERTY = "management.endpoints.web.base-path";
+  private static final String DEFAULT_BASE_PATH = "/actuator";
+
+  private String managementBasePath = DEFAULT_BASE_PATH;
+
+  @Override
+  public void setEnvironment(Environment environment) {
+    String basePath = environment.getProperty(BASE_PATH_PROPERTY, DEFAULT_BASE_PATH);
+    this.managementBasePath = basePath.isBlank() ? DEFAULT_BASE_PATH : basePath;
+  }
+
+  @Override
+  public Object postProcessAfterInitialization(Object bean, String beanName) {
+    if (bean instanceof ReactiveRequestInformationExtractor delegate) {
+      return new ManagementPathAwareExtractor(delegate, managementBasePath);
+    }
+    return bean;
+  }
+
+  // El extractor de lib-trace-logger vuelca cada request en un RequestInformationContextHolder
+  // singleton: las sondas de liveness/readiness/prometheus pisan el contexto del request de
+  // negocio y ademas bufferean su body. Se las deja pasar sin capturar.
+  private record ManagementPathAwareExtractor(WebFilter delegate, String managementBasePath)
+      implements WebFilter {
+
+    @NonNull
+    @Override
+    public Mono<Void> filter(@NonNull ServerWebExchange exchange, @NonNull WebFilterChain chain) {
+      if (isManagementPath(exchange)) {
+        return chain.filter(exchange);
+      }
+      return delegate.filter(exchange, chain);
+    }
+
+    private boolean isManagementPath(ServerWebExchange exchange) {
+      return exchange
+          .getRequest()
+          .getPath()
+          .pathWithinApplication()
+          .value()
+          .startsWith(managementBasePath);
+    }
+  }
+}
+```
+
+### Variante Spring MVC / servlet (SOAP, WAS)
+
+```java
+package com.pichincha.sp.infrastructure.config;
+
+import com.pichincha.common.trace.logger.extractor.request.information.servlet.ServletRequestInformationExtractor;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TraceLoggerManagementPathConfig implements BeanPostProcessor, EnvironmentAware {
+
+  private static final String BASE_PATH_PROPERTY = "management.endpoints.web.base-path";
+  private static final String DEFAULT_BASE_PATH = "/actuator";
+
+  private String managementBasePath = DEFAULT_BASE_PATH;
+
+  @Override
+  public void setEnvironment(Environment environment) {
+    String basePath = environment.getProperty(BASE_PATH_PROPERTY, DEFAULT_BASE_PATH);
+    this.managementBasePath = basePath.isBlank() ? DEFAULT_BASE_PATH : basePath;
+  }
+
+  @Override
+  public Object postProcessAfterInitialization(Object bean, String beanName) {
+    if (bean instanceof ServletRequestInformationExtractor delegate) {
+      return new ManagementPathAwareExtractor(delegate, managementBasePath);
+    }
+    return bean;
+  }
+
+  // El extractor de lib-trace-logger vuelca cada request en un RequestInformationContextHolder
+  // singleton: las sondas de liveness/readiness/prometheus pisan el contexto del request de
+  // negocio y ademas cachean su body en memoria. Se las deja pasar sin capturar.
+  private record ManagementPathAwareExtractor(Filter delegate, String managementBasePath)
+      implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+        throws IOException, ServletException {
+      if (request instanceof HttpServletRequest httpRequest && isManagementPath(httpRequest)) {
+        chain.doFilter(request, response);
+        return;
+      }
+      delegate.doFilter(request, response, chain);
+    }
+
+    private boolean isManagementPath(HttpServletRequest request) {
+      return pathWithinApplication(request).startsWith(managementBasePath);
+    }
+
+    private String pathWithinApplication(HttpServletRequest request) {
+      String uri = request.getRequestURI();
+      String contextPath = request.getContextPath();
+      if (contextPath == null || contextPath.isEmpty() || !uri.startsWith(contextPath)) {
+        return uri;
+      }
+      return uri.substring(contextPath.length());
+    }
+  }
+}
+```
+
+### Decisiones que no hay que cambiar
+
+- **`BeanPostProcessor` que envuelve, no un filtro nuevo**: un filtro adicional no
+  puede impedir que el extractor de la lib se ejecute.
+- **Seleccion por `instanceof`, no por `beanName`**: el nombre del bean depende del
+  component-scan de la libreria; la clase es contrato estable.
+- **Base-path desde `Environment`** (`management.endpoints.web.base-path`, que
+  viene de `${CCC_ACTUATOR_BASE_PATH}`), default `/actuator`. **Si llega en
+  blanco cae a `/actuator`**: `startsWith("")` seria `true` para todo y apagaria
+  la captura del servicio entero.
+- `pathWithinApplication()` (WebFlux) / restar `getContextPath()` (servlet) para
+  aguantar un `spring.webflux.base-path` o `server.servlet.context-path`.
+
+**Efecto colateral conocido**: al envolver, el bean deja de resolverse por su tipo
+concreto (`getBeanNamesForType(...Extractor.class).length == 0`). Verificado que
+nada lo inyecta por tipo, solo se registra como `Filter`/`WebFilter`. Re-chequear
+si sube `lib-trace-logger`.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash
