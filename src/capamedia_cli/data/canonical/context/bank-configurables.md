@@ -28,24 +28,25 @@ Nodo ESQL del IIB que lee configurables de un repositorio operativo del banco.
 
 ```esql
 CALL GestionarRecursoConfigurable(
-    'CMRCTEATR',              -- ConfigName
+    'UMPSeguridad0087Config',  -- columna `Configurable` del CSV
     'REG_MAX',                -- ClavePropiedad
     OutputRoot.XMLNSC.valor   -- OUT
 );
 ```
 
 **Cómo migrarlo**:
-1. El CSV `ConfigurablesBusOmniTest_Transfor` (en `PromptCapaMedia/prompts/`)
-   contiene los valores de producción.
-2. El agente migrador abre el CSV, busca la row `CMRCTEATR` / `REG_MAX`.
+1. El CSV `ConfigurablesBusOmni*.csv` (en el repo local `PromptCapaMedia/`)
+   tiene los valores de producción. Es **ISO-8859-1, delimitador `;`**, columnas
+   `Configurable;Variable;Valor` (ver `/doublecheck` Paso 1.9: un `grep` en
+   locale UTF-8 devuelve un falso "no encontrado").
+2. El agente busca la fila por su columna `Configurable`.
 3. Mapea el valor encontrado a `application.yml`:
 
 ```yaml
 # application.yml
-cache:
-  CMRCTEATR:
-    REG_MAX: "10"                    # valor del CSV
-    CODIGO_VACIO: "0001"             # valor del CSV
+UMPSeguridad0087Config:
+  ns: "http://soap.easysol.net/detect/detectService"
+  enableTRA: "true"                  # valor del CSV
 ```
 
 ### 2. IIB — `GestionarRecursoXML`

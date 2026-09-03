@@ -213,6 +213,37 @@ Y los 3 Helm (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) declaran las
 - NO aplicar nada de esto a WAS/BUS: `lib-event-logs` y sus niveles son
   ORQ-only (el trace-logger de los Checks 7.7/7.8 si es universal).
 
+## Paso 1.9 - Configurables del CSV operativo (IIB con `GestionarRecursoConfigurable`)
+
+Solo si el servicio usa `GestionarRecursoConfigurable` / `Environment.cache.<Nombre>`.
+El CSV vive en el repo local: `PromptCapaMedia/ConfigurablesBusOmni*.csv`.
+
+**El archivo es ISO-8859-1 con delimitador `;`**, no UTF-8 ni coma. Un `grep` en
+locale UTF-8 lo trata como binario y **sale con codigo 1 y sin salida, que es
+identico a "no encontrado"**; `sort` muere con `Illegal byte sequence`. Asi se
+reporto como ausente un configurable que tenia 12 filas (WSSeguridad0069,
+2026-09-03), perdiendo la `url` y el `ns` del proveedor externo.
+
+Forma correcta de consultarlo:
+
+```bash
+CSV="$(ls ~/BP/PromptCapaMedia/ConfigurablesBusOmni*.csv | head -1)"
+iconv -f ISO-8859-1 -t UTF-8 "$CSV" | grep -i "UMPSeguridad0087Config"
+echo "exit=$?"          # 0 = existe ; 1 = NO existe. Sin `|| echo`.
+# columnas reales: Configurable;Variable;Valor   (los valores traen """X""" de Excel)
+```
+
+Reglas duras:
+
+- **NUNCA** encadenar `|| echo "NO ENCONTRADO"` a la busqueda: convierte un
+  fallo de la herramienta en un falso negativo silencioso. Mirar el exit code.
+- **NUNCA** concluir ausencia desde un `head -N` de la lista: hay 533
+  configurables distintos en 7868 filas.
+- Solo con exit code `1` (leido OK y ausente) se documenta como pendiente del
+  SRE. Si el CSV no se pudo leer, **no hay respuesta**: no inventar ni asumir.
+- Valor encontrado -> va a `application.yml`. `url`/host/credenciales como
+  `${CCC_*}` + Helm; flags y constantes como literal.
+
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash

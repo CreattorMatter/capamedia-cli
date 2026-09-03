@@ -1184,8 +1184,8 @@ leen sus configurables de un CSV operativo del banco:
 PromptCapaMedia/prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv
 ```
 
-Tiene ~7879 filas con las configurables oficiales de produccion (CMRCTEATR,
-CMRDATRFN, etc. mapeadas a valores por ambiente).
+Tiene 7868 filas de datos con las configurables oficiales de produccion,
+agrupadas en 533 nombres distintos (columna `Configurable`).
 
 ### Por que no esta embebido en el CLI
 
@@ -1197,18 +1197,17 @@ paquete Python. Ademas se actualiza con regularidad desde operaciones.
 **Cuando el ANALYSIS detecta `GestionarRecursoConfigurable`**, el agente
 migrador DEBE:
 
-1. Abrir el CSV desde el repo local `PromptCapaMedia` (path arriba).
-2. Buscar las rows cuyo campo `ConfigName` matchee las configurables
-   usadas por el servicio legacy.
-3. Mapear cada row a una entrada en `application.yml`:
+1. Abrir el CSV local (ISO-8859-1, delimitador `;` — ver `/doublecheck` Paso 1.9:
+   un `grep` en UTF-8 da un falso "no encontrado").
+2. Buscar las filas cuya columna `Configurable` matchee las usadas por el legacy.
+3. Mapear cada fila (`Configurable;Variable;Valor`) a `application.yml`:
 
 ```yaml
-# Ejemplo: legacy usa Environment.cache.CMRCTEATR.REG_MAX
-cache:
-  CMRCTEATR:
-    REG_MAX: "10"                     # valor del CSV (row CMRCTEATR.REG_MAX)
-    CODIGO_VACIO: "0001"              # valor del CSV
-    # ... demas campos del CSV para este ConfigName
+# Ejemplo real: el UMP lee Environment.cache.UMPSeguridad0087Config
+UMPSeguridad0087Config:
+  url: ${CCC_DETECTID_URL}            # env-dependent -> Helm
+  ns: "http://soap.easysol.net/detect/detectService"
+  enableTRA: "true"                   # valor del CSV
 ```
 
 4. **NUNCA** dejar como `TBD` si el CSV tiene el valor. **NUNCA** inventar
