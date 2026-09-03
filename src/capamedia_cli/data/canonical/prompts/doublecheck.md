@@ -259,14 +259,29 @@ reportar `requestUri=/actuator/health/readiness` en vez del suyo. Es el hallazgo
 del TO del 2026-08-25 (`"type":"TRANSACTIONAL"` con URI de actuator). Un filtro
 adicional no sirve: hay que **reemplazar el bean** con un `BeanPostProcessor`.
 
-**MUST**: `src/main/java/<base>/infrastructure/config/TraceLoggerManagementPathConfig.java`
-(Regla 1: solo 3 capas; nombre `*Config` por code-style). La variante depende del
-stack:
+**MUST en TODO servicio migrado**, sin excepciones:
+`src/main/java/<base>/infrastructure/config/TraceLoggerManagementPathConfig.java`
+(Regla 1: solo 3 capas; nombre `*Config` por code-style). **No depende de si el
+servicio invoca BANCS, ni del origen (WAS/BUS/ORQ), ni de la cantidad de
+operaciones**: si el proyecto tiene `lib-trace-logger`, tiene el problema.
 
-| Stack | Variante | Extractor que envuelve |
+La unica pregunta es que variante. Se decide **por el starter que declara
+`build.gradle`**, nada mas:
+
+| `build.gradle` declara | Variante | Extractor que envuelve |
 |---|---|---|
-| ORQ / BUS + invocaBancs (WebFlux) | reactiva | `ReactiveRequestInformationExtractor` |
-| SOAP y WAS (Spring MVC, servlet) | servlet | `ServletRequestInformationExtractor` |
+| `spring-boot-starter-webflux` | reactiva | `ReactiveRequestInformationExtractor` |
+| `spring-boot-starter-web` o `-web-services` | servlet | `ServletRequestInformationExtractor` |
+
+```bash
+grep -o "spring-boot-starter-web[a-z-]*" build.gradle | sort -u   # decide la variante
+```
+
+Para que quede sin ambiguedad, los casos de la matriz MCP que caen en **WebFlux**
+(variante reactiva) son **tres**: ORQ, BUS/IIB con `invocaBancs=true`, y **BUS/IIB
+sin BANCS con 1 operacion** (la matriz manda 1 op -> REST + WebFlux). Los que caen
+en **servlet** son WAS y todo SOAP. Un BUS WebFlux sin BANCS **si lleva la clase**:
+omitirla ahi fue un error real (WSSeguridad0069, 2026-09-03).
 
 Poner la variante equivocada no compila contra el stack del proyecto. Compila
 igual con `lib-trace-logger:1.4.0` y con `lib-trace-logger-sb4:1.2.0`: los FQCN de
