@@ -6,6 +6,70 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-03
+
+### Fixed — Falso negativo al consultar el CSV de configurables
+
+Hallazgo de la migracion de WSSeguridad0069: el agente reporto que
+`UMPSeguridad0087Config` "no existe en el CSV" cuando tiene **12 filas**, entre
+ellas la `url` y el `ns` de Cyxtera DetectID que el UMP legacy lee de
+`Environment.cache.UMPSeguridad0087Config`. Sin esos valores la migracion habria
+dejado el downstream como pendiente del SRE teniendolos disponibles.
+
+No fue un error de razonamiento del modelo, fue guia fragil del CLI:
+
+- El CSV es **ISO-8859-1**. En locale UTF-8 `grep` lo trata como binario: sale
+  con **codigo 1 y sin salida, indistinguible de "no encontrado"**, y `sort`
+  muere con `Illegal byte sequence`.
+- El delimitador es `;`, no `,`.
+- Los canonicals nombraban la columna clave como `ConfigName`, que **no
+  existe**: el header real es `Configurable;Variable;Valor`.
+- El caso trabajado de la doc (`CMRCTEATR` / `REG_MAX`) **no esta en el
+  archivo**, asi que un agente que seguia el ejemplo al pie de la letra buscaba
+  algo ausente y "confirmaba" su conclusion.
+- El patron `grep ... || echo "NO ENCONTRADO"` convertia el fallo de la
+  herramienta en un falso negativo silencioso, y `head -40` sobre la lista
+  ordenada cortaba antes de la mayoria (hay 533 configurables, no ~40).
+
+Nuevo `core/configurables.py` + comando **`capamedia configurables`**:
+
+- Lee el CSV con encoding y delimitador correctos, salta el header y las filas
+  de relleno `;;;;`, y desarma el triple-quote de Excel (`"""X"""` -> `X`).
+- **Contrato de exit codes**, que es la distincion que el `|| echo` borraba:
+  `0` = hay filas; `1` = CSV leido OK y la clave **no** esta (respuesta
+  definitiva, recien aca aplica "pendiente del SRE"); `2` = CSV ilegible o
+  ausente (**no hay respuesta**, prohibido concluir ausencia).
+- `--json` (una linea, por stdout plano para que el agente lo parsee),
+  `--yaml` (bloque `application.yml` listo), `--variable`, `--exact`,
+  `--limit`, `--csv`. El inventario avisa explicitamente cuando trunca.
+- `WARN` sobre los 24 valores cuyo acento viene mal codificado en el origen
+  (byte `0xE2` donde iba `o` con tilde): no se copian literales a
+  `application.yml`, se piden al SRE.
+- Descubrimiento del CSV reutilizando la busqueda de `prompts/` de los
+  catalogos oficiales (`catalog_injector.candidate_capamedia_roots`, ahora
+  publica) para no tener dos convenciones divergentes.
+
+Datos del archivo verificados el 2026-09-03: 7868 filas de datos, 533
+configurables distintos, `Configurable`/`Variable` **ASCII puro** en todas las
+filas (por eso el lookup por nombre siempre es exacto).
+
+### Changed — Canonicals del CSV corregidos
+
+`bank-official-rules.md` Regla 11 (tabla de formato real, receta con exit codes,
+anti-patrones `grep`/`|| echo`/`head`, ejemplo real `UMPSeguridad0087Config`),
+`bank-configurables.md` (fuente, ESQL de ejemplo con un configurable que si
+existe, tabla literal-vs-env-var, anti-patrones), `context/CLAUDE.md`,
+`prompts/analisis-servicio.md` y `prompts/migrate-rest-full.md` (REQUIRED INPUT
+item 4 + seccion 4.13): todos apuntan al comando y prohiben el `grep` directo.
+
+### Tests
+
+Nuevo `tests/test_configurables.py` (+16): CSV sintetico en latin-1 con las
+mismas trampas (delimitador, triple-quote, relleno, acento corrupto), prueba
+que UTF-8 explota y latin-1 no, parseo, lookup substring/exact/variable, los
+tres exit codes, `--json` parseable, aviso de truncado, y guard de que los
+canonicals ya no ensenan la receta rota. Suite 1131.
+
 ## [0.41.0] - 2026-09-03
 
 ### Fixed — Subagentes morian con `Prompt is too long` (presupuesto de contexto)

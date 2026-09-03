@@ -109,7 +109,7 @@ Before executing, verify that you have access to:
    ```
    The adapter suffix (e.g., `profile`, `location`, `economic`, `reference`) determines which `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL` env var to use. **NEVER guess the adapter — always consult this catalog.**
 
-4. **Servicios Configurables catalog (MANDATORY when the ANALYSIS reports `GestionarRecursoConfigurable`)** — Local file `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`. Treat it as the operational source of truth for `Environment.cache.<ConfigName>.<field>` values. Resolve every used field here before leaving any placeholder.
+4. **Servicios Configurables catalog (MANDATORY when the ANALYSIS reports `GestionarRecursoConfigurable`)** — Query it with **`capamedia configurables <Name>`** (add `--yaml` for a ready `application.yml` block). It reads the local CSV `PromptCapaMedia/ConfigurablesBusOmni*.csv` with the correct encoding. **NEVER `grep` that file**: it is ISO-8859-1 with `;` delimiter, so a grep under a UTF-8 locale exits 1 with no output and looks exactly like "not found" (false negative in WSSeguridad0069, 2026-09-03). Exit `0` = use the values; exit `1` = read OK and absent, document as SRE pending; exit `2` = could not read, **no conclusion allowed**. Resolve every used field before leaving any placeholder.
 
 5. **Discovery edge cases (MANDATORY when present)** — Read `DISCOVERY_EDGE_CASES`
    from `ANALISIS_<ServiceName>.md`, `COMPLEXITY_<service>.md`, or the report
@@ -2779,12 +2779,12 @@ Every configuration variable identified in the ANALYSIS (Section 15 "Service Con
 - **NEVER leave a variable undocumented.** If the ANALYSIS lists a property key, it MUST appear in `application.yml`.
 - **Only declare in Helm the `${CCC_*}` variables that are actually referenced in `application.yml`.** No orphan variables.
 
-If the ANALYSIS reported `GestionarRecursoConfigurable`, create the corresponding service-specific config block in `application.yml` and resolve it from the local CSV `ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`.
+If the ANALYSIS reported `GestionarRecursoConfigurable`, create the corresponding service-specific config block in `application.yml` and resolve every field with `capamedia configurables <Name> --yaml` (never by grepping the CSV — see REQUIRED INPUT item 4).
 
 Additional rules for configurables:
 - Non-secret functional values (lengths, prefixes, booleans, cache durations, business timeouts) may be committed as literals.
 - Secrets or environment-dependent values must stay as `${CCC_*}` and be declared in `helm/*.yml`.
-- NEVER leave a configurable as `TBD` if the field exists in the local CSV.
+- NEVER leave a configurable as `TBD` if `capamedia configurables <Name>` returns it (exit 0). Only exit code 1 justifies `TBD` + SRE pending; exit code 2 means the CSV was unreadable, so nothing can be concluded.
 
 ```yaml
 spring:

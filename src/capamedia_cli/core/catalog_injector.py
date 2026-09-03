@@ -96,6 +96,16 @@ def _default_capamedia_roots(workspace: Path) -> list[Path]:
     return candidates
 
 
+def candidate_capamedia_roots(workspace: Path) -> list[Path]:
+    """Orden de busqueda publico del `prompts/` global del banco.
+
+    Fuente unica para cualquier modulo que necesite ubicar los catalogos
+    oficiales o el CSV de configurables (`core/configurables.py`), para no
+    volver a tener dos convenciones de descubrimiento divergentes.
+    """
+    return _default_capamedia_roots(workspace)
+
+
 def _find_prompts_dir(workspace: Path, explicit: Path | None) -> Path | None:
     if explicit is not None:
         explicit = explicit.resolve()

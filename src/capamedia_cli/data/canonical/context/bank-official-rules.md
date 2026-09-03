@@ -1427,38 +1427,98 @@ con severidad HIGH. Test: `tests/test_block_15_legacy_name.py`.
 leen sus configurables de un CSV operativo del banco:
 
 ```
-PromptCapaMedia/prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv
+PromptCapaMedia/ConfigurablesBusOmni*.csv
 ```
 
-Tiene ~7879 filas con las configurables oficiales de produccion (CMRCTEATR,
-CMRDATRFN, etc. mapeadas a valores por ambiente).
+**Formato real del archivo** (verificado 2026-09-03; el CLI lo lee por vos con
+`capamedia configurables`):
+
+| Atributo | Valor |
+|---|---|
+| Encoding | `ISO-8859-1` (NO UTF-8) |
+| Delimitador | `;` (NO coma) |
+| Columnas | `Configurable;Variable;Valor` |
+| Filas de datos | 7868 |
+| Configurables distintos | 533 |
+| Valores | vienen con triple-quote de Excel (`"""X"""` -> `X`) |
+
+`Configurable` y `Variable` son **ASCII puro** en las 7868 filas, asi que la
+busqueda por nombre siempre es exacta. Solo 24 valores de descripcion traen un
+acento mal codificado en el origen (byte `0xE2` donde iba `o` con tilde): el CLI
+avisa con `WARN` y ese texto se pide al SRE, no se copia literal.
 
 ### Por que no esta embebido en el CLI
 
-El CSV es **demasiado grande** (~500 KB, 7879 filas) para distribuir en el
-paquete Python. Ademas se actualiza con regularidad desde operaciones.
+El CSV es **demasiado grande** (~500 KB) para distribuir en el paquete Python.
+Ademas se actualiza con regularidad desde operaciones. El CLI no lo embebe: lo
+**lee** del repo local con el encoding correcto.
+
+### Como consultarlo (obligatorio: usar el CLI, no `grep`)
+
+```bash
+capamedia configurables UMPSeguridad0087Config          # tabla
+capamedia configurables UMPSeguridad0087Config --yaml   # bloque application.yml
+capamedia configurables                                 # inventario (533 nombres)
+```
+
+**Exit codes** (la distincion que un `grep` no da):
+
+| Code | Significado | Accion |
+|---|---|---|
+| `0` | Hay filas | Usar los valores |
+| `1` | CSV leido OK y la clave NO esta | Respuesta **definitiva**: documentar como pendiente del SRE |
+| `2` | CSV no encontrado / ilegible | **NO hay respuesta**: nunca concluir que no existe |
+
+**NEVER** hacer `grep` directo sobre este CSV. Falla asi (caso real
+WSSeguridad0069, 2026-09-03):
+
+- El archivo es **ISO-8859-1**. En locale UTF-8 `grep` lo trata como binario:
+  **sale con codigo 1 y sin salida, identico a "no encontrado"**. `sort` muere
+  con `Illegal byte sequence`.
+- El delimitador es `;`, no `,`: un `cut -d','` devuelve la fila entera.
+- El patron `grep ... || echo "NO ENCONTRADO"` **convierte el fallo de la
+  herramienta en un falso negativo silencioso**. Prohibido: nunca enmascarar
+  el exit code de una busqueda con `||`.
+- Concluir ausencia desde un `head -N` de la lista ordenada tambien es falso
+  negativo: hay 533 configurables, no los ~40 que entran en pantalla.
+
+Si por algun motivo hay que leerlo a mano, la unica forma correcta es
+convertir primero y verificar el codigo de salida explicitamente:
+
+```bash
+CSV="$(ls PromptCapaMedia/ConfigurablesBusOmni*.csv | head -1)"
+iconv -f ISO-8859-1 -t UTF-8 "$CSV" | grep -i "UMPSeguridad0087Config"
+echo "exit=$?"   # 0 = encontrado, 1 = ausente. Sin `|| echo`.
+```
 
 ### Como consumirlo
 
 **Cuando el ANALYSIS detecta `GestionarRecursoConfigurable`**, el agente
 migrador DEBE:
 
-1. Abrir el CSV desde el repo local `PromptCapaMedia` (path arriba).
-2. Buscar las rows cuyo campo `ConfigName` matchee las configurables
-   usadas por el servicio legacy.
-3. Mapear cada row a una entrada en `application.yml`:
+1. Correr `capamedia configurables <Nombre>` (el nombre sale del ESQL:
+   `GestionarRecursoConfigurable('<Nombre>', ...)` /
+   `Environment.cache.<Nombre>`).
+2. Mapear cada fila devuelta a una entrada en `application.yml`. Ejemplo real
+   de WSSeguridad0069, cuyo UMP lee `Environment.cache.UMPSeguridad0087Config`:
 
 ```yaml
-# Ejemplo: legacy usa Environment.cache.CMRCTEATR.REG_MAX
-cache:
-  CMRCTEATR:
-    REG_MAX: "10"                     # valor del CSV (row CMRCTEATR.REG_MAX)
-    CODIGO_VACIO: "0001"              # valor del CSV
-    # ... demas campos del CSV para este ConfigName
+# capamedia configurables UMPSeguridad0087Config --yaml
+UMPSeguridad0087Config:
+  enableAUD: "true"
+  enableEXC: "true"
+  enableREN: "true"
+  enableTRA: "true"
+  ns: "http://soap.easysol.net/detect/detectService"
+  url: "https://detectidtest.uio.bpichincha.com/detect/services/WSClientService"
 ```
 
+3. `url` cambia por ambiente -> va como `${CCC_*}` + Helm en los 3 ambientes.
+   Los flags y el `ns` son literales del catalogo operativo (ver la tabla de
+   decision en `bank-configurables.md`).
 4. **NUNCA** dejar como `TBD` si el CSV tiene el valor. **NUNCA** inventar
-   si el CSV no tiene el row — documentar como pendiente del SRE.
+   si el CSV no tiene la fila (exit code `1`) — documentar como pendiente del
+   SRE. Con exit code `2` no se concluye nada: el CSV no se pudo leer.
 
 ### Cross-check con Block 19
 

@@ -10,7 +10,12 @@ summary: Configuracion externa del banco - GestionarRecursoConfigurable (IIB), G
 **Fuentes autoritativas**:
 - `prompts/documentacion/BPTPSRE-Servicios Configurables-200426-212822.pdf`
 - `prompts/documentacion/BPTPSRE-Archivos de configuración-200426-212744.pdf`
-- CSV operativo: `PromptCapaMedia/prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv` (~7879 filas)
+- CSV operativo: `PromptCapaMedia/ConfigurablesBusOmni*.csv` — **ISO-8859-1**,
+  delimitador `;`, columnas `Configurable;Variable;Valor`, 7868 filas, 533
+  configurables distintos. **Consultarlo SIEMPRE con `capamedia configurables
+  <Nombre>`**, nunca con `grep` (ver Regla 11 de `bank-official-rules.md`: en
+  locale UTF-8 `grep` sale con codigo 1 y sin salida, indistinguible de "no
+  encontrado", y eso produjo un falso negativo real en WSSeguridad0069).
 - Commit `b55a794` del PromptCapaMedia (2026-04-21)
 
 Este canonical centraliza las reglas para **configurables** (IIB/WAS) y su
@@ -28,25 +33,34 @@ Nodo ESQL del IIB que lee configurables de un repositorio operativo del banco.
 
 ```esql
 CALL GestionarRecursoConfigurable(
-    'CMRCTEATR',              -- ConfigName
-    'REG_MAX',                -- ClavePropiedad
-    OutputRoot.XMLNSC.valor   -- OUT
+    'UMPSeguridad0087Config',  -- nombre del configurable (columna `Configurable` del CSV)
+    'url',                     -- clave           (columna `Variable` del CSV)
+    OutputRoot.XMLNSC.valor    -- OUT             (columna `Valor` del CSV)
 );
 ```
 
+El primer argumento es lo que se le pasa a `capamedia configurables <Nombre>`.
+
 **Cómo migrarlo**:
-1. El CSV `ConfigurablesBusOmniTest_Transfor` (en `PromptCapaMedia/prompts/`)
+1. El CSV `ConfigurablesBusOmni*.csv` (en el repo local `PromptCapaMedia/`)
    contiene los valores de producción.
-2. El agente migrador abre el CSV, busca la row `CMRCTEATR` / `REG_MAX`.
-3. Mapea el valor encontrado a `application.yml`:
+2. El agente migrador corre `capamedia configurables <Nombre>` con el nombre
+   que aparece en el ESQL. **No hace `grep`**: el archivo es ISO-8859-1 y un
+   grep en locale UTF-8 devuelve un falso "no encontrado". Exit code `1` =
+   leído y ausente (definitivo); exit code `2` = no se pudo leer (sin
+   respuesta, nunca concluir ausencia).
+3. Mapea las filas devueltas a `application.yml` (ejemplo real de
+   WSSeguridad0069, cuyo UMP lee `Environment.cache.UMPSeguridad0087Config`):
 
 ```yaml
-# application.yml
-cache:
-  CMRCTEATR:
-    REG_MAX: "10"                    # valor del CSV
-    CODIGO_VACIO: "0001"             # valor del CSV
+# capamedia configurables UMPSeguridad0087Config --yaml
+UMPSeguridad0087Config:
+  enableAUD: "true"
+  ns: "http://soap.easysol.net/detect/detectService"
+  url: "https://detectidtest.uio.bpichincha.com/detect/services/WSClientService"
 ```
+
+`url` es env-dependent -> `${CCC_*}` + Helm; flags y `ns` son literales.
 
 ### 2. IIB — `GestionarRecursoXML`
 
@@ -135,7 +149,7 @@ El CLI ejecuta este flujo automáticamente en `capamedia clone` /
 |---|---|
 | Aparece en `bank-shared-properties.md` | **Literal** (catálogo global del banco) |
 | Valor fijo conocido del legacy (resource name, code, prefix, longitud) | **Literal** |
-| CSV `ConfigurablesBusOmniTest_Transfor` tiene row | **Literal** (desde CSV) |
+| `capamedia configurables <N>` devuelve la fila (exit 0) | **Literal** (valor del CSV) |
 | Contiene URL / host / puerto / password / token | **`${CCC_*}`** + Helm (3 envs) |
 | Cambia entre dev/test/prod | **`${CCC_*}`** + Helm (3 envs) |
 | JNDI de BD | Ver `bank-secrets.md` — `${CCC-XXX-USER/PASSWORD}` (con guiones) |
@@ -146,7 +160,11 @@ El CLI ejecuta este flujo automáticamente en `capamedia clone` /
   `properties-report.yaml` la listó.
 - **NEVER** inventar un valor si el CSV / legacy / catálogo global no lo
   tiene. En ese caso usar `${CCC_*}` + comentario
-  `# TODO: valor no disponible — solicitar al SRE`.
+  `# TODO: valor no disponible — solicitar al SRE`. "No lo tiene" significa
+  `capamedia configurables` con **exit code 1**, no un `grep` vacío.
+- **NEVER** enmascarar el resultado de una búsqueda con `|| echo "NO
+  ENCONTRADO"` ni concluir ausencia desde una lista truncada con `head`: ambos
+  convierten un fallo de herramienta en un falso negativo (WSSeguridad0069).
 - **NEVER** declarar `${CCC_*}` huérfanos en Helm sin uso en `application.yml`.
 - **NEVER** duplicar una clave del catálogo global (`bank-shared-properties.md`)
   como env var — es literal.

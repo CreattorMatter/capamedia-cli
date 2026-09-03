@@ -323,12 +323,12 @@ Banco Pichincha's IIB uses two explicit helpers for config lookup. Scan the ESQL
    ```
    For each invocation: folder arg, file arg, and where the result is consumed.
 
-2. **`GestionarRecursoConfigurable`** — loads **Servicios Configurables** (cached key/value properties) into `Environment.cache.<ConfigName>`. Historical source is the SharePoint XLSX `ConfigurablesBusOmniTest_Transfor.xlsx`, but in this repo the working source of truth is the local file `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`.
+2. **`GestionarRecursoConfigurable`** — loads **Servicios Configurables** (cached key/value properties) into `Environment.cache.<ConfigName>`. Historical source is the SharePoint XLSX `ConfigurablesBusOmniTest_Transfor.xlsx`; the working source of truth is the local CSV `PromptCapaMedia/ConfigurablesBusOmni*.csv`. **Query it with `capamedia configurables <Name>`, never with `grep`** — the file is ISO-8859-1 and a grep under a UTF-8 locale exits 1 with no output, indistinguishable from "not found" (real false negative in WSSeguridad0069). Exit code 1 = read OK and absent (definitive); exit code 2 = could not read (no answer).
    ```esql
    CALL com.bpichincha.esb.generico.recursos.GestionarRecursoConfigurable('OmniServiceConfig', configurable);
    DECLARE configurable REFERENCE TO Environment.cache.OmniServiceConfig;
    ```
-   For each configurable: name, fields read from `Environment.cache.<Name>.*`, and the exact value resolved from the local CSV when present. Only use `TBD` when the configurable or field is missing from the CSV. Also classify each field as:
+   For each configurable: name, fields read from `Environment.cache.<Name>.*`, and the exact value resolved with `capamedia configurables <Name>`. Only use `TBD` when that command exits 1 (read OK, key absent) — never when it exits 2, and never from an empty `grep`. Also classify each field as:
    - **Literal in `application.yml`** — non-secret functional values (lengths, prefixes, flags, cache durations, business timeouts).
    - **`${CCC_*}` + Helm/ConfigMap** — secrets or clearly environment-dependent values (URLs, credentials, tokens, certificates).
 
