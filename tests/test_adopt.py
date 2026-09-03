@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 
 from capamedia_cli.cli import app
 
-
 runner = CliRunner()
 
 

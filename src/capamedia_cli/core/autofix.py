@@ -1124,6 +1124,85 @@ def fix_trace_logger_helm(root: Path, violation: Violation) -> AutofixResult:
     )
 
 
+def _base_package(root: Path) -> str:
+    """Paquete base del proyecto: el de la clase `@SpringBootApplication`; si no,
+    el primer `package` bajo `src/main/java` recortado a la raiz hexagonal."""
+    src_java = root / "src" / "main" / "java"
+    fallback = ""
+    for f in _iter_java_files(src_java):
+        text = _read(f)
+        m = re.search(r"^package\s+([\w.]+)\s*;", text, re.MULTILINE)
+        if not m:
+            continue
+        if "@SpringBootApplication" in text:
+            return m.group(1)
+        if not fallback:
+            pkg = m.group(1)
+            for layer in (".infrastructure", ".application", ".domain"):
+                if layer in pkg:
+                    pkg = pkg.split(layer)[0]
+                    break
+            fallback = pkg
+    return fallback or "com.pichincha.sp"
+
+
+def fix_add_trace_logger_management_config(root: Path, violation: Violation) -> AutofixResult:
+    """2.10 - Crea `infrastructure/config/TraceLoggerManagementPathConfig.java`.
+
+    La variante la decide el starter de `build.gradle` (webflux -> reactiva; web /
+    web-services -> servlet), NO si el servicio invoca BANCS: un BUS WebFlux sin
+    BANCS tambien la necesita. No sobreescribe un archivo existente — si esta pero
+    con la variante equivocada, el Check 2.10 lo reporta para revision manual.
+    """
+    from capamedia_cli.core.checklist_rules import _project_uses_webflux
+    from capamedia_cli.core.java_templates import (
+        TRACE_LOGGER_MGMT_CONFIG_CLASS,
+        trace_logger_mgmt_template,
+    )
+
+    src_java = root / "src" / "main" / "java"
+    if not src_java.is_dir():
+        return AutofixResult(applied=False, notes="sin src/main/java")
+    existing = next(
+        (
+            f
+            for f in src_java.rglob(f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}.java")
+            if not any(part in {"build", "target", ".git"} for part in f.parts)
+        ),
+        None,
+    )
+    if existing is not None:
+        return AutofixResult(
+            applied=False,
+            notes=(
+                f"{TRACE_LOGGER_MGMT_CONFIG_CLASS} ya existe; una variante equivocada "
+                "se corrige a mano (Check 2.10)"
+            ),
+        )
+
+    gradle_files = [f for f in (root / "build.gradle", root / "build.gradle.kts") if f.exists()]
+    uses_webflux = _project_uses_webflux(gradle_files)
+    base_pkg = _base_package(root)
+    dest = (
+        src_java
+        / Path(*base_pkg.split("."))
+        / "infrastructure"
+        / "config"
+        / f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}.java"
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _write(dest, trace_logger_mgmt_template(uses_webflux, base_pkg))
+    return AutofixResult(
+        applied=True,
+        files_modified=[dest],
+        after=str(dest.relative_to(root)).replace("\\", "/"),
+        notes=(
+            f"{TRACE_LOGGER_MGMT_CONFIG_CLASS} ({'reactiva' if uses_webflux else 'servlet'}) "
+            f"creada en {base_pkg}.infrastructure.config"
+        ),
+    )
+
+
 # -- Registry ---------------------------------------------------------------
 
 # La clave es el ID del checklist_rules (NO un slug inventado). Asi calza 1:1
@@ -1133,6 +1212,7 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "0.2e": [fix_bancs_autoconfigure_exclude_adapter],
     "1.3": [fix_abstract_to_interface],
     "2.5": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
+    "2.10": [fix_add_trace_logger_management_config],
     "5.1": [fix_bancs_exception_wrapping],
     "8.1": [fix_spring_boot_plugin_version],
     "15.1": [fix_empty_mensajeNegocio_setter],

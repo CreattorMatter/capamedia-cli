@@ -288,7 +288,7 @@ Poner la variante equivocada no compila contra el stack del proyecto. Compila
 igual con `lib-trace-logger:1.4.0` y con `lib-trace-logger-sb4:1.2.0`: los FQCN de
 los extractores no cambiaron.
 
-### Variante WebFlux (ORQ, BUS + invocaBancs)
+### Variante reactiva — `build.gradle` con `spring-boot-starter-webflux`
 
 ```java
 package com.pichincha.sp.infrastructure.config;
@@ -353,7 +353,7 @@ public class TraceLoggerManagementPathConfig implements BeanPostProcessor, Envir
 }
 ```
 
-### Variante Spring MVC / servlet (SOAP, WAS)
+### Variante servlet — `build.gradle` con `spring-boot-starter-web` / `-web-services`
 
 ```java
 package com.pichincha.sp.infrastructure.config;

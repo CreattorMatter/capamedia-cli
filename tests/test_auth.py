@@ -6,12 +6,10 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from capamedia_cli.commands.auth import _merge_path_entries
-from capamedia_cli.commands.auth import app as auth_app
-from capamedia_cli.commands.auth import bootstrap
 from capamedia_cli.cli import app as root_app
+from capamedia_cli.commands.auth import _merge_path_entries, bootstrap
+from capamedia_cli.commands.auth import app as auth_app
 from capamedia_cli.core.auth import build_azure_git_env, resolve_azure_devops_pat
-
 
 runner = CliRunner()
 
@@ -262,8 +260,9 @@ def test_probe_pat_ok_on_http_200(monkeypatch) -> None:
 
 def test_probe_pat_denied_on_401(monkeypatch) -> None:
     """urlopen lanza HTTPError 401 -> ('denied', menciona scope Code Read)."""
-    import capamedia_cli.core.auth as auth_mod
     from urllib.error import HTTPError
+
+    import capamedia_cli.core.auth as auth_mod
 
     monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "wrong-scope-pat")
 
@@ -279,8 +278,9 @@ def test_probe_pat_denied_on_401(monkeypatch) -> None:
 
 def test_probe_pat_denied_on_403(monkeypatch) -> None:
     """urlopen lanza HTTPError 403 -> ('denied', ...)."""
-    import capamedia_cli.core.auth as auth_mod
     from urllib.error import HTTPError
+
+    import capamedia_cli.core.auth as auth_mod
 
     monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "forbidden-pat")
 
@@ -295,8 +295,9 @@ def test_probe_pat_denied_on_403(monkeypatch) -> None:
 
 def test_probe_pat_unreachable_on_urlerror(monkeypatch) -> None:
     """urlopen lanza URLError (red/proxy) -> ('unreachable', ...)."""
-    import capamedia_cli.core.auth as auth_mod
     from urllib.error import URLError
+
+    import capamedia_cli.core.auth as auth_mod
 
     monkeypatch.setenv("CAPAMEDIA_AZDO_PAT", "any-pat")
 

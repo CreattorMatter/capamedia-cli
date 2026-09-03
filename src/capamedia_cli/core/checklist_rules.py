@@ -2005,6 +2005,82 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
             detail=f"{len(key_files)} componentes clave validados"
         ))
 
+    # 2.10 - TraceLoggerManagementPathConfig: las sondas de management no deben
+    # llegar al extractor del lib-trace-logger (pisan el RequestInformationContextHolder
+    # singleton). Aplica a TODO servicio migrado; la variante la decide el
+    # starter de build.gradle, no si el servicio invoca BANCS.
+    gradle_files = [
+        f
+        for f in (ctx.migrated_path / "build.gradle", ctx.migrated_path / "build.gradle.kts")
+        if f.exists()
+    ]
+    uses_webflux = _project_uses_webflux(gradle_files)
+    expected_extractor = (
+        "ReactiveRequestInformationExtractor" if uses_webflux else "ServletRequestInformationExtractor"
+    )
+    wrong_extractor = (
+        "ServletRequestInformationExtractor" if uses_webflux else "ReactiveRequestInformationExtractor"
+    )
+    stack = "WebFlux" if uses_webflux else "MVC/servlet"
+    config_file = next(
+        (
+            f
+            for f in src_java.rglob("TraceLoggerManagementPathConfig.java")
+            if not any(part in {"build", "target", ".git"} for part in f.parts)
+        ),
+        None,
+    ) if src_java.exists() else None
+    title_210 = "Sondas de management fuera del trace-logger (TraceLoggerManagementPathConfig)"
+
+    if config_file is None:
+        results.append(CheckResult(
+            "2.10", "Block 2", title_210, "fail", severity="high",
+            detail=(
+                f"falta infrastructure/config/TraceLoggerManagementPathConfig.java "
+                f"(variante {stack}: instanceof {expected_extractor})"
+            ),
+            suggested_fix=(
+                "Crear la clase: BeanPostProcessor + EnvironmentAware que envuelve el bean "
+                f"`{expected_extractor}` y deja pasar sin capturar los paths bajo "
+                "`management.endpoints.web.base-path` (default /actuator). Aplica a TODO "
+                "servicio migrado, invoque BANCS o no. Autofix: "
+                "fix_add_trace_logger_management_config. Detalle en /doublecheck Paso 1.10."
+            ),
+        ))
+    else:
+        cfg_text = _read_or_empty(config_file)
+        issues: list[str] = []
+        if "BeanPostProcessor" not in cfg_text:
+            issues.append(
+                "no implementa BeanPostProcessor (un filtro extra no impide que el "
+                "extractor de la lib capture)"
+            )
+        if f"instanceof {expected_extractor}" not in cfg_text:
+            issues.append(f"sin `instanceof {expected_extractor}` (stack {stack})")
+        if f"instanceof {wrong_extractor}" in cfg_text:
+            issues.append(f"variante equivocada: envuelve {wrong_extractor} en un proyecto {stack}")
+        lowered = [part.lower() for part in config_file.parts]
+        if "infrastructure" not in lowered or "config" not in lowered:
+            issues.append(
+                f"ubicacion {_relative_display(config_file, ctx.migrated_path)} -> "
+                "debe vivir en infrastructure/config/ (Regla 1)"
+            )
+        if issues:
+            results.append(CheckResult(
+                "2.10", "Block 2", title_210, "fail", severity="high",
+                detail="; ".join(issues),
+                suggested_fix=(
+                    f"Alinear la clase a la variante {stack} (BeanPostProcessor + "
+                    f"instanceof {expected_extractor}, seleccion por tipo y no por beanName). "
+                    "Ver /doublecheck Paso 1.10."
+                ),
+            ))
+        else:
+            results.append(CheckResult(
+                "2.10", "Block 2", title_210, "pass",
+                detail=f"variante {stack} en {_relative_display(config_file, ctx.migrated_path)}",
+            ))
+
     if missing_debug:
         results.append(CheckResult(
             "2.9",

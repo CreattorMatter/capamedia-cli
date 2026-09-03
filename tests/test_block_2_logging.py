@@ -8,6 +8,7 @@ Cubre:
 from __future__ import annotations
 
 from pathlib import Path
+
 from capamedia_cli.core.checklist_rules import CheckContext, run_block_2
 
 

@@ -14,7 +14,6 @@ from pathlib import Path
 
 from capamedia_cli.core.checklist_rules import CheckContext, run_block_18
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

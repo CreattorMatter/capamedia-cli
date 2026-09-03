@@ -487,6 +487,10 @@ capamedia-cli/
 
 - [x] v0.30.0 - **Discovery OLA 2 embebido** (`data/catalog/ola2.json`: 25 servicios, 5 ORQ, 37 relaciones): al migrar cualquier servicio del catálogo el prompt recibe su **ficha** (tribu, tecnología, métodos, links IcePanel/WSDL/código); un ORQ recibe además su **mapa de downstreams** (`in_discovery`/`in_ola1`) que `analisis-orq.md` usa como fuente primaria con reconciliación 3-way. **Adaptadores BANCS embebidos** (`data/catalog/bancs_adapters.json`: 8 adaptadores Core Adapter, 55 TX): el prompt recibe la tabla TX→adaptador→URL interna; prevalece `prompts/tx-adapter-catalog.json`; patrón `CCC_BANCS_ADAPTER_<SUFFIX>_BASE_URL`. Guardrails en todo: **catálogo=contexto NO árbitro** (el ESQL manda; los checks no los importan), sanitización estructural (el `.numbers` de adaptadores trae cookies/PII y NO se versiona). Generadores reproducibles `tools/build_*.py`. +57 tests, suite 1009. (2 revisiones adversariales ejecutando el código)
 
+### Release 0.45.0 — El CLI crea `TraceLoggerManagementPathConfig`
+
+- [x] v0.45.0 - **Check 2.10 + autofix**: la clase que mantiene las sondas de Kubernetes fuera del `lib-trace-logger` ahora la **crea el CLI**, con la variante que corresponde al stack. La variante se decide por el starter de `build.gradle`, **nunca por BANCS**: un BUS WebFlux sin `invocaBancs` también la necesita, y ese era justo el caso que el prompt omitía. Plantillas en `core/java_templates.py`, con un guard que las mantiene idénticas al código de `/doublecheck`. +12 tests, suite 1091.
+
 ### Release 0.44.0 — Spring Boot 4 sin fricción: sin tope de versión, sin pins de Netty, librerías nuevas y namespace `tem`
 
 - [x] v0.44.0 - **`tem` disponible en `capamedia fabrics generate`** (`tem-msa-sp-<servicio>`). Una sola línea en la fuente única `BANK_NAMESPACES`: `fabrics`/`qa`, `adopt` y `clone --migrated` lo reconocen solos. +1 test.

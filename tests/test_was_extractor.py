@@ -11,7 +11,6 @@ from capamedia_cli.core.was_extractor import (
     render_was_config_prompt_appendix,
 )
 
-
 IBM_WEB_BND = """<?xml version="1.0" encoding="UTF-8"?>
 <web-bnd xmlns="http://websphere.ibm.com/xml/ns/javaee">
     <virtual-host name="VHClientes" />

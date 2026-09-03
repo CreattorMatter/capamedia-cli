@@ -6,7 +6,6 @@ from pathlib import Path
 
 from capamedia_cli.core.canonical import CANONICAL_ROOT, load_canonical_assets
 
-
 # ---------------------------------------------------------------------------
 # Gap 1: QA prompts (commit 368a5c9)
 # ---------------------------------------------------------------------------

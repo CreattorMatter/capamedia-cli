@@ -17,7 +17,6 @@ from pathlib import Path
 from capamedia_cli.commands import clone as clone_mod
 from capamedia_cli.commands.clone import _classify_clone_failures, _resolve_azure_repo
 
-
 # ---------------------------------------------------------------------------
 # _classify_clone_failures
 # ---------------------------------------------------------------------------

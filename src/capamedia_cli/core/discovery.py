@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
-import xml.etree.ElementTree as ET
 
 DISCOVERY_DEFAULT_SHEET = "Validacion de servicios"
 DISCOVERY_WORKBOOK_NAME = "Discovery_Servicios_Complejidad OLA 1.xlsx"

@@ -6,6 +6,41 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-09-03
+
+### Added — Check 2.10 + autofix: `TraceLoggerManagementPathConfig`
+
+El CLI ahora **crea la clase**, no solo la documenta. Motivo: en v0.44.0 el paso
+de `/doublecheck` traia el codigo pero la tabla de variantes decia "ORQ / BUS +
+invocaBancs" para la reactiva y "SOAP y WAS" para la servlet. Un BUS WebFlux
+**sin** invocaBancs no encajaba en ninguna fila, asi que el agente concluyo que
+no aplicaba y la omitio (WSSeguridad0069). Los titulos de las dos secciones
+repetian el mismo sesgo.
+
+- **Check 2.10 (HIGH)**: obligatorio en TODO servicio migrado — no depende de
+  BANCS, del origen ni de la cantidad de operaciones. Detecta ausencia, falta de
+  `BeanPostProcessor`, ubicacion fuera de `infrastructure/config/` y **variante
+  equivocada para el stack**.
+- **Autofix `fix_add_trace_logger_management_config`**: genera la clase con la
+  variante del stack y el paquete base del proyecto. No sobreescribe una
+  existente. Idempotente.
+- **La variante se decide por el starter de `build.gradle`**
+  (`spring-boot-starter-webflux` -> reactiva; `-web`/`-web-services` ->
+  servlet), nunca por BANCS. Los titulos de `/doublecheck` ahora nombran el
+  starter y el paso enumera los tres casos WebFlux, incluido BUS sin BANCS de 1
+  operacion.
+- **`core/java_templates.py`** con las dos variantes, generadas desde el texto
+  de `/doublecheck` Paso 1.10. `test_java_templates_match_doublecheck_prompt`
+  verifica que el codigo que genera el autofix y el que lee el agente sean
+  identicos.
+
+Probado end-to-end sobre una copia del servicio real (`bus` + `webflux` +
+`invoca_bancs: false`): 2.10 FAIL -> autofix crea la variante reactiva en
+`com.pichincha.sp.infrastructure.config` -> 2.10 PASS, idempotente.
+
++12 tests, suite 1091.
+
+
 ## [0.44.0] - 2026-09-03
 
 Primera version despues del rollback a `3c26f7c` (v0.38.0): reaplica, con el
