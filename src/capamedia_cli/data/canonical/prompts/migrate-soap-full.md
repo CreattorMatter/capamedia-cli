@@ -103,6 +103,104 @@ src/main/resources/
    never the legacy IIB/WAS/ORQ short name).
 9. Add focused unit/integration tests for each WSDL operation and each mapped
    error path.
+10. Add `infrastructure/config/TraceLoggerManagementPathConfig.java` (servlet
+    variant, below) and its test so Kubernetes probes never reach the
+    `lib-trace-logger` extractor (Regla 9e.3, Checks 2.10 / 2.11).
+11. Keep INFO logs to transaction-identifying events only; `"Request received
+    for operation"`, `"Input validation passed"` and similar diagnostics go to
+    `log.debug` (Regla 9e.1, Check 2.6).
+12. Before handing the card to the TO, `README.md` (or `docs/`) carries one cURL
+    per WSDL operation: sample envelope, `Content-Type: text/xml;charset=utf-8`,
+    SOAPAction, success response (`error.codigo=0`, `tipo=INFO`) and at least
+    one business error (`tipo=ERROR`). Check 0.6.
+
+## TraceLoggerManagementPathConfig (MVC — mandatory, Regla 9e.3)
+
+`ServletRequestInformationExtractor` of `lib-trace-logger` dumps every request into
+a **singleton** `RequestInformationContextHolder`; liveness/readiness/prometheus
+probes overwrite the business request context (TO finding 2026-08-25 §1.2). Wrap the
+bean with a `BeanPostProcessor` — an extra filter cannot stop the library's filter.
+Same code compiles on `lib-trace-logger:1.4.0` (SB3) and `lib-trace-logger-sb4:1.2.0`
+(SB4). Location `infrastructure/config/` (Rule: 3 layers), name `*Config`.
+
+```java
+package com.pichincha.sp.infrastructure.config;
+
+import com.pichincha.common.trace.logger.extractor.request.information.servlet.ServletRequestInformationExtractor;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TraceLoggerManagementPathConfig implements BeanPostProcessor, EnvironmentAware {
+
+  private static final String BASE_PATH_PROPERTY = "management.endpoints.web.base-path";
+  private static final String DEFAULT_BASE_PATH = "/actuator";
+
+  private String managementBasePath = DEFAULT_BASE_PATH;
+
+  @Override
+  public void setEnvironment(Environment environment) {
+    String basePath = environment.getProperty(BASE_PATH_PROPERTY, DEFAULT_BASE_PATH);
+    this.managementBasePath = basePath.isBlank() ? DEFAULT_BASE_PATH : basePath;
+  }
+
+  @Override
+  public Object postProcessAfterInitialization(Object bean, String beanName) {
+    if (bean instanceof ServletRequestInformationExtractor delegate) {
+      return new ManagementPathAwareExtractor(delegate, managementBasePath);
+    }
+    return bean;
+  }
+
+  // El extractor de lib-trace-logger vuelca cada request en un RequestInformationContextHolder
+  // singleton: las sondas de liveness/readiness/prometheus pisan el contexto del request de
+  // negocio y ademas cachean su body en memoria. Se las deja pasar sin capturar.
+  private record ManagementPathAwareExtractor(Filter delegate, String managementBasePath)
+      implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+        throws IOException, ServletException {
+      if (request instanceof HttpServletRequest httpRequest && isManagementPath(httpRequest)) {
+        chain.doFilter(request, response);
+        return;
+      }
+      delegate.doFilter(request, response, chain);
+    }
+
+    private boolean isManagementPath(HttpServletRequest request) {
+      return pathWithinApplication(request).startsWith(managementBasePath);
+    }
+
+    private String pathWithinApplication(HttpServletRequest request) {
+      String uri = request.getRequestURI();
+      String contextPath = request.getContextPath();
+      if (contextPath == null || contextPath.isEmpty() || !uri.startsWith(contextPath)) {
+        return uri;
+      }
+      return uri.substring(contextPath.length());
+    }
+  }
+}
+```
+
+Test `TraceLoggerManagementPathConfigTest` (JUnit 5 + Mockito + AssertJ,
+`given_when_then`, no `@DisplayName`/JavaDoc, **>= 6 cases**, Check 2.11):
+`/actuator/prometheus`, `/actuator/health/liveness`, `/actuator/health/readiness`
+→ `chain.doFilter` called, delegate never; `/<ServiceName>/soap/...` → delegate
+called, chain never; custom base-path `/management`; blank base-path falls back to
+`/actuator`; unrelated `mock(Filter.class)` → `isSameAs`; context path `/svc` +
+`/svc/actuator/health` skipped. Use `MockHttpServletRequest` + `mock(FilterChain)`.
+`capamedia ai doublecheck` can generate both files.
 
 ## Error Structure (mandatory — applies to WAS, BUS without BANCS, and any SOAP target)
 
@@ -191,7 +289,14 @@ query, DAO/repository, or config file that proves DB usage.
 
 ## Build And Dependencies
 
-Use Java 21 and Spring Boot `3.5.15` or newer approved by the bank.
+Use Java 21 and Spring Boot **`4.1.1`** (baseline for every new project — BPTPSRE
+2026-08; MCP `v20260827161016` emits it). **Never downgrade** a version the MCP
+generated: if the scaffold is `>= 4.1.1` keep it as-is. If an older MCP build
+scaffolded `3.5.x`, raise the plugin to `4.1.1` before development and switch to the
+SB4 artifact set below. Only an EXISTING project already built on `3.5.15+` stays on
+the SB3 line (Check 8.1 reports MEDIUM; the upgrade goes in a libraries PR with
+`lib-trace-logger:1.4.0` → `lib-trace-logger-sb4:1.2.0`). Netty pins are SB3-only
+(Check 8.7): never add `io.netty:*:4.1.x` on SB4.
 
 Allowed common dependencies:
 
@@ -219,7 +324,10 @@ EVERY migrated service (orchestrator AND microservice — NOT ORQ-only). Declare
 dependency:
 
 ```gradle
-implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
+// Spring Boot 4 (baseline): NEW artifactId with -sb4 suffix — Check 8.13
+implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'
+// Existing Spring Boot 3.5.x projects only:
+// implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
 ```
 
 Forbidden dependencies:
@@ -239,6 +347,14 @@ Forbidden dependencies:
 - `KUBERNETES_NAMESPACE` in `azure-pipelines.yml` must equal
   `metadata.namespace`.
 - Helm env var `name:` / `value:` lines must not contain inline comments.
+- Helm probes (Spring Boot 4, Checks 7.10 / 7.11): `livenessProbe` curls
+  `/actuator/health/liveness` and `readinessProbe` curls
+  `/actuator/health/readiness` in `helm/dev.yml`, `test.yml`, `prod.yml`
+  (canonical `if ! curl -s <url> | grep -q '"status":"UP"'; then exit 1; fi`; the
+  MCP `cut` form is accepted; never the aggregate `/actuator/health`). Keep the
+  chart timings. `application.yml` declares
+  `management.endpoint.health.probes.enabled: ${CCC_ACTUATOR_HEALTH_PROBES_ENABLED}`
+  and the 3 Helm files set `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"`.
 - No unresolved placeholders: `<pendiente_validar>`, `TODO`, `TBD`,
   `VALIDAR`, `REVISAR`, or `not_probed`.
 - Helm capacity + KEDA baseline (Banco Pichincha official; capacity ajuste 2026-07): every `helm/dev.yml`, `helm/test.yml`, `helm/prod.yml` must carry the canonical `resources` baseline plus **KEDA** autoscaling — `hpa:` is **deprecated**. Values are **referential** to let pods start; refined after performance/load tests. See `bank-official-rules.md` Regla 9h.1 for the source. Required: `resources.requests` (cpu=`50m`, memory=`100Mi`), `resources.limits` (cpu=`200m`, memory=`400Mi`); `keda.enabled=true` with `minReplicaCount=1`/`maxReplicaCount=1` and a prometheus trigger on `http_server_requests_seconds_count`; `servicemonitor.enabled=true` with `path='/actuator/prometheus'`; **no `hpa:` block**. Validated by checklist 7.4/7.5d/7.5e/7.5g (HIGH).

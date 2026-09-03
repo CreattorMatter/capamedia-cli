@@ -6,6 +6,108 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-02
+
+Fuente: doc `BPTPSRE-SpringBoot4-probes-actuator-logs.md` (2026-09-02), correos
+BPTPSRE (Alexis Padilla / Juan Guillermo Callapina) y revision del TO del
+2026-08-25 (8/8 tarjetas rechazadas). Verificado por el equipo con build verde en
+WSPagos0017 (MVC), WSProductos0178, ORQPagos0011, ORQPagos0008 y ORQProductos1001
+(WebFlux).
+
+### Changed — Baseline Spring Boot `4.1.1` con politica "nunca bajar"
+
+- `SPRING_BOOT_BASELINE_VERSION` `3.5.15` -> `4.1.1` ("todos los proyectos nuevos
+  van en Spring Boot 4"; el MCP Fabrics `v20260827161016` ya lo emite). Nueva
+  `SPRING_BOOT_LEGACY_BASELINE_VERSION = "3.5.15"` para la linea SB3 de proyectos
+  existentes y `MCP_MIN_VERSION = "v20260827161016"`.
+- **Check 8.1** con tres estados: `< 3.5.15` o `4.x < 4.1.1` -> HIGH; `3.5.15 <= v < 4`
+  -> MEDIUM (aceptado solo para proyectos existentes; el upgrade va en el PR de
+  librerias); `>= 4.1.1` -> PASS incluida cualquier version mayor que emita el
+  MCP. **Nunca se pide bajar una version.**
+- `fix_spring_boot_plugin_version` sube **solo dentro de la misma linea mayor**
+  (`spring_boot_target_version`: `3.5.14 -> 3.5.15`, `4.0.x -> 4.1.1`) y jamas
+  salta `3.x -> 4.x` (cambia artifactIds y librerias). `migration-context.json`
+  sigue al `build.gradle`.
+- `/migrate` (router `migrate.md` reglas 6-7, `migrate-rest-full.md` Block 1 +
+  Rules 14/22b/22c/26b/26c, `migrate-soap-full.md`, skill `migrar`) y
+  `doublecheck.md` (Paso 1.9 nuevo, regla 9) instruyen: conservar lo que trae el
+  MCP; si un MCP viejo scaffoldeo 3.5.x en un proyecto NUEVO, subir a `4.1.1` con
+  el set SB4 antes de desarrollar; un proyecto SB3 ya construido se deja en
+  `3.5.15+` y se reporta el upgrade como pendiente. Textos de `ai doublecheck` y
+  `batch` usan las constantes (sin `3.5.15` hardcodeado).
+- Pins CVE de la linea SB3 gated por major: en Spring Boot 4 los Checks 8.8/8.10
+  no aplican (PASS informativo, `pendiente_validar` Netty/Jackson 3) y el 8.7
+  marca cualquier `io.netty:*:4.1.x` como MEDIUM (downgrade del BOM SB4, que trae
+  Netty 4.2.x / Reactor Netty 1.3.x). `fix_remove_netty_pin` remueve solo los
+  `4.1.x` en SB4; `fix_netty_full_tree_pin` y `fix_webflux_security_pins` no
+  actuan en SB4.
+
+### Added — Librerias del banco por major de Spring Boot
+
+- **Check 8.13 + `fix_trace_logger_sb4_artifact`**: SB4 cambia el artifactId
+  `lib-trace-logger:1.4.0` -> `lib-trace-logger-sb4:1.2.0` (`LIB_TRACE_LOGGER_COORD`
+  / `_VERSION` + `_SB3_*`, helper `lib_trace_logger_coord`). Cruzar artifact y
+  major, version menor o lib ausente -> HIGH. El autofix reescribe en SB4, sube
+  versiones viejas en SB3 y no revierte un `-sb4`.
+- **Check 8.14 + `fix_event_logs_sb4_version`**: `lib-event-logs-*` `>= 2.0.0` en
+  SB4 (`LIB_EVENT_LOGS_VERSION`; SB3 sigue en 1.0.x). Check 17.1 deja de
+  hardcodear `1.0.0`.
+- **Check 8.9 endurecido / Regla 8**: `lib-bnc-api-client:3.0.0` final en SB4 para
+  cualquier OLA (`LIB_BNC_API_CLIENT_SB4`; `lib_bnc_api_client_version(service,
+  spring_boot_version)`); pre-releases (`3.0.0-alpha.20260825120715`) prohibidas.
+  `fix_add_libbnc_dependency` fija `3.0.0` en SB4 y **conserva** una version
+  `>= 3.0.0` en SB3 (nunca baja, lo reporta en `notes`).
+
+### Added — Probes Kubernetes y sondas fuera del trace-logger (hallazgos TO)
+
+- **Check 7.10 + `fix_helm_probe_paths`**: `livenessProbe` -> `/actuator/health/liveness`,
+  `readinessProbe` -> `/actuator/health/readiness` en `helm/{dev,test,prod}.yml`.
+  Acepta la forma canonica `grep -q` y la forma `cut` del MCP; HIGH en SB4, MEDIUM
+  en SB3. El autofix reescribe solo el path dentro de cada bloque de probe
+  (conserva timings y forma de shell). **Check 7.11 + `fix_helm_probes_enabled_env`**:
+  `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` en los 3 Helm (acepta lista
+  `name/value` y mapping).
+- **Check 2.10 + `fix_add_trace_logger_management_config`**: `infrastructure/config/
+  TraceLoggerManagementPathConfig` (BeanPostProcessor que envuelve
+  `ServletRequestInformationExtractor` en MVC o `ReactiveRequestInformationExtractor`
+  en WebFlux) para que las sondas no pisen el `RequestInformationContextHolder`
+  singleton; variante equivocada para el stack -> HIGH. **Check 2.11**: su test con
+  >= 6 casos `given_when_then` (MEDIUM). Plantillas Java (clase + test, ambas
+  variantes) en `core/sb4_templates.py`.
+- **Check 17.8 + `fix_event_logs_excluded_paths`** (ORQ): `logging.event.excluded-paths`
+  con `/actuator/**` (LT-2 pasa de default documentado a MUST); `LoggingWebFilter`
+  de event-logs si loguea cada request.
+- **Check 2.6** (MEDIUM): `log.info` / `CustomLogLevel.INFO` con `Request received`,
+  `Input validation passed`, `Validation passed`, `Received request` -> DEBUG
+  (`DIAGNOSTIC_INFO_LOG_PATTERNS`). Sale del baseline solo-doc.
+- **Check 0.6** (MEDIUM): un bloque `curl` por operacion del WSDL en `README.md` /
+  `docs/**/*.md` (cruza con las operaciones del portType, como 0.3). Gate previo a
+  asignar la tarjeta al TO (`bank-checklist-desarrollo.md` §5).
+- Canonicals: `bank-official-rules.md` Regla 8 (fila SB4), Regla 8.5 (baseline
+  4.1.1, politica de versiones, pendientes SB4), **Regla 9e nueva** (9e.1 logs sin
+  valor, 9e.3 sondas fuera del trace-logger con tabla de tests), Regla 9h.1
+  (probes); `log-transaccional-orq.md` LT-1/LT-2; `checklist-rules.md` (0.6, 2.6,
+  2.10, 2.11, 7.10, 7.11, 8.1, 8.7-8.10, 8.13, 8.14, 17.8); `bank-mcp-matrix.md`
+  (MCP minimo); `fabric.md`.
+
+### Added — `fabrics generate` y namespaces
+
+- `capamedia fabrics generate` compara el build del MCP con `MCP_MIN_VERSION`
+  (`mcp_build_is_current`, timestamp `YYYYMMDDhhmmss` del package
+  `1.0.0-alpha.<ts>`), avisa con `WARN` si es anterior (scaffold en 3.5.x) y
+  registra `mcp_min_version` / `mcp_build_current` en `.capamedia/fabrics.json`.
+- Namespace **`tem`** en `BANK_NAMESPACES` (`tem-msa-sp-<servicio>`); `tca` ya
+  estaba desde v0.37.0.
+
+### Tests
+
+- Nuevo `tests/test_sb4_probes_actuator_logs.py` (+36) cubre politica de
+  versiones, gating SB3/SB4 de Netty, 8.9/8.13/8.14, 7.10/7.11, 2.6/2.10/2.11,
+  17.8, 0.6, MCP minimo y namespace `tem`. Guards actualizados:
+  `test_no_canonical_promotes_a_different_spring_boot_version` acepta las dos
+  lineas (`4.1.1` baseline, `3.5.15` legacy), `2.6` sale de
+  `DOC_WITHOUT_CHECK_BASELINE`. Suite 1104.
+
 ### Fixed — `fabrics generate` corria un MCP viejo del cache en vez de `@latest`
 
 `.mcp.json` siempre dijo `@pichincha/fabrics-project@latest`, pero

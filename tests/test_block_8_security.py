@@ -36,6 +36,7 @@ from capamedia_cli.core.version_policy import (
     PEER_REVIEW_PLUGIN_ID,
     PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
+    SPRING_BOOT_LEGACY_BASELINE_VERSION,
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
     WEBFLUX_SECURITY_DEPENDENCY_PINS,
@@ -63,9 +64,11 @@ def _find(results, check_id):
 # ---------------------------------------------------------------------------
 
 
-def test_baseline_is_3_5_15() -> None:
-    """El baseline declarado en version_policy.py debe ser 3.5.15."""
-    assert SPRING_BOOT_BASELINE_VERSION == "3.5.15"
+def test_baseline_is_4_1_1_and_legacy_line_is_3_5_15() -> None:
+    """Baseline vigente Spring Boot 4.1.1 (v0.40.0, MCP v20260827161016); la
+    linea SB3 sigue aceptada para proyectos existentes con minimo 3.5.15."""
+    assert SPRING_BOOT_BASELINE_VERSION == "4.1.1"
+    assert SPRING_BOOT_LEGACY_BASELINE_VERSION == "3.5.15"
 
 
 # ---------------------------------------------------------------------------
@@ -120,15 +123,28 @@ def test_8_1_passes_for_baseline(tmp_path: Path) -> None:
 
 
 def test_8_1_passes_for_newer_than_baseline(tmp_path: Path) -> None:
-    """Versiones mas nuevas que el baseline tambien pasan."""
+    """Versiones mas nuevas que el baseline tambien pasan (nunca se pide bajar)."""
     root = _make_minimal_project(tmp_path)
-    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.16' }\n")
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '4.2.0' }\n")
 
     ctx = CheckContext(migrated_path=root, legacy_path=None)
     results = run_block_8(ctx)
     check = _find(results, "8.1")
 
     assert check.status == "pass"
+
+
+def test_8_1_legacy_sb3_line_is_medium_not_high(tmp_path: Path) -> None:
+    """3.5.16 (>= 3.5.15, < 4): linea SB3 aceptada para proyectos existentes ->
+    MEDIUM (WARN), no HIGH. El detalle apunta al baseline SB4."""
+    root = _make_minimal_project(tmp_path)
+    _write_gradle(root, "plugins { id 'org.springframework.boot' version '3.5.16' }\n")
+
+    check = _find(run_block_8(CheckContext(migrated_path=root, legacy_path=None)), "8.1")
+
+    assert check.status == "fail"
+    assert check.severity == "medium"
+    assert "4.1.1" in check.detail
 
 
 # ---------------------------------------------------------------------------

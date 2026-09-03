@@ -267,7 +267,9 @@ def test_rest_prompt_uses_stable_bancs_dependency_and_no_ccc_inline_defaults() -
     )
 
     assert "lib-bnc-api-client:1.1.0-alpha" not in content
-    assert "com.pichincha.bnc:lib-bnc-api-client:1.1.0" in content
+    assert "implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0-alpha" not in content
+    # v0.40.0: baseline Spring Boot 4 -> lib-bnc-api-client 3.0.0 final (BUS + invocaBancs)
+    assert "com.pichincha.bnc:lib-bnc-api-client:3.0.0" in content
     assert "resilience4j-spring-boot2" not in content
     assert "resilience4j-spring-boot3" in content
     assert not re.search(r"\$\{CCC_[A-Z0-9_]+:[^}]+\}", content)

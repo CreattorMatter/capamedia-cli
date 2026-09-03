@@ -26,6 +26,11 @@ from rich.table import Table
 from capamedia_cli.core.auth import resolve_artifact_token
 from capamedia_cli.core.gradle_properties import remove_committed_gradle_java_home
 from capamedia_cli.core.ola_policy import BANK_NAMESPACES
+from capamedia_cli.core.version_policy import (
+    MCP_MIN_VERSION,
+    SPRING_BOOT_BASELINE_VERSION,
+    mcp_build_is_current,
+)
 
 console = Console()
 
@@ -1096,6 +1101,25 @@ def generate(
         raise typer.Exit(1)
 
     if generated_ok:
+        # Build del MCP vs minimo que emite Spring Boot 4 (correo BPTPSRE 2026-08).
+        # Un build anterior scaffoldea 3.5.x: el migrador debe subir a 4.1.1 en el
+        # Block 1 (nunca al reves — si el MCP emite mas alto, se conserva).
+        mcp_pkg_version = _resolved_mcp_package_version(spec)
+        mcp_current = mcp_build_is_current(mcp_pkg_version)
+        if mcp_current is False:
+            console.print(
+                f"  [yellow]WARN[/yellow] MCP build {mcp_pkg_version} es anterior a "
+                f"{MCP_MIN_VERSION}: el scaffold trae Spring Boot 3.5.x. El migrador debe "
+                f"subir el proyecto NUEVO a {SPRING_BOOT_BASELINE_VERSION} (lib-trace-logger-sb4, "
+                "event-logs 2.0.0, lib-bnc 3.0.0) antes de empezar. Actualiza el MCP con "
+                "'capamedia fabrics generate' sin --use-cache y el PAT vigente."
+            )
+        elif mcp_current is None:
+            console.print(
+                f"  [yellow]WARN[/yellow] no pude determinar el build del MCP (version "
+                f"'{mcp_pkg_version or 'desconocida'}'); verifica que el scaffold traiga Spring Boot "
+                f">= {SPRING_BOOT_BASELINE_VERSION} (minimo MCP {MCP_MIN_VERSION})."
+            )
         _write_fabrics_metadata(
             ws,
             {
@@ -1120,7 +1144,12 @@ def generate(
                 "mcp_server_version": str(server_info.get("version", "")),
                 # Version del npm package (serverInfo.version siempre dice "1.0.0",
                 # asi que no sirve para auditar con que build se scaffoldeo).
-                "mcp_package_version": _resolved_mcp_package_version(spec),
+                "mcp_package_version": mcp_pkg_version,
+                # Build minimo que emite el baseline SB4 y si este scaffold lo cumple.
+                "mcp_min_version": MCP_MIN_VERSION,
+                "mcp_build_current": (
+                    "unknown" if mcp_current is None else str(mcp_current).lower()
+                ),
             },
         )
 

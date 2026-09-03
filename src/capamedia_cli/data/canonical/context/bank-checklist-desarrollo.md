@@ -93,6 +93,15 @@ Resumen del PDF para revisión rápida:
 - ✅ `azure-pipeline.yml` presente y ejecutable.
 - ✅ Tests siguen `unit-test-guidelines.md` (given/when/then, English).
 - ✅ 9 reglas de `validate_hexagonal.py` pasan (script oficial del banco).
+- ✅ **README con un cURL por operación del WSDL** (hallazgo TO 2026-08-25 §1.3):
+  envelope SOAP de ejemplo (headerIn + bodyIn), `Content-Type: text/xml;charset=utf-8`,
+  SOAPAction si aplica, respuesta de éxito (`error.codigo=0`, `tipo=INFO`), al
+  menos un error de negocio (`tipo=ERROR`) y, con `invocaBancs=true`, el header
+  sin `<bancs>` (`9927`, `tipo=FATAL`). Insumo de los consumidores: completo
+  **antes** de asignar la tarjeta al TO (Check 0.6).
+- ✅ Sondas Kubernetes fuera del trace-logger y de los eventos: `TraceLoggerManagementPathConfig`
+  (Check 2.10), probes a `/actuator/health/{liveness,readiness}` (7.10) y en ORQ
+  `logging.event.excluded-paths` (17.8). Logs INFO solo con correlador (2.6).
 
 ## Relación con otros canonicals
 

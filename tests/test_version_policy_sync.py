@@ -23,6 +23,7 @@ from capamedia_cli.core.version_policy import (
     PEER_REVIEW_PLUGIN_ID,
     PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
+    SPRING_BOOT_LEGACY_BASELINE_VERSION,
 )
 
 CANON = Path(__file__).resolve().parent.parent / "src" / "capamedia_cli" / "data" / "canonical"
@@ -103,15 +104,18 @@ def test_no_canonical_promotes_a_different_spring_boot_version() -> None:
     pattern = re.compile(
         r"org\.springframework\.boot['\"]?\s+version\s+['\"]([0-9][^'\"]*)['\"]"
     )
+    # v0.40.0: conviven dos lineas — el baseline SB4 (proyectos nuevos) y el
+    # minimo SB3 (proyectos existentes, solo como referencia de "no bajar").
+    allowed = {SPRING_BOOT_BASELINE_VERSION, SPRING_BOOT_LEGACY_BASELINE_VERSION}
     offenders: list[str] = []
     for rel in sorted(_canonical_files()):
         for version in set(pattern.findall(_read(rel))):
-            if version != SPRING_BOOT_BASELINE_VERSION:
+            if version not in allowed:
                 offenders.append(f"{rel}: {version}")
     assert not offenders, (
-        f"Canonicales que proponen una version de Spring Boot distinta del "
-        f"baseline ({SPRING_BOOT_BASELINE_VERSION}): {offenders}. Mantener una "
-        "sola version en todo el canonical o el agente recibe ordenes en conflicto."
+        f"Canonicales que proponen una version de Spring Boot fuera de "
+        f"{sorted(allowed)}: {offenders}. Mantener una "
+        "sola version por linea en todo el canonical o el agente recibe ordenes en conflicto."
     )
 
 

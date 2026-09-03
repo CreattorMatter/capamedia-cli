@@ -547,7 +547,7 @@ def test_block_8_requires_current_spring_boot_plugin(tmp_path: Path) -> None:
 def test_block_8_passes_current_spring_boot_plugin(tmp_path: Path) -> None:
     root = _make_migrated(tmp_path)
     (root / "build.gradle").write_text(
-        "plugins { id 'org.springframework.boot' version '3.5.15' }\n",
+        "plugins { id 'org.springframework.boot' version '4.1.1' }\n",
         encoding="utf-8",
     )
 

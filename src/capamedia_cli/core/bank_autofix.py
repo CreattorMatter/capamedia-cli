@@ -6,8 +6,8 @@ ejemplos YES/NO. Aqui implementamos los fixes que se pueden aplicar sin AI:
 - Regla 4: `@BpLogger` faltante en metodos publicos de @Service
 - Regla 7: `${VAR:default}` en `application.yml` → `${VAR}` (excluye `optimus.web.*`)
 - Regla 8: `com.pichincha.bnc:lib-bnc-api-client` (version segun OLA del
-  servicio — 1.1.0 OLA 1, 2.0.0 OLA 2) solo para BUS/IIB con invocaBancs=true;
-  en WAS/ORQ/BUS sin BANCS no se agrega.
+  servicio en SB3 — 1.1.0 OLA 1, 2.0.0 OLA 2 — y 3.0.0 final en Spring Boot 4)
+  solo para BUS/IIB con invocaBancs=true; en WAS/ORQ/BUS sin BANCS no se agrega.
 - Regla 9: `catalog-info.yaml` con placeholders literales → esqueleto valido
 
 Regla 6 (Service sin utils) **NO** es autofixeable: requiere refactor semantico.
@@ -21,7 +21,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from capamedia_cli.core.ola_policy import lib_bnc_api_client_version, ola_label
+from capamedia_cli.core.ola_policy import (
+    LIB_BNC_API_CLIENT_SB4,
+    lib_bnc_api_client_version,
+    ola_label,
+)
 from capamedia_cli.core.version_policy import (
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
@@ -30,8 +34,21 @@ from capamedia_cli.core.version_policy import (
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
     WEBFLUX_SECURITY_DEPENDENCY_PINS,
+    is_spring_boot_4,
     is_version_lower,
 )
+
+
+def _project_spring_boot_version(project_root: Path) -> str:
+    """Version del plugin Spring Boot del proyecto (build.gradle raiz o
+    migration-context.json). Decide si los pins CVE de la linea SB3 aplican."""
+    from capamedia_cli.core.checklist_rules import _detected_spring_boot_version
+
+    return _detected_spring_boot_version(project_root)
+
+
+def _project_is_sb4(project_root: Path) -> bool:
+    return is_spring_boot_4(_project_spring_boot_version(project_root))
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -314,14 +331,17 @@ def fix_add_libbnc_dependency(
     """Fija `lib-bnc-api-client` en la version del OLA del servicio.
 
     Version (ver `core/ola_policy.py`):
-      - OLA 1 (default): 1.1.0
-      - OLA 2 (servicios de `OLA2_SERVICES`): 2.0.0
+      - Spring Boot 4 (cualquier OLA): 3.0.0 (final; reemplaza 3.0.0-alpha.*)
+      - SB3 / OLA 1 (default): 1.1.0
+      - SB3 / OLA 2 (servicios de `OLA2_SERVICES`): 2.0.0
 
     Comportamiento:
       1. Si la libreria ya esta declarada con una version distinta a la del
          OLA — incluye pre-releases y la version de la otra OLA — la reescribe
          a la version correcta. Cubre `1.1.0` en un servicio OLA 2 y `2.0.0`
-         en uno OLA 1.
+         en uno OLA 1. Excepcion (politica 2026-09, nunca bajar): una version
+         >= 3.0.0 en un proyecto SB3 se conserva y se reporta en `notes`; en
+         SB4 solo se reescriben versiones menores a 3.0.0 o pre-releases.
       2. Si la matriz dice BUS/IIB + invocaBancs=true y la libreria no esta,
          la inserta con la version del OLA.
       3. Si la matriz dice WAS/ORQ/BUS sin BANCS, nunca la agrega.
@@ -334,8 +354,10 @@ def fix_add_libbnc_dependency(
 
     if service is None:
         service = _detect_service_name(project_root)
-    target_version = lib_bnc_api_client_version(service)
-    label = ola_label(service)
+    sb_version = _project_spring_boot_version(project_root)
+    sb4 = is_spring_boot_4(sb_version)
+    target_version = lib_bnc_api_client_version(service, sb_version)
+    label = f"Spring Boot {sb_version}" if sb4 else ola_label(service)
     required_dep_line = f"    implementation '{LIBBNC_ARTIFACT}:{target_version}'"
 
     gradle_files = [
@@ -364,10 +386,31 @@ def fix_add_libbnc_dependency(
         # Cubre pre-releases (1.1.0-alpha.*, 2.0.0-SNAPSHOT) y la version de la
         # otra OLA (1.1.0 en un servicio OLA 2, o 2.0.0 en uno OLA 1).
         present_versions = {m.group(2) for m in _LIBBNC_COORD_RE.finditer(text)}
-        wrong_versions = sorted(present_versions - {target_version})
+
+        def _is_prerelease(ver: str) -> bool:
+            return bool(re.search(r"-(alpha|beta|rc|snapshot)", ver, re.IGNORECASE))
+
+        # Nunca bajar: una version >= 3.0.0 (linea SB4) declarada en un proyecto
+        # SB3 no se reescribe a 1.1.0/2.0.0; en SB4 una version mayor a 3.0.0
+        # estable se conserva. Las pre-releases siempre se normalizan.
+        kept_higher = sorted(
+            v
+            for v in present_versions
+            if v != target_version
+            and not _is_prerelease(v)
+            and not is_version_lower(v, LIB_BNC_API_CLIENT_SB4)
+        )
+        wrong_versions = sorted(present_versions - {target_version} - set(kept_higher))
+        if kept_higher:
+            result.notes = (
+                f"lib-bnc-api-client {', '.join(kept_higher)} conservada (>= {LIB_BNC_API_CLIENT_SB4}, "
+                f"nunca se baja); target del proyecto: {target_version} ({label})"
+            )
         if wrong_versions:
+            wrong_set = set(wrong_versions)
             text = _LIBBNC_COORD_RE.sub(
-                lambda m: m.group(1) + target_version, text
+                lambda m, ws=wrong_set: m.group(1) + (target_version if m.group(2) in ws else m.group(2)),
+                text,
             )
             result.changes.append(
                 f"{gf.relative_to(project_root)}: lib-bnc-api-client "
@@ -1663,6 +1706,10 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         "spring-boot-starter-webflux" in f.read_text(encoding="utf-8", errors="replace")
         for f in gradle_files
     )
+    # Spring Boot 4: el BOM trae Netty 4.2.x. Los unicos pins que se remueven son
+    # los 4.1.x heredados de SB3 (downgrade que rompe Reactor Netty); el resto
+    # queda (criterio Netty/Jackson 3 en SB4: pendiente_validar BPTPSRE).
+    sb4 = _project_is_sb4(project_root)
 
     modified_files: list[Path] = []
     for f in gradle_files:
@@ -1674,7 +1721,9 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
             continue
 
         new_text, n = _remove_netty_pins_from_dependency_management(
-            text, allow_webflux_pin=is_webflux
+            text,
+            allow_webflux_pin=is_webflux and not sb4,
+            only_version_prefix="4.1." if sb4 else None,
         )
         if n > 0 and new_text != text:
             # Limpiar lineas blancas dobles que pueden haber quedado
@@ -1689,7 +1738,12 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
         result.applied = True
         result.files_modified = modified_files
     else:
-        if is_webflux:
+        if sb4:
+            result.notes = (
+                "Spring Boot 4: sin pins io.netty 4.1.x (downgrade) a remover; otros pins "
+                "quedan (pendiente_validar BPTPSRE)"
+            )
+        elif is_webflux:
             result.notes = (
                 "no se encontraron pins de io.netty:* a remover (WebFlux: "
                 f"pin {NETTY_WEBFLUX_ALLOWED_VERSION} permitido)"
@@ -1700,12 +1754,14 @@ def fix_remove_netty_pin(project_root: Path) -> BankAutofixResult:
 
 
 def _remove_netty_pins_from_dependency_management(
-    text: str, *, allow_webflux_pin: bool = False
+    text: str, *, allow_webflux_pin: bool = False, only_version_prefix: str | None = None
 ) -> tuple[str, int]:
     """Remove active io.netty pins only while inside dependencyManagement.
 
     Si `allow_webflux_pin=True`, preserva los pins con version
-    `4.1.133.Final` (CVE-fix oficial 2026-05).
+    `NETTY_WEBFLUX_ALLOWED_VERSION` (CVE-fix oficial SB3). Si
+    `only_version_prefix` viene (ej. `"4.1."`, modo SB4), solo se remueven los
+    pins cuya version empieza con ese prefijo; los demas se conservan.
     """
     lines = text.splitlines(keepends=True)
     output: list[str] = []
@@ -1733,7 +1789,10 @@ def _remove_netty_pins_from_dependency_management(
             continue
 
         if in_dep_mgmt and not is_comment and _NETTY_PIN_LINE_RE.match(raw_line):
-            if allow_webflux_pin and _NETTY_ALLOWED_PIN_RE.search(raw_line):
+            keep = allow_webflux_pin and _NETTY_ALLOWED_PIN_RE.search(raw_line)
+            if only_version_prefix is not None and f":{only_version_prefix}" not in raw_line:
+                keep = True
+            if keep:
                 output.append(raw_line)
                 brace_depth += opens - closes
                 if brace_depth < dep_mgmt_brace:
@@ -1863,6 +1922,12 @@ def fix_netty_full_tree_pin(project_root: Path) -> BankAutofixResult:
     )
     if not is_webflux:
         result.notes = "no es WebFlux; el arbol Netty solo se pinea en WebFlux"
+        return result
+    if _project_is_sb4(project_root):
+        result.notes = (
+            "Spring Boot 4: el BOM trae Netty 4.2.x / Reactor Netty 1.3.x; pinear el arbol "
+            f"{NETTY_WEBFLUX_ALLOWED_VERSION} seria un downgrade (no aplica, pendiente_validar)"
+        )
         return result
 
     modified: list[Path] = []
@@ -2064,6 +2129,12 @@ def fix_webflux_security_pins(project_root: Path) -> BankAutofixResult:
     )
     if not is_webflux:
         result.notes = "no es WebFlux; los pins de seguridad WebFlux solo aplican alli"
+        return result
+    if _project_is_sb4(project_root):
+        result.notes = (
+            "Spring Boot 4: los pins Snyk 2026-06 (spring-framework-bom 6.2.x, reactor-netty "
+            "1.2.x, ...) son de la linea SB3 y serian un downgrade (no aplica, pendiente_validar)"
+        )
         return result
 
     modified: list[Path] = []

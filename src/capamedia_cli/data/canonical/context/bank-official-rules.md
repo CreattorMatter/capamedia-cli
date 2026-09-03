@@ -381,23 +381,29 @@ optimus:
 
 ---
 
-## Regla 8 - `lib-bnc-api-client` solo cuando la matriz lo exige (version segun OLA)
+## Regla 8 - `lib-bnc-api-client` solo cuando la matriz lo exige (version segun OLA / Spring Boot)
 
 **MUST**: solo servicios BUS/IIB con `invocaBancs=true` deben declarar la
-libreria BANCS API client del banco. La **version depende del OLA del
-servicio**:
+libreria BANCS API client del banco. La **version depende del major de Spring
+Boot y, en SB3, del OLA del servicio**:
 
-| OLA | Version | Notas |
+| Linea | Version | Notas |
 |-----|---------|-------|
-| OLA 1 | `1.1.0` | Linea base de OLA 1. |
-| OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
+| **Spring Boot 4** (cualquier OLA) | `3.0.0` | Version **final** (correo BPTPSRE Alexis Padilla 2026-08). Reemplaza la alpha `3.0.0-alpha.20260825120715`, que queda prohibida. |
+| SB3 / OLA 1 | `1.1.0` | Linea base de OLA 1. |
+| SB3 / OLA 2 | `2.0.0` | Linea base **obligatoria desde OLA 2** (disponible 2026-05-25). Suma soporte de token y transacciones financieras. |
 
 ```gradle
-// servicio OLA 1
+// Spring Boot 4 (baseline vigente, MCP v20260827161016)
+implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0'
+// servicio SB3 OLA 1
 implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
-// servicio OLA 2
+// servicio SB3 OLA 2
 implementation 'com.pichincha.bnc:lib-bnc-api-client:2.0.0'
 ```
+
+**Nunca bajar**: una version `>= 3.0.0` ya declarada no se reescribe a `1.1.0`
+/ `2.0.0` aunque el proyecto siga en SB3 (el autofix la conserva y lo reporta).
 
 **Que servicios son OLA 2**: la lista oficial vive en `core/ola_policy.py`
 (`OLA2_SERVICES`) — fuente de verdad unica del CLI. Un servicio usa `2.0.0`
@@ -410,6 +416,7 @@ OLA 2 futuras amplian esa lista.
 - usar `1.1.0` en un servicio OLA 2 — necesita `2.0.0` para token y transacciones financieras
 - usar `2.0.0` en un servicio OLA 1
 - usar version `1.0.x` o menor
+- usar `1.1.0` / `2.0.0` / `3.0.0-alpha.*` en un proyecto **Spring Boot 4** — va `3.0.0` final (Check 8.9)
 - mantener pre-releases (`-alpha.*`, `-SNAPSHOT`, `.RELEASE`, `-rc*`, `-beta*`)
   en proyectos migrados nuevos
 
@@ -418,9 +425,11 @@ OLA 2 futuras amplian esa lista.
 `capamedia validate-hexagonal auto-fix --rules 8` (y `capamedia ai doublecheck`)
 aplican dos pasos:
 
-1. **Fija la version** a la que corresponde al OLA del servicio. Si la libreria
-   esta declarada con otra version — pre-release, o la version de la otra OLA —
-   la reescribe a la correcta (`1.1.0` OLA 1, `2.0.0` OLA 2).
+1. **Fija la version** a la que corresponde al proyecto: `3.0.0` si el plugin
+   Spring Boot es `>= 4`; si no, la del OLA del servicio. Si la libreria esta
+   declarada con otra version — pre-release, o la version de la otra OLA — la
+   reescribe a la correcta (`3.0.0` SB4, `1.1.0` OLA 1, `2.0.0` OLA 2). Nunca
+   baja una version `>= 3.0.0`.
 2. Si la matriz indica BUS/IIB con `invocaBancs=true` y la libreria no esta
    declarada, la inserta en el bloque `dependencies { }` del `build.gradle`.
    En WAS, ORQ y BUS/IIB sin BANCS no la agrega.
@@ -483,23 +492,59 @@ implican BANCS (caso WSReglas0010: `UMPSeguridad0085` envuelve Cyxtera SOAP).
 **Fuente:** Snyk reports 2026-05 sobre servicios 0076, 0090, 0091 + orquestador
 (Slack: kevin armas / Jean Pierre Garcia / Alexis Padilla). 10 CVEs HIGH
 activas: 3 Jackson 3.0.1 transitivas, 4 Netty 4.1.132 transitivas, 3 Undertow.
+**Actualizacion 2026-09** (correos BPTPSRE Alexis Padilla / Juan Guillermo
+Callapina): **todos los proyectos nuevos van en Spring Boot 4**; el MCP Fabrics
+`v20260827161016` ya emite `4.1.1`.
 
-**Decision vigente del equipo:** usar **Spring Boot `3.5.15`** como baseline
-aprobado para servicios OLA. Spring Boot 4.x NO es baseline general por
-compatibilidad con arquetipos/librerias actuales del banco. Undertow se sigue
+**Decision vigente:** baseline **Spring Boot `4.1.1`** para todo proyecto nuevo.
+La linea **`3.5.15+`** se acepta **solo para proyectos existentes** (no romper el
+pasado; el upgrade a SB4 va en el mismo PR que sube librerias). Undertow se sigue
 bloqueando aparte (Regla 8 + Check 8.2) y los pins manuales de Netty/Jackson
 siguen prohibidos porque se quedan atras al proximo CVE.
+
+### Politica de versiones: NUNCA bajar, subir solo si hace falta
+
+- Si el MCP emite una version **mayor** al baseline (plugin, libs), **se conserva**.
+- Si el scaffold viene **por debajo del minimo de su linea**, se sube dentro de
+  la misma linea: `3.5.x < 3.5.15 -> 3.5.15`; `4.x < 4.1.1 -> 4.1.1`.
+- Un proyecto **nuevo** que el MCP scaffoldee en 3.5.x (build anterior a
+  `v20260827161016`) lo sube el **migrador** a `4.1.1` en el Block 1, junto con
+  `lib-trace-logger-sb4:1.2.0` (Regla 8.6 / Check 8.13), `lib-event-logs 2.0.0`
+  en ORQ (Check 8.14) y `lib-bnc-api-client 3.0.0` si `invocaBancs` (Regla 8).
+- El autofix del Check 8.1 **jamas salta 3.x -> 4.x** (cambia artifactIds).
 
 ### Baseline oficial
 
 ```gradle
 plugins {
-    id 'org.springframework.boot' version '3.5.15'
+    id 'org.springframework.boot' version '4.1.1'
+}
+
+dependencies {
+    implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'     // artifactId NUEVO (sufijo -sb4)
+    implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'   // solo ORQ
+    implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0'          // solo BUS + invocaBancs
 }
 ```
 
-`SPRING_BOOT_BASELINE_VERSION` en `capamedia_cli/core/version_policy.py` es la
-fuente unica.
+`SPRING_BOOT_BASELINE_VERSION = "4.1.1"`, `SPRING_BOOT_LEGACY_BASELINE_VERSION =
+"3.5.15"` y `MCP_MIN_VERSION = "v20260827161016"` en
+`capamedia_cli/core/version_policy.py` son la fuente unica. Proyectos SB3
+existentes: `id 'org.springframework.boot' version '3.5.15'` o superior de esa
+linea, con `lib-trace-logger:1.4.0` y `lib-event-logs-webflux:1.0.x`.
+
+### Pendiente de validar en SB4 (`<pendiente_validar>` BPTPSRE)
+
+- **Netty (excepcion 8.7/8.8).** SB4 trae Reactor Netty 1.3.x / Netty 4.2.x de
+  fabrica: el pin `4.1.136.Final` de la linea SB3 seria un **downgrade** que
+  rompe Reactor Netty. En SB4 el Check 8.7 marca cualquier pin `io.netty:*:4.1.x`
+  como MEDIUM (downgrade) y 8.8/8.10 no aplican. Los ORQ actuales fuerzan
+  `netty 4.2.17.Final` / `reactor-netty 1.3.7` (commits `fix: Clean snyk`).
+- **Jackson 3.** SB4 usa `tools.jackson.*` ademas de `com.fasterxml.jackson.*`.
+  La regla "NUNCA pinear Jackson" convive con `force 'tools.jackson.core:*:3.2.2'`
+  en los ORQ. Criterio unico pendiente.
+- **Plugin peer-review `1.1.2`** (Regla 9h.4) y **CXF `generateFromWsdl` 4.1.8**:
+  confirmar compatibilidad con SB4.
 
 ### NEVER (anti-patrones que se quedan atras al proximo CVE)
 
@@ -530,9 +575,9 @@ fuente unica.
 
 - **NUNCA `replicaCount: 2` en helm** (regla derogada — ver Regla 9h.1).
 
-### Excepcion oficial — arbol Netty `4.1.136.Final` en WebFlux (v0.27.0; arbol completo v0.28.3; version vigente v0.32.0)
+### Excepcion oficial — arbol Netty `4.1.136.Final` en WebFlux (v0.27.0; arbol completo v0.28.3; version vigente v0.32.0) — SOLO Spring Boot 3.5.x
 
-Proyectos con `spring-boot-starter-webflux` deben pinear el **arbol core de Netty
+Proyectos **Spring Boot 3.5.x** con `spring-boot-starter-webflux` deben pinear el **arbol core de Netty
 (13 modulos)** a `io.netty:*:4.1.136.Final`: el BOM de Spring Boot 3.5.x trae
 Netty en version vulnerable (`4.1.121.Final`). Es la **unica** version permitida;
 cualquier otra (`4.1.132.Final`, `4.1.135.Final`, `4.1.999.Final`, **4.2.x**)
@@ -585,16 +630,23 @@ configurations.all {
 
 ### Validacion (Block 8 del checklist, todos HIGH desde 2026-05)
 
-- 8.1: plugin `org.springframework.boot` con version < `3.5.15` → HIGH.
+- 8.1: plugin `org.springframework.boot` `< 3.5.15` o `4.x < 4.1.1` → HIGH;
+  `3.5.15 <= v < 4` → MEDIUM (linea SB3, solo existentes); `>= 4.1.1` → PASS.
+  Nunca se pide bajar.
 - 8.2: cualquier dependencia `undertow` activa → HIGH.
-- 8.7: cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH,
+- 8.7 (SB3): cualquier pin `io.netty:*:VERSION` en `dependencyManagement` → HIGH,
   **excepto** `io.netty:*:4.1.136.Final` en proyectos WebFlux (ver bloque
-  arriba). 4.2.x tambien bloqueada (rompe Reactor Netty).
-- 8.8: en WebFlux con pin Netty, los 13 modulos core deben estar en
+  arriba). 4.2.x tambien bloqueada en SB3 (rompe Reactor Netty).
+  (SB4): pins `io.netty:*:4.1.x` → MEDIUM (downgrade del BOM); otros pins se
+  conservan (`pendiente_validar`).
+- 8.8 (solo SB3): en WebFlux con pin Netty, los 13 modulos core deben estar en
   `dependencyManagement` **y** en `resolutionStrategy.force` → faltantes HIGH.
-- 8.10: en WebFlux con pin Netty, los pins de seguridad NO-Netty del mismo
-  Snyk report deben estar en `dependencyManagement` → faltantes/version
+- 8.10 (solo SB3): en WebFlux con pin Netty, los pins de seguridad NO-Netty del
+  mismo Snyk report deben estar en `dependencyManagement` → faltantes/version
   distinta HIGH. Solo WebFlux (BUS REST + ORQ).
+- 8.13: `lib-trace-logger` con el artifactId del major (`-sb4:1.2.0` en SB4,
+  `:1.4.0` en SB3); cruzado, menor o ausente → HIGH.
+- 8.14: `lib-event-logs-*` `< 2.0.0` con SB4 → HIGH.
 
 ### Excepcion oficial — pins de seguridad NO-Netty en WebFlux (Snyk 2026-06)
 
@@ -627,10 +679,18 @@ dependencyManagement {
 
 ### Autofix
 
-`fix_spring_boot_version` (clave `"8.1"`):
-1. Actualiza `id 'org.springframework.boot' version '<vieja>'` → `'3.5.15'`
-   en `build.gradle` y `build.gradle.kts`.
-2. Actualiza `spring_boot_version` en `migration-context.json` si difiere.
+`fix_spring_boot_plugin_version` (clave `"8.1"`):
+1. Sube `id 'org.springframework.boot' version '<vieja>'` al **minimo de su
+   linea** (`3.5.x` → `'3.5.15'`, `4.x` → `'4.1.1'`) en `build.gradle` y
+   `build.gradle.kts`. Nunca baja; nunca salta `3.x → 4.x`.
+2. Actualiza `spring_boot_version` en `migration-context.json` si quedo atras.
+
+`fix_trace_logger_sb4_artifact` (clave `"8.13"`): en SB4 reescribe
+`lib-trace-logger:<v>` → `lib-trace-logger-sb4:1.2.0`; en SB3 sube a `1.4.0`
+sin revertir un `-sb4`. `fix_event_logs_sb4_version` (clave `"8.14"`): sube
+`lib-event-logs-*` a `2.0.0` en SB4. Ambos solo reescriben declaraciones
+existentes y nunca bajan. En SB4 `fix_remove_netty_pin` remueve solo pins
+`4.1.x` y `fix_netty_full_tree_pin` / `fix_webflux_security_pins` no actuan.
 
 `fix_remove_netty_pin` (clave `"8.7"`): elimina `dependency 'io.netty:*:VERSION'`
 de bloques `dependencyManagement { dependencies { ... } }`. Idempotente. En
@@ -740,6 +800,99 @@ public class Wsclientes0076OutputAdapter implements ConsultarClienteOutputPort {
   referencia a `sqb-msa-<target>` o `ws-<target>-was` como path/URL en
   configuracion, **FAIL HIGH** con hint de cambiar al endpoint del
   servicio migrado.
+
+---
+
+## Regla 9e - Logs con valor operativo y sondas fuera del trace-logger
+
+**Fuente:** revision del TO 2026-08-25 (8/8 tarjetas rechazadas, hallazgos §1.1
+y §1.2 del doc BPTPSRE-SpringBoot4-probes-actuator-logs).
+
+### Regla 9e.1 - Logs INFO sin valor de monitoreo van a DEBUG
+
+Criterio del TO: un log **INFO** debe permitir **identificar inequivocamente la
+transaccion** (guid / requestId). Si no incluye ese correlador, no va en INFO.
+
+| Patron observado | Nivel actual | Nivel requerido |
+|---|---|---|
+| `"Request received for operation: {}"` | INFO | DEBUG |
+| `"Input validation passed for: {}"` | INFO | DEBUG |
+| `"Validation passed ..."` / `"Received request ..."` | INFO | DEBUG |
+
+`ServiceLogHelper` ya expone `debug(...)`. Los flags
+`CCC_CUSTOM_LEVEL_DEBUG_ENABLED` / `TPL_LOG_DEBUG` son la "variable de entorno"
+que pide el TO para activarlos en desarrollo. **Check 2.6 (MEDIUM).**
+
+### Regla 9e.3 - Sondas de management fuera del `lib-trace-logger` (MUST)
+
+`ServletRequestInformationExtractor` / `ReactiveRequestInformationExtractor` de
+`lib-trace-logger` **no emiten lineas de log**: son un `Filter` / `WebFilter` que
+leen y bufferean el body y vuelcan URI, metodo, headers y body en
+`RequestInformationContextHolder`, que es un **`@Component` singleton, no
+request-scoped**. Cada sonda liveness/readiness/prometheus **pisa el contexto
+compartido**: un trace de negocio `@BpTraceable` puede reportar
+`requestUri=/actuator/health/readiness` (exactamente el hallazgo §1.2:
+`"type":"TRANSACTIONAL"` con `requestUri` de actuator). Bajar `logging.level` no
+alcanza y un filtro adicional no puede impedir que el extractor de la lib se
+ejecute: hay que **reemplazar el bean** con un `BeanPostProcessor`.
+
+**MUST**: `src/main/java/<base>/infrastructure/config/TraceLoggerManagementPathConfig.java`
+(Regla 1: solo 3 capas; nombre `*Config` por code-style) que:
+
+- implementa `BeanPostProcessor` + `EnvironmentAware`;
+- lee `management.endpoints.web.base-path` del `Environment` (viene de
+  `${CCC_ACTUATOR_BASE_PATH}` en Helm), default `/actuator`; **si llega en
+  blanco cae a `/actuator`** (`startsWith("")` apagaria la captura de todo el
+  servicio);
+- envuelve el bean por **`instanceof`** (no por `beanName`, que depende del
+  component-scan de la lib): `ServletRequestInformationExtractor` en **MVC**
+  (WAS 1 op, WAS 2+ ops SOAP, BUS sin BANCS 2+ ops) o
+  `ReactiveRequestInformationExtractor` en **WebFlux** (BUS + invocaBancs, ORQ);
+- el wrapper (`record ManagementPathAwareExtractor`) delega al `chain` sin
+  capturar cuando `pathWithinApplication()` (WebFlux) o `requestURI` menos
+  `contextPath` (servlet) empieza con el base-path; el resto delega al extractor.
+
+Compila sin cambios con `lib-trace-logger:1.4.0` (SB3) y
+`lib-trace-logger-sb4:1.2.0` (SB4): los FQCN de los extractores y anotaciones son
+identicos; solo cambia el paquete de `RequestInformationContextHolder`
+(`...context.request.` → `...context.`), que afecta unicamente tests que lo
+importen. Efecto colateral conocido: el bean deja de resolverse por su tipo
+concreto (`getBeanNamesForType(...Extractor.class).length == 0`); verificado que
+nada lo inyecta por tipo (solo como `Filter` / `WebFilter`). Re-chequear al subir
+`lib-trace-logger`.
+
+Las dos variantes completas viven en `core/sb4_templates.py` del CLI (autofix
+`fix_add_trace_logger_management_config`) y en `migrate-rest-full.md` §4.11b /
+`migrate-soap-full.md`. Verificado con build verde en WSPagos0017 (MVC),
+WSProductos0178, ORQPagos0011, ORQPagos0008 y ORQProductos1001 (WebFlux).
+
+**Tests obligatorios** (`TraceLoggerManagementPathConfigTest`, JUnit 5 + Mockito +
+AssertJ, `given_when_then`, sin `@DisplayName` ni JavaDoc; **>= 6** casos):
+
+| Test | MVC | WebFlux |
+|---|---|---|
+| `/actuator/prometheus` → salta al `chain`, delegate nunca invocado | ✅ | ✅ |
+| `/actuator/health/liveness` → idem | ✅ | ✅ |
+| `/actuator/health/readiness` → idem | ✅ | ✅ |
+| `/IntegrationBus/soap/<Servicio>` → delegate invocado, chain no | ✅ | ✅ |
+| base-path custom `/management` → `/management/health` salteado | ✅ | ✅ |
+| base-path `""` → cae a `/actuator`, request de negocio delega | ✅ | ✅ |
+| bean ajeno (`mock(Filter/WebFilter)`) → `isSameAs`, no se envuelve | ✅ | ✅ |
+| context path `/svc` + `/svc/actuator/health` → salteado | ✅ | n/a |
+
+Utilidades: MVC → `MockHttpServletRequest` + `mock(FilterChain)`; WebFlux →
+`MockServerWebExchange` + `mock(WebFilterChain)` + `StepVerifier`. Mocks del
+extractor con `mock(<Extractor>.class)` (clases concretas no-final).
+
+**Validacion**: Check 2.10 (HIGH: ausente, sin `BeanPostProcessor`, fuera de
+`infrastructure/config/` o variante equivocada para el stack) y Check 2.11
+(MEDIUM: test ausente o con menos de 6 casos). En ORQ ademas **Check 17.8**:
+`logging.event.excluded-paths` con `/actuator/**` (LT-2 MUST), porque
+`LoggingWebFilter` de `lib-event-logs` si emite un registro por request.
+
+Si despues de esto siguen apareciendo lineas de actuator, no salen de
+trace-logger: candidatos `org.springframework.boot.actuate` a `WARN` en
+`logback-spring.xml`, access log del contenedor, o `LoggingWebFilter` (ORQ, LT-2).
 
 ---
 
@@ -992,6 +1145,44 @@ servicemonitor:
   path: '/actuator/prometheus'
 ```
 
+**Probes Kubernetes (Spring Boot 4, correo BPTPSRE 2026-08):** `livenessProbe`
+y `readinessProbe` apuntan a los endpoints **dedicados** de actuator, no al
+agregado `/actuator/health`. Forma canonica para el CLI (robusta al orden de
+campos y al pretty-print del JSON):
+
+```yaml
+livenessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if ! curl -s http://localhost:8080/actuator/health/liveness | grep -q '"status":"UP"'; then exit 1; fi
+  initialDelaySeconds: 300     # conservar los valores que ya tenga el chart
+  periodSeconds: 30
+  timeoutSeconds: 10
+
+readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if ! curl -s http://localhost:8080/actuator/health/readiness | grep -q '"status":"UP"'; then exit 1; fi
+```
+
+La forma con `cut` que emite el MCP `v20260827161016` es **equivalente y
+aceptada** (`if [ "$(curl -s .../actuator/health/readiness | cut -d "{" -f 2 |
+cut -d "}" -f 1 | cut -d "," -f 1 )" != '"status":"UP"' ];then exit 1; fi`);
+depende de que `"status"` sea el primer campo, por eso la canonica es `grep -q`.
+Prerrequisito: `management.endpoint.health.probes.enabled:
+${CCC_ACTUATOR_HEALTH_PROBES_ENABLED}` en `application.yml` y
+`CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` en los 3 Helm (Spring lo activa solo
+si detecta el cluster; el valor explicito evita depender de la deteccion).
+Alcance: **obligatorio en SB4** (Check 7.10 HIGH), recomendado en 3.5.x (MEDIUM;
+migrar en el mismo PR que sube librerias). Check 7.11 valida la env var. Autofix
+`fix_helm_probe_paths` reescribe solo el path dentro de cada bloque de probe.
+
 **Valores por-servicio (no son placeholders `<...>`, se resuelven al migrar):**
 - `keda.triggers[].metadata.namespace`: igual a `metadata.namespace` del
   `catalog-info.yaml` (`tnd-msa-sp-*` -> `tnd-middleware`, etc.).
@@ -1007,6 +1198,9 @@ servicemonitor:
   viejas tipo "produccion replicaCount >= 2" estan **derogadas** desde 2026-05.
 
 **Validacion (Block 7 del checklist, HIGH):**
+- 7.10: probes que no apuntan a `/actuator/health/liveness` /
+  `/actuator/health/readiness` (HIGH en SB4, MEDIUM en 3.5.x); 7.11:
+  `CCC_ACTUATOR_HEALTH_PROBES_ENABLED` distinto de `"true"` (MEDIUM).
 - 7.4: presencia del bloque `hpa:` (derogado) en cualquier helm.
 - 7.5d: `keda:` no declarado, o sin `enabled: true` /
   `minReplicaCount`/`maxReplicaCount`/`triggers`.
@@ -1303,7 +1497,10 @@ completa.
 - `capamedia check <path> --auto-fix` — corrige automaticamente las que son deterministas:
   - Regla 4 `@BpLogger`: agrega anotacion a metodos publicos de `@Service`
   - Regla 7 `${VAR:default}`: reemplaza `${VAR:default}` por `${VAR}` (preserva `optimus.web.*`)
-  - Regla 8 `lib-bnc-api-client`: agrega la dependency solo si la matriz indica BUS/IIB con `invocaBancs=true`
+  - Regla 8 `lib-bnc-api-client`: agrega la dependency solo si la matriz indica BUS/IIB con `invocaBancs=true` (version `3.0.0` en SB4; OLA en SB3; nunca baja)
+  - Regla 9e.3 `TraceLoggerManagementPathConfig`: `fix_add_trace_logger_management_config` crea la clase + test segun stack (Checks 2.10/2.11)
+  - Regla 9h.1 probes: `fix_helm_probe_paths` (7.10) y `fix_helm_probes_enabled_env` (7.11)
+  - LT-2 `excluded-paths`: `fix_event_logs_excluded_paths` (17.8)
   - Regla 9 `catalog-info.yaml`: genera esqueleto con `namespace`/`name`/`lifecycle` correctos + placeholders marcados para review manual (owner, URLs, UUID sonar)
 - Reglas 1, 2, 3, 5: validadas en `capamedia check` (bloques 0 y 1)
 - Regla 6: autofix parcial deterministico:

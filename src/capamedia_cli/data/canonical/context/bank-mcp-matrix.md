@@ -11,6 +11,13 @@ summary: Matriz oficial BPTPSRE-Modos de uso - 3 reglas de override MCP + 8 temp
 (Banco Pichincha). Este archivo es la **fuente de verdad** para decidir
 que framework/archetype genera el MCP Fabrics segun los parametros ingresados.
 
+**MCP minimo: `v20260827161016`** (`MCP_MIN_VERSION` en `core/version_policy.py`).
+Ese build emite **Spring Boot `4.1.1`** (baseline vigente). `capamedia fabrics
+generate` registra `mcp_package_version` / `mcp_build_current` en
+`.capamedia/fabrics.json` y avisa con `WARN` si el build es anterior (scaffold en
+3.5.x): el migrador sube el proyecto nuevo a `4.1.1` en el Block 1. Nunca bajar
+una version que el MCP haya emitido mas alta.
+
 ## Los 5 parametros MCP
 
 | Parametro | Valores | Descripcion |

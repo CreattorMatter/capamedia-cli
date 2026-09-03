@@ -373,7 +373,7 @@ When the SOAP request does not include the `<bancs>` block inside `<headerIn>`, 
 
 ### Infrastructure (Rules 14-18)
 
-**Rule 14 — `livenessProbe` and `readinessProbe` MANDATORY** in all `values.yaml` (dev, test, prod).
+**Rule 14 — `livenessProbe` and `readinessProbe` MANDATORY** in all `values.yaml` (dev, test, prod), pointing at the **dedicated** actuator endpoints: liveness → `/actuator/health/liveness`, readiness → `/actuator/health/readiness` (never the aggregate `/actuator/health`; Spring Boot 4, BPTPSRE 2026-08). Canonical shell form `if ! curl -s <url> | grep -q '"status":"UP"'; then exit 1; fi`; the `cut` form emitted by MCP `v20260827161016` is equivalent and accepted. Requires `management.endpoint.health.probes.enabled: ${CCC_ACTUATOR_HEALTH_PROBES_ENABLED}` in `application.yml` and `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` in the 3 Helm files. Checks 7.10 (HIGH on SB4) / 7.11. See `bank-official-rules.md` Regla 9h.1.
 
 **Rule 15 — `CMDB_APPLICATION_ID: "Red Hat OpenShift Container Platform"`** (exact value) in the pipeline.
 
@@ -443,6 +443,10 @@ is missing, document it as handoff outside Helm.
 
 **Rule 22 — `./gradlew clean build` must pass without errors.**
 
+**Rule 22b — INFO logs must identify the transaction.** An INFO log must carry the correlator (guid / requestId). Diagnostic messages such as `"Request received for operation: {}"`, `"Input validation passed for: {}"`, `"Validation passed ..."`, `"Received request ..."` go to `log.debug(...)` (`ServiceLogHelper`), enabled in dev through `CCC_CUSTOM_LEVEL_DEBUG_ENABLED` / `TPL_LOG_DEBUG`. TO finding 2026-08-25 §1.1; Check 2.6 (MEDIUM). See `bank-official-rules.md` Regla 9e.1.
+
+**Rule 22c — Management probes must NOT reach `lib-trace-logger`.** `infrastructure/config/TraceLoggerManagementPathConfig.java` (§4.11b) is MANDATORY in every service: a `BeanPostProcessor` wrapping the trace-logger extractor so liveness/readiness/prometheus pass through without overwriting the singleton `RequestInformationContextHolder`. Check 2.10 (HIGH) + its test, Check 2.11. In ORQ also `logging.event.excluded-paths: /actuator/**,...` (LT-2 MUST, Check 17.8). See Regla 9e.3.
+
 ### Process (Rules 23-26)
 
 **Rule 23 — NEVER `git push` or `git commit` to legacy repositories** (they are read-only).
@@ -452,6 +456,10 @@ is missing, document it as handoff outside Helm.
 **Rule 25 — NEVER skip blocks** in the pipeline without completing the previous ones.
 
 **Rule 26 — NEVER fabricate data:** if something cannot be determined, mark it as `<pendiente_validar>` or `TBD`.
+
+**Rule 26b — README with one cURL per WSDL operation, BEFORE handing the card to the TO.** For every `<wsdl:operation>` of the portType, `README.md` (or `docs/`) carries a complete cURL: sample SOAP envelope (headerIn + bodyIn), `Content-Type: text/xml;charset=utf-8`, SOAPAction if applicable, the success response (`error.codigo=0`, `tipo=INFO`), at least one business error (`tipo=ERROR`) and, when `invocaBancs=true`, the header-without-`<bancs>` case (`9927`, `tipo=FATAL`). Check 0.6 (MEDIUM); consumers depend on it (TO finding §1.3).
+
+**Rule 26c — Versions: never downgrade what the MCP generated.** Baseline is Spring Boot `4.1.1` (`SPRING_BOOT_BASELINE_VERSION`; MCP `v20260827161016` emits it). If the MCP emits a higher version of the plugin or any bank library, KEEP it. Only raise: a fresh scaffold below `4.1.1` (older MCP build → 3.5.x) is raised to `4.1.1` in Block 1 together with `lib-trace-logger-sb4:1.2.0`, `lib-event-logs-webflux:2.0.0` (ORQ) and `lib-bnc-api-client:3.0.0` (BANCS). Existing SB3 projects stay on `3.5.15+` (Check 8.1 WARN) — never bump a live 3.5.x project to 4.x inside a migration/doublecheck run without the bank's go.
 
 ---
 
@@ -881,10 +889,10 @@ Parameters:
 
 **After MCP scaffolding, apply these mandatory updates:**
 
-1. **Spring Boot version:** Use `3.5.15` in `build.gradle` (current approved baseline for OLA services). Do not upgrade to Spring Boot 4.x unless the bank explicitly approves it for that service.
-2. **Peer Review plugin:** Update to `1.1.2` (Check 8.12 — older scaffolds ship `1.1.0`; the `architectureReview` task gates the PR in Azure)
-3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05.
-4. **Netty:** in **WebFlux** projects (`spring-boot-starter-webflux` present) pin the **core Netty tree (12 modules)** to `io.netty:*:4.1.136.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, `4.1.135.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
+1. **Spring Boot version — `4.1.1` baseline, NEVER downgrade (Rule 26c).** All new projects go on Spring Boot 4 (BPTPSRE 2026-08). The MCP `v20260827161016` already emits `id 'org.springframework.boot' version '4.1.1'`: keep whatever the MCP generated if it is `>= 4.1.1` (a higher version is kept as-is). If the local MCP is older and scaffolded `3.5.x`, raise the plugin to `4.1.1` **before starting development** and apply the SB4 library set in the same step: `com.pichincha.common:lib-trace-logger-sb4:1.2.0` (new artifactId, replaces `lib-trace-logger:1.4.0` — Check 8.13), `com.pichincha.common:lib-event-logs-webflux:2.0.0` in ORQ (Check 8.14), `com.pichincha.bnc:lib-bnc-api-client:3.0.0` final only for BUS + `invocaBancs` (Check 8.9; the alpha `3.0.0-alpha.20260825120715` is forbidden). Only an EXISTING SB3 project (already built on `3.5.15+`) stays on its line; Check 8.1 reports it as MEDIUM and the upgrade goes in a dedicated libraries PR. Update `spring_boot_version` in `migration-context.json` accordingly.
+2. **Peer Review plugin:** Update to `1.1.2` (Check 8.12 — older scaffolds ship `1.1.0`; the `architectureReview` task gates the PR in Azure). Compatibility with SB4 is `<pendiente_validar>` — report any `architectureReview` failure.
+3. **Jackson:** Do NOT pin `jackson-core` / `jackson-databind` / `jackson-dataformat-xml`. Pinning explicit versions causes drift on the next CVE — same trap the old `4.1.132.Final` Netty pin hit in 2026-05. SB4 ships Jackson 3 (`tools.jackson.*`) next to `com.fasterxml.jackson.*`; the single criterion is `<pendiente_validar>` (BPTPSRE) — do not add `force 'tools.jackson.core:*'` on your own.
+4. **Netty — Spring Boot 3.5.x ONLY.** SB4 ships Reactor Netty 1.3.x / Netty 4.2.x: do NOT pin `io.netty:*:4.1.136.Final` there (it is a downgrade that breaks Reactor Netty; Check 8.7 flags any `4.1.x` pin on SB4 and Checks 8.8/8.10 do not apply). On an existing **SB3 WebFlux** project (`spring-boot-starter-webflux` present) pin the **core Netty tree (13 modules)** to `io.netty:*:4.1.136.Final` with a **dual mechanism**: `dependencyManagement { dependency '...' }` AND `configurations.all { resolutionStrategy { force '...' } }`. The Spring Boot 3.5.x BOM ships a vulnerable Netty (`4.1.121.Final`) and `dependencyManagement` doesn't always win over transitives (lib-bnc, the BOM itself) — `force` guarantees it. The 12 modules: `netty-common`, `netty-buffer`, `netty-transport`, `netty-resolver`, `netty-resolver-dns`, `netty-codec`, `netty-codec-dns`, `netty-codec-http`, `netty-codec-http2`, `netty-codec-socks`, `netty-handler`, `netty-handler-proxy` (excludes native binaries and `netty-tcnative-*`). Pinning only `netty-codec*` leaves transitives like `netty-handler-proxy` vulnerable (WSClientes0013: 9 CVEs). Any other version (`4.1.132.Final`, `4.1.135.Final`, **4.2.x**, etc.) is blocked by Check 8.7 — **NEVER bump to 4.2.x** (breaks Reactor Netty: `StacklessClosedChannelException`). MVC/SOAP projects: no manual pin permitted, any version.
 5. **logstash-logback-encoder:** Use `9.0`
 6. **`CMDB_APPLICATION_ID`:** Set to `"Red Hat OpenShift Container Platform"` in `azure-pipelines.yml`
 7. **Fix `schemaLocation` in XSD files:** If any XSD references external paths, fix to local paths. Copy `GenericSOAP.xsd` to `src/main/resources/legacy/`.
@@ -917,7 +925,7 @@ WebFlux dependency block to WAS REST/MVC services:
 plugins {
     id 'jacoco'
     id 'java'
-    id 'org.springframework.boot' version '3.5.15'
+    id 'org.springframework.boot' version '4.1.1'   // baseline SB4 (MCP v20260827161016). Keep a higher MCP version; never downgrade.
     id 'io.spring.dependency-management' version '1.1.7'
     id 'com.pichincha.frm-plugin-peer-review-gradle' version '1.1.2'
 }
@@ -987,12 +995,16 @@ dependencies {
     implementation 'io.prometheus:simpleclient_hotspot:0.16.0'
     implementation 'io.prometheus:simpleclient_common:0.16.0'
 
-    // Corporate libraries
-    implementation 'com.pichincha.common:lib-trace-logger:1.4.0'
-    // lib-bnc-api-client: version segun OLA del servicio — 1.1.0 (OLA 1) o
-    // 2.0.0 (OLA 2; servicios de core/ola_policy.py OLA2_SERVICES). El autofix
-    // de `capamedia ai doublecheck` (Regla 8) la fija a la version correcta.
-    implementation 'com.pichincha.bnc:lib-bnc-api-client:1.1.0'
+    // Corporate libraries — Spring Boot 4 artifact set (Checks 8.13 / 8.9 / 8.14).
+    // SB4 changes the trace-logger artifactId: lib-trace-logger:1.4.0 (SB3) -> lib-trace-logger-sb4:1.2.0
+    implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'
+    // lib-bnc-api-client: ONLY BUS + invocaBancs=true. Spring Boot 4 -> 3.0.0 final
+    // (the alpha 3.0.0-alpha.20260825120715 is forbidden). Existing SB3 projects keep
+    // the OLA version (1.1.0 OLA 1 / 2.0.0 OLA 2, core/ola_policy.py). The autofix of
+    // `capamedia ai doublecheck` (Regla 8) fixes it and never downgrades.
+    implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0'
+    // ORQ only (deploymentType=orquestador): lib-event-logs-webflux 2.0.0 on SB4 (1.0.x on SB3)
+    // implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'
 
     // Logging
     implementation 'net.logstash.logback:logstash-logback-encoder:9.0'
@@ -1034,25 +1046,24 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-        // WebFlux only (Snyk 2026-06): spring-framework-bom override (Check 8.10).
-        mavenBom 'org.springframework:spring-framework-bom:6.2.19'
     }
-    // NOTE: do NOT add `dependency 'io.netty:*:VERSION'` blocks here to "patch
-    // a CVE", EXCEPT for the official WebFlux exception `io.netty:*:4.1.136.Final`
-    // (Snyk CVE-fix approved for WebFlux services). Any other version is
-    // blocked by Check 8.7. Old scaffolds that pinned `netty-codec-http:4.1.132.Final`
-    // became the source of 4 new CVEs — remove them. MVC/SOAP: no manual pin allowed.
+    // Spring Boot 4: let the BOM manage Netty (4.2.x), Reactor Netty (1.3.x), Spring
+    // Framework 7 and Jackson. Do NOT copy the SB3 CVE pins below into an SB4 project:
+    // they are downgrades and Check 8.7 flags any `io.netty:*:4.1.x` pin on SB4.
     //
-    // WebFlux only — security pins of the same Snyk report (Check 8.10), alongside
-    // the Netty tree (Check 8.8). `capamedia ai doublecheck` autofixes them.
-    dependencies {
-        // Netty tree (13 core modules) at 4.1.136.Final — see Check 8.8.
-        // NON-Netty WebFlux security pins (Check 8.10):
-        dependency 'io.micrometer:micrometer-core:1.15.12'
-        dependency 'io.projectreactor.netty:reactor-netty-http:1.2.18'
-        dependency 'org.springframework.retry:spring-retry:2.0.13'
-        dependency 'org.springframework.kafka:spring-kafka:3.3.16'
-    }
+    // ---- EXISTING Spring Boot 3.5.x WebFlux projects ONLY (Checks 8.7/8.8/8.10) ----
+    // NOTE: do NOT add `dependency 'io.netty:*:VERSION'` blocks to "patch a CVE",
+    // EXCEPT for the official SB3 WebFlux exception `io.netty:*:4.1.136.Final`.
+    // Old scaffolds that pinned `netty-codec-http:4.1.132.Final` became the source
+    // of 4 new CVEs — remove them. MVC/SOAP: no manual pin allowed.
+    //   imports { mavenBom 'org.springframework:spring-framework-bom:6.2.19' }   // SB3 only
+    //   dependencies {
+    //       // Netty tree (13 core modules) at 4.1.136.Final — Check 8.8 (SB3 only)
+    //       dependency 'io.micrometer:micrometer-core:1.15.12'                    // Check 8.10 (SB3 only)
+    //       dependency 'io.projectreactor.netty:reactor-netty-http:1.2.18'
+    //       dependency 'org.springframework.retry:spring-retry:2.0.13'
+    //       dependency 'org.springframework.kafka:spring-kafka:3.3.16'
+    //   }
 }
 
 compileJava {
@@ -1173,6 +1184,10 @@ grep "FROM" Dockerfile
 # CHECK 7: postProcessWsdl.groovy exists
 test -f gradle/postProcessWsdl.groovy && echo "OK" || echo "MISSING"
 # EXPECTED: OK
+
+# CHECK 8b: Spring Boot plugin >= 4.1.1 and SB4 artifact set (never downgraded)
+grep -E "boot' version '4\." build.gradle && grep -c "lib-trace-logger-sb4:1.2.0" build.gradle
+# EXPECTED: plugin 4.x present; 1 (lib-trace-logger-sb4). `lib-trace-logger:1.4.0` must NOT remain on SB4.
 
 # CHECK 8: logstash-logback-encoder version 9.0
 grep "logstash-logback-encoder" build.gradle
@@ -2620,6 +2635,81 @@ public class ReactiveContextWebConfig implements WebFilter {
 
 ---
 
+#### 4.11b TraceLoggerManagementPathConfig (MANDATORY — Regla 9e.3, Check 2.10)
+
+The `lib-trace-logger` extractor (`ReactiveRequestInformationExtractor` on WebFlux, `ServletRequestInformationExtractor` on MVC) dumps every request into a **singleton** `RequestInformationContextHolder`. Kubernetes probes (`/actuator/health/liveness`, `/readiness`, `/actuator/prometheus`) overwrite the business request context and the trace shows `requestUri=/actuator/...` (TO finding 2026-08-25 §1.2). Lowering `logging.level` does not help and an extra filter cannot stop the library's filter: wrap the bean with a `BeanPostProcessor`. Same code compiles on `lib-trace-logger:1.4.0` (SB3) and `lib-trace-logger-sb4:1.2.0` (SB4).
+
+WebFlux variant (BUS + invocaBancs, ORQ) — `src/main/java/com/pichincha/sp/infrastructure/config/TraceLoggerManagementPathConfig.java`:
+
+```java
+package com.pichincha.sp.infrastructure.config;
+
+import com.pichincha.common.trace.logger.extractor.request.information.reactive.ReactiveRequestInformationExtractor;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.core.env.Environment;
+import org.springframework.lang.NonNull;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Mono;
+
+@Component
+public class TraceLoggerManagementPathConfig implements BeanPostProcessor, EnvironmentAware {
+
+  private static final String BASE_PATH_PROPERTY = "management.endpoints.web.base-path";
+  private static final String DEFAULT_BASE_PATH = "/actuator";
+
+  private String managementBasePath = DEFAULT_BASE_PATH;
+
+  @Override
+  public void setEnvironment(Environment environment) {
+    String basePath = environment.getProperty(BASE_PATH_PROPERTY, DEFAULT_BASE_PATH);
+    this.managementBasePath = basePath.isBlank() ? DEFAULT_BASE_PATH : basePath;
+  }
+
+  @Override
+  public Object postProcessAfterInitialization(Object bean, String beanName) {
+    if (bean instanceof ReactiveRequestInformationExtractor delegate) {
+      return new ManagementPathAwareExtractor(delegate, managementBasePath);
+    }
+    return bean;
+  }
+
+  // El extractor de lib-trace-logger vuelca cada request en un RequestInformationContextHolder
+  // singleton: las sondas de liveness/readiness/prometheus pisan el contexto del request de
+  // negocio y ademas bufferean su body. Se las deja pasar sin capturar.
+  private record ManagementPathAwareExtractor(WebFilter delegate, String managementBasePath)
+      implements WebFilter {
+
+    @NonNull
+    @Override
+    public Mono<Void> filter(@NonNull ServerWebExchange exchange, @NonNull WebFilterChain chain) {
+      if (isManagementPath(exchange)) {
+        return chain.filter(exchange);
+      }
+      return delegate.filter(exchange, chain);
+    }
+
+    private boolean isManagementPath(ServerWebExchange exchange) {
+      return exchange
+          .getRequest()
+          .getPath()
+          .pathWithinApplication()
+          .value()
+          .startsWith(managementBasePath);
+    }
+  }
+}
+```
+
+WAS REST/MVC uses the servlet variant (`instanceof ServletRequestInformationExtractor`, wraps `jakarta.servlet.Filter`, strips `getContextPath()`): copy it from `migrate-soap-full.md` (same class name and location). Design decisions: select by `instanceof` (not `beanName`); read `management.endpoints.web.base-path` from `Environment` (`${CCC_ACTUATOR_BASE_PATH}`), default `/actuator`; blank base-path falls back to `/actuator` (`startsWith("")` would disable capture for the whole service); `pathWithinApplication()` keeps it robust to `spring.webflux.base-path`.
+
+MANDATORY test `src/test/java/.../infrastructure/config/TraceLoggerManagementPathConfigTest.java` (JUnit 5 + Mockito + AssertJ, `given_when_then`, no `@DisplayName`, no JavaDoc, **>= 6 cases** — Check 2.11): `/actuator/prometheus`, `/actuator/health/liveness`, `/actuator/health/readiness` → `chain.filter` called, delegate never; `/IntegrationBus/soap/<Servicio>` → delegate called, chain never; custom base-path `/management` → `/management/health` skipped; base-path `""` → falls back to `/actuator`, business request delegates; unrelated `mock(WebFilter.class)` → `isSameAs`. Use `MockServerWebExchange` + `mock(WebFilterChain)` + `StepVerifier`; `mock(ReactiveRequestInformationExtractor.class)` (concrete, non-final). `capamedia ai doublecheck` can generate both files (`fix_add_trace_logger_management_config`).
+
+---
+
 #### 4.12 CatalogExceptionConstants
 
 ```java
@@ -2735,7 +2825,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: "health,mappings,beans"
+        include: "health,mappings,beans,prometheus"
+  endpoint:
+    health:
+      probes:
+        enabled: ${CCC_ACTUATOR_HEALTH_PROBES_ENABLED}   # exposes /actuator/health/{liveness,readiness} for the Helm probes (Rule 14, Check 7.11)
 
 web-filter:
   trace-id-header-name: x-guid
@@ -3179,6 +3273,11 @@ grep "ErrorWebExceptionHandler" src/main/java/**/ErrorResolverHandler.java
 find src -name "ReactiveContextWebConfig.java" | head -1
 # EXPECTED: 1 file
 
+# CHECK 8b: TraceLoggerManagementPathConfig exists with the stack's extractor (Check 2.10) + its test (Check 2.11)
+grep -rl "instanceof ReactiveRequestInformationExtractor" src/main/java --include=TraceLoggerManagementPathConfig.java
+grep -rc "void given" src/test/java --include=TraceLoggerManagementPathConfigTest.java
+# EXPECTED: 1 file (WebFlux variant; WAS REST/MVC: ServletRequestInformationExtractor); >= 6 tests
+
 # CHECK 9: NO .block() calls in controller
 grep -r "\.block()" src/main/java/**/impl/*.java
 # EXPECTED: empty
@@ -3223,6 +3322,7 @@ env:
   CCC_BANCS_CIRCUIT_BREAKER_SLOW_CALL_DURATION_THRESHOLD: "1000ms"
   CCC_LOG_COM_PICHINCHA_SP: "INFO"
   CCC_LOG_COM_PICHINCHA_WEB_FILTER: "INFO"
+  CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"   # the 3 envs — enables /actuator/health/{liveness,readiness} (Check 7.11)
   CCC_TRACE_LOGGER_ENABLED: "true"
   CCC_CUSTOM_LEVEL_ENABLED: "true"
   CCC_CUSTOM_LEVEL_INFO_ENABLED: "true"
@@ -3237,6 +3337,31 @@ env:
 **Lookup `CCC_BANCS_BASE_URL`** from `prompts/tx-adapter-catalog.json` using the TX code.
 
 **All environments MUST carry the official capacity + KEDA baseline** (Rule 16): `resources.requests/limits` exact values, `keda.enabled=true` with `minReplicaCount=1`/`maxReplicaCount=1` and a prometheus trigger, `servicemonitor.enabled=true` with `path=/actuator/prometheus`, no `hpa:` block, probes enabled. The bank refines these values after performance/load tests; until then, this baseline is mandatory.
+
+**Probes (Rule 14, Spring Boot 4 — Checks 7.10 / 7.11).** In `helm/dev.yml`, `helm/test.yml` and `helm/prod.yml` the probes hit the dedicated endpoints. Canonical form (keep the chart's existing `initialDelaySeconds`/`periodSeconds`/`timeoutSeconds`):
+
+```yaml
+livenessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if ! curl -s http://localhost:8080/actuator/health/liveness | grep -q '"status":"UP"'; then exit 1; fi
+  initialDelaySeconds: 300     # keep the chart's existing timings
+  periodSeconds: 30
+  timeoutSeconds: 10
+
+readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if ! curl -s http://localhost:8080/actuator/health/readiness | grep -q '"status":"UP"'; then exit 1; fi
+```
+
+The `cut` form emitted by the MCP `v20260827161016` (`if [ "$(curl -s http://localhost:8080/actuator/health/readiness | cut -d "{" -f 2 | cut -d "}" -f 1 | cut -d "," -f 1 )" != '"status":"UP"' ];then exit 1; fi`) is equivalent and accepted; only the path matters. If the MCP scaffold still points at the aggregate `/actuator/health`, change ONLY the path in each probe block (`fix_helm_probe_paths` does exactly that).
 
 #### GATE 5 — Helm Verification
 
@@ -3255,9 +3380,13 @@ done
 #           keda enabled=true min=1 max=1; servicemonitor path /actuator/prometheus;
 #           NO hpa: block
 
-# CHECK 3: Probes are configured
-grep "livenessProbe" helm/values-dev.yaml
-# EXPECTED: present
+# CHECK 3: Probes are configured and point at the dedicated endpoints (Checks 7.3 / 7.10 / 7.11)
+for env in dev test prod; do
+  grep -A6 "livenessProbe" "helm/$env.yml" | grep -c "/actuator/health/liveness"
+  grep -A6 "readinessProbe" "helm/$env.yml" | grep -c "/actuator/health/readiness"
+  grep -c 'CCC_ACTUATOR_HEALTH_PROBES_ENABLED' "helm/$env.yml"
+done
+# EXPECTED: 1 / 1 / 1 per environment; no probe left on the aggregate /actuator/health
 ```
 
 **If all pass:** Update `migration-context.json` with `bloque_05_helm_docker: "completado"`.
