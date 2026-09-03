@@ -39,8 +39,9 @@ class OpencodeAdapter(HarnessAdapter):
         model = _resolve_model(asset)
         if model:
             fm["model"] = model
-        dest.write_text(serialize_frontmatter(fm, asset.body), encoding="utf-8")
-        return [dest]
+        body, parts = self.prompt_body(asset, target_dir)
+        dest.write_text(serialize_frontmatter(fm, body), encoding="utf-8")
+        return [dest, *parts]
 
     def render_agent(self, asset: CanonicalAsset, target_dir: Path) -> list[Path]:
         out_dir = target_dir / ".opencode" / "agents"
@@ -76,23 +77,18 @@ class OpencodeAdapter(HarnessAdapter):
         self, assets: list[CanonicalAsset], target_dir: Path
     ) -> list[Path]:
         dest_agents = target_dir / "AGENTS.md"
-        parts = ["# Contexto del proyecto\n"]
-        for a in assets:
-            parts.append(f"\n## {a.title}\n\n{a.body}")
+        text, on_demand = self.context_text(assets, target_dir, "# Contexto del proyecto")
 
         written: list[Path] = []
         if dest_agents.exists():
             existing = dest_agents.read_text(encoding="utf-8")
             marker = "<!-- capamedia:context -->"
             if marker not in existing:
-                dest_agents.write_text(
-                    existing + f"\n\n{marker}\n" + "\n".join(parts), encoding="utf-8"
-                )
+                dest_agents.write_text(existing + f"\n\n{marker}\n" + text, encoding="utf-8")
         else:
-            dest_agents.write_text(
-                "<!-- capamedia:context -->\n" + "\n".join(parts), encoding="utf-8"
-            )
+            dest_agents.write_text("<!-- capamedia:context -->\n" + text, encoding="utf-8")
         written.append(dest_agents)
+        written.extend(on_demand)
 
         opencode_json = target_dir / "opencode.json"
         if not opencode_json.exists():

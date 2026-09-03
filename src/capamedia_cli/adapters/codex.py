@@ -63,9 +63,10 @@ class CodexAdapter(HarnessAdapter):
         dest = out_dir / f"{asset.name}.md"
         fm = {"name": asset.name, "description": asset.description}
         hint = model_hint_comment(asset)
-        body = f"{hint}\n\n{asset.body}" if hint else asset.body
+        raw_body, parts = self.prompt_body(asset, target_dir)
+        body = f"{hint}\n\n{raw_body}" if hint else raw_body
         dest.write_text(serialize_frontmatter(fm, body), encoding="utf-8")
-        return [dest]
+        return [dest, *parts]
 
     def render_agent(self, asset: CanonicalAsset, target_dir: Path) -> list[Path]:
         out_dir = target_dir / ".codex" / "agents"
@@ -99,23 +100,18 @@ class CodexAdapter(HarnessAdapter):
         self, assets: list[CanonicalAsset], target_dir: Path
     ) -> list[Path]:
         dest_agents = target_dir / "AGENTS.md"
-        parts = ["# Contexto del proyecto\n"]
-        for a in assets:
-            parts.append(f"\n## {a.title}\n\n{a.body}")
+        text, on_demand = self.context_text(assets, target_dir, "# Contexto del proyecto")
 
         written: list[Path] = []
         if dest_agents.exists():
             existing = dest_agents.read_text(encoding="utf-8")
             marker = "<!-- capamedia:context -->"
             if marker not in existing:
-                dest_agents.write_text(
-                    existing + f"\n\n{marker}\n" + "\n".join(parts), encoding="utf-8"
-                )
+                dest_agents.write_text(existing + f"\n\n{marker}\n" + text, encoding="utf-8")
         else:
-            dest_agents.write_text(
-                "<!-- capamedia:context -->\n" + "\n".join(parts), encoding="utf-8"
-            )
+            dest_agents.write_text("<!-- capamedia:context -->\n" + text, encoding="utf-8")
         written.append(dest_agents)
+        written.extend(on_demand)
         return written
 
     def render_settings(self, target_dir: Path) -> list[Path]:

@@ -40,6 +40,29 @@ Este prompt **no implementa codigo**. Es un router que:
 
 `<namespace>` es el codigo de tribu (`tnd`, `csg`, `tia`, etc.) que sale de `.capamedia/config.yaml`, `spring.application.name` o el nombre del repo/carpeta que ya genero Fabrics. Nunca asumir `tnd-`; `catalog-info.yaml` `metadata.name` queda fijo en `tpl-middleware`.
 
+## Paso 0 — Presupuesto de contexto (obligatorio)
+
+El modelo objetivo del CLI es Opus y su ventana es finita: `CLAUDE.md` se carga
+en cada sesion y en cada subagente, asi que todo lo que se lea de mas se paga
+dos veces. Reglas:
+
+1. **Los canonicals de `.capamedia/context/` se leen bajo demanda**, uno por
+   uno, cuando el bloque en curso los necesita (la tabla "Contexto bajo
+   demanda" de `CLAUDE.md` dice cuando). Nunca cargar los 20 al inicio ni
+   pegarlos en el prompt del `migrador`: pasar el **path**.
+2. **`migrate-rest-full.md` es un indice**: sus partes viven en
+   `.capamedia/prompts/migrate-rest-full/NN-*.md`. Leer las partes `inicio`
+   antes de empezar y cada parte `bloque` recien al llegar a ese bloque
+   (leer, ejecutar, pasar el GATE, seguir). `migrate-soap-full.md` es chico y
+   se lee entero.
+3. **Un subagente por bloque, no uno para toda la migracion.** Al lanzar
+   `migrador`, darle solo: el path de la parte del bloque, el path del legacy
+   que ese bloque necesita, `migration-context.json` y el resumen (5 lineas)
+   del GATE anterior. Cada bloque arranca con contexto limpio.
+4. Si un subagente muere con `Prompt is too long`, NO reintentar con el mismo
+   prompt: partir el bloque (ej. Block 4 en 4.1-4.6 / 4.7-4.11 / 4.12-4.17) y
+   relanzar.
+
 ## Paso 1 — Detectar modo (matriz MCP)
 
 Leer `bank-mcp-matrix.md`, `COMPLEXITY_<servicio>.md` y `migration-context.json` en `destino/`. La matriz manda sobre cualquier heuristica local:
@@ -73,6 +96,7 @@ Usar el sub-agente `migrador` con este contexto minimo:
 - `COMPLEXITY_<servicio>.md` — analisis previo
 - `bank-mcp-matrix.md` — fuente unica de la decision REST/WebFlux, REST/MVC, SOAP/MVC
 - `migrate-rest-full.md` **o** `migrate-soap-full.md` — el que corresponda segun Paso 1
+  (REST: pasar el path de la **parte** del bloque en curso, no el prompt entero — Paso 0)
 
 El agente ejecuta los bloques definidos en ese prompt full (no se redefinen aqui).
 

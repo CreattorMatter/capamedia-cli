@@ -6,6 +6,54 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-09-03
+
+### Fixed — Subagentes morian con `Prompt is too long` (presupuesto de contexto)
+
+Caso real: `Agent "Migrate WSSeguridad0069 REST WebFlux" failed: Prompt is too
+long`. Causa: `capamedia init` concatenaba los 22 canonicals de `context/` en UN
+solo `CLAUDE.md` (202 KB, ~50k tokens) que Claude Code carga en cada sesion Y en
+cada subagente; encima `/migrate` cargaba `migrate-rest-full.md` entero (153 KB).
+El `migrador` (Opus, modelo objetivo del CLI) agotaba la ventana antes de leer un
+archivo del legacy. Mismo problema latente en AGENTS.md (Codex/opencode),
+`.windsurfrules`, `copilot-instructions.md` y la regla `alwaysApply` de Cursor.
+
+Nuevo `core/context_budget.py` (presupuestos calibrados para Opus):
+
+- **Contexto en dos niveles.** El archivo auto-cargado solo lleva los
+  canonicals nucleo (`CLAUDE`, `hexagonal`, `code-style`, `security`) y los
+  muy chicos (<= 2 KB); el resto se escribe uno por archivo en
+  `.capamedia/context/<name>.md` y el archivo auto-cargado trae una tabla
+  "Contexto bajo demanda" (canonical, cuando leerlo, tamano, path) con la regla
+  de leerlos solo cuando el bloque lo necesita. `CLAUDE.md` pasa de 202 KB a
+  ~22 KB (`INLINE_CONTEXT_BUDGET_BYTES = 24_000`). Nada se pierde: cambia
+  donde vive.
+- **Prompts grandes partidos.** Un prompt con cuerpo > 48 KB se renderiza como
+  indice (preambulo + tabla de partes con tipo `inicio`/`bloque`/`cierre`) y
+  partes en `.capamedia/prompts/<name>/NN-<slug>.md`, cortadas por `##`, luego
+  `###`, luego `####` y agrupadas hasta ~24 KB. Hoy aplica solo a
+  `migrate-rest-full` (153 KB -> indice de 6 KB + 15 partes); SOAP/MVC (19 KB)
+  y el resto quedan intactos, pero cualquier prompt futuro que crezca se parte
+  solo. Aplica a los 6 harnesses (comparten `.capamedia/`).
+- **Compatibilidad**: `capamedia init --inline-context`
+  (`scaffold_project(inline_context=True)`, `render_all(...,
+  inline_context=True)`) reproduce exactamente el render anterior. `upgrade`,
+  `adopt`, `clone --init` y `batch` usan el default slim.
+- `init` imprime el **Presupuesto de contexto** (tamano de cada archivo
+  auto-cargado, canonicals bajo demanda, prompts partidos; WARN si supera el
+  presupuesto) y `doctor` lo muestra dentro de un workspace.
+- Canonicals: `migrate.md` Paso 0 (leer partes y contexto bajo demanda; un
+  subagente por bloque con el PATH de la parte, no su contenido; si muere por
+  contexto, partir el bloque), `agents/migrador.md` seccion "Presupuesto de
+  contexto", `context/README.md`.
+
+### Tests
+
+- Nuevo `tests/test_context_budget.py`: particion inline/bajo demanda, tamano
+  del archivo auto-cargado, roundtrip de las partes (concatenacion == cuerpo
+  original), tipos inicio/bloque/cierre, modo `--inline-context` identico al
+  render previo, `written` incluye partes y canonicals bajo demanda. Suite 1115.
+
 ## [0.40.0] - 2026-09-02
 
 Fuente: doc `BPTPSRE-SpringBoot4-probes-actuator-logs.md` (2026-09-02), correos

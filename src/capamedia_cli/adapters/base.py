@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from capamedia_cli.core.canonical import CanonicalAsset
+from capamedia_cli.core.context_budget import context_document, prompt_body_for_harness
 
 
 class HarnessAdapter(ABC):
@@ -20,9 +21,26 @@ class HarnessAdapter(ABC):
     name: str = ""
     display_name: str = ""
     supported_primitives: frozenset[str] = frozenset()
+    # v0.41.0: presupuesto de contexto. False (default) = archivo auto-cargado
+    # slim + canonicals bajo demanda + prompts grandes partidos. True = el
+    # comportamiento previo (todo concatenado inline), `capamedia init
+    # --inline-context`.
+    inline_context: bool = False
 
     def supports(self, primitive: str) -> bool:
         return primitive in self.supported_primitives
+
+    def prompt_body(self, asset: CanonicalAsset, target_dir: Path) -> tuple[str, list[Path]]:
+        """Cuerpo a renderizar para un prompt (indice si es grande) y las partes escritas."""
+        return prompt_body_for_harness(asset, target_dir, inline_context=self.inline_context)
+
+    def context_text(
+        self, assets: list[CanonicalAsset], target_dir: Path, heading: str
+    ) -> tuple[str, list[Path]]:
+        """Texto del archivo auto-cargado del harness y los canonicals bajo demanda escritos."""
+        return context_document(
+            assets, target_dir, heading=heading, inline_context=self.inline_context
+        )
 
     @abstractmethod
     def render_prompt(
@@ -52,11 +70,18 @@ class HarnessAdapter(ABC):
         self,
         assets: dict[str, list[CanonicalAsset]],
         target_dir: Path,
+        *,
+        inline_context: bool | None = None,
     ) -> tuple[list[Path], list[str]]:
         """Dispatch: render every canonical asset through this adapter.
 
+        `inline_context=True` reproduce el render previo a v0.41.0 (todo el
+        contexto concatenado en el archivo auto-cargado, prompts sin partir).
+
         Returns a tuple of (written paths, warnings).
         """
+        if inline_context is not None:
+            self.inline_context = inline_context
         written: list[Path] = []
         warnings: list[str] = []
 
