@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
 # Catalogo oficial del banco (BPTPSRE-Secretos).
 # key = nombre exacto del JNDI (case-sensitive, como aparece en el legacy)
 # value = (db_label, user_secret, password_secret)

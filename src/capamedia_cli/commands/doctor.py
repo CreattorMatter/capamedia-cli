@@ -37,14 +37,6 @@ def doctor() -> None:
     proj_cfg = Path.cwd() / ".capamedia" / "config.yaml"
     if proj_cfg.exists():
         table.add_row("Project config", str(proj_cfg))
-        # v0.41.0: presupuesto de contexto del workspace (lo que cada sesion y
-        # subagente carga solo).
-        from capamedia_cli.core.context_budget import AUTOLOADED_FILES, context_budget_report
-
-        report = context_budget_report(Path.cwd(), list(AUTOLOADED_FILES))
-        for line in report.lines():
-            style = "yellow" if "SUPERA" in line else "dim"
-            table.add_row("Contexto", f"[{style}]{line}[/{style}]")
     else:
         table.add_row("Project config", "[dim]no encontrado (no es un proyecto inicializado)[/dim]")
 

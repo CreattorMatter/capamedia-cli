@@ -1,12 +1,5 @@
 # Configuracion AI - Capa Media OLA1
 
-> Desde capamedia-cli v0.41.0 el archivo auto-cargado (`CLAUDE.md` / `AGENTS.md`)
-> solo trae los canonicals nucleo; el resto vive en `.capamedia/context/*.md` y se
-> lee bajo demanda (tabla al final de `CLAUDE.md`). Los prompts grandes
-> (`migrate-rest-full`) son un indice con partes en `.capamedia/prompts/<name>/`.
-> Motivo: el modelo objetivo es Opus y los subagentes heredan `CLAUDE.md`; con
-> todo inline (~200 KB) morian con `Prompt is too long`.
-
 ## Como usar
 
 Copiar la carpeta `.claude/` completa a la raiz de cada proyecto de migracion:

@@ -213,43 +213,6 @@ Y los 3 Helm (`helm/dev.yml`, `helm/test.yml`, `helm/prod.yml`) declaran las
 - NO aplicar nada de esto a WAS/BUS: `lib-event-logs` y sus niveles son
   ORQ-only (el trace-logger de los Checks 7.7/7.8 si es universal).
 
-## Paso 1.9 - Spring Boot 4: versiones, probes y sondas fuera del trace-logger
-
-Fuente: doc BPTPSRE-SpringBoot4-probes-actuator-logs (2026-09) + hallazgos TO
-2026-08-25. Checks 8.1 / 8.13 / 8.14 / 8.9 / 7.10 / 7.11 / 2.10 / 2.11 / 2.6 /
-17.8 / 0.6 — casi todos con autofix; lo que no, se aplica a mano.
-
-- **Versiones (Check 8.1, autofix `fix_spring_boot_plugin_version`).** Baseline
-  `4.1.1`. **Nunca bajar** una version que trae el `build.gradle` (plugin o
-  libs): si el MCP emitio algo mayor, se conserva. El autofix solo sube dentro
-  de la misma linea (`3.5.x < 3.5.15 -> 3.5.15`, `4.x < 4.1.1 -> 4.1.1`). Un
-  proyecto en `3.5.15+` queda MEDIUM: si es un proyecto **nuevo** (recien
-  migrado con un MCP viejo), subirlo a `4.1.1` **a mano** junto con el set SB4;
-  si es un proyecto existente en produccion, reportarlo como handoff
-  ("upgrade a SB4 pendiente"), no tocarlo.
-- **Set de librerias SB4** (autofixes `fix_trace_logger_sb4_artifact`,
-  `fix_event_logs_sb4_version`, Regla 8): `lib-trace-logger-sb4:1.2.0`
-  (artifactId nuevo), `lib-event-logs-webflux:2.0.0` (ORQ),
-  `lib-bnc-api-client:3.0.0` final (solo BUS + invocaBancs; la alpha esta
-  prohibida). En SB4 **no** aplicar los pins Netty/Snyk de SB3 (8.7/8.8/8.10):
-  `fix_remove_netty_pin` quita solo los `4.1.x` (downgrade) y los otros dos
-  autofixes no actuan.
-- **Probes Helm** (`fix_helm_probe_paths`, `fix_helm_probes_enabled_env`):
-  liveness -> `/actuator/health/liveness`, readiness -> `/actuator/health/readiness`
-  en los 3 Helm (formas `grep -q` y `cut` aceptadas), `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"`
-  y `management.endpoint.health.probes.enabled: ${CCC_ACTUATOR_HEALTH_PROBES_ENABLED}`
-  en application.yml.
-- **`TraceLoggerManagementPathConfig`** (`fix_add_trace_logger_management_config`
-  crea clase + test segun stack). Si ya existe con la variante equivocada
-  (servlet en WebFlux o viceversa), corregirla a mano con la plantilla de la
-  Regla 9e.3.
-- **ORQ:** `logging.event.excluded-paths: /actuator/**,/health,/metrics,/prometheus`
-  (`fix_event_logs_excluded_paths`; si existe sin `/actuator/**`, completar a mano).
-- **Logs INFO diagnosticos** (Check 2.6, sin autofix): `Request received...`,
-  `Input validation passed...` -> `log.debug(...)`.
-- **README con cURL por operacion** (Check 0.6, sin autofix): completar antes
-  de reportar PR_READY; es gate del TO.
-
 ## Paso 2 — Ejecutar `capamedia checklist`
 
 ```bash
@@ -263,17 +226,12 @@ Eso dispara internamente:
    - Regla 4: `@BpLogger` faltante en metodos publicos de `@Service`
    - Regla 6: `StringUtils.*` → Java nativo, extraer records inner del Service
    - Regla 7: `${VAR:default}` → `${VAR}` limpio (preserva `optimus.web.*`)
-   - Regla 8: fijar `lib-bnc-api-client` a la version del proyecto — `3.0.0`
-     final en Spring Boot 4 (cualquier OLA); en SB3 la del OLA (`1.1.0` OLA 1,
-     `2.0.0` OLA 2) — solo si la matriz permite BANCS (BUS/IIB +
-     invocaBancs=true). Nunca baja una version `>= 3.0.0`.
-   - Regla Gradle REST/BANCS: `lib-bnc-api-client` debe quedar en esa version
-     (`3.0.0` SB4 / `1.1.0` OLA 1 / `2.0.0` OLA 2, sin `-alpha.*`) y
-     Resilience4j debe usar el starter compatible (`resilience4j-spring-boot3`)
-   - Spring Boot 4 (Paso 1.9): `lib-trace-logger-sb4:1.2.0` (8.13),
-     `lib-event-logs 2.0.0` en ORQ (8.14), probes liveness/readiness +
-     `CCC_ACTUATOR_HEALTH_PROBES_ENABLED` (7.10/7.11), `excluded-paths` (17.8),
-     `TraceLoggerManagementPathConfig` + test (2.10/2.11)
+   - Regla 8: fijar `lib-bnc-api-client` a la version del OLA del servicio
+     (`1.1.0` OLA 1, `2.0.0` OLA 2) solo si la matriz permite BANCS (BUS/IIB
+     + invocaBancs=true)
+   - Regla Gradle REST/BANCS: `lib-bnc-api-client` debe quedar en la version
+     del OLA del servicio (`1.1.0` OLA 1, `2.0.0` OLA 2) y Resilience4j debe
+     usar el starter compatible con Spring Boot 3 (`resilience4j-spring-boot3`)
    - Regla 9: esqueleto inicial de `catalog-info.yaml`
    - Regla 9h.1: `resources` al baseline + eliminar el bloque `hpa:` derogado
      (el `keda:`/`servicemonitor:` lo genera la plantilla de migracion)
@@ -390,7 +348,7 @@ Al final del doublecheck, responder con un resumen:
 - PR_READY / READY_WITH_FOLLOW_UP / BLOCKED_BY_HIGH
 
 ### Fixes aplicados automaticamente
-1. `lib-bnc-api-client` fijado a la version del proyecto (3.0.0 SB4 / 1.1.0 OLA 1 / 2.0.0 OLA 2)
+1. `lib-bnc-api-client` fijado a la version del OLA (1.1.0 OLA 1 / 2.0.0 OLA 2)
 2. `@BpLogger` agregado a 3 metodos de CustomerServiceImpl
 3. 4 env vars `${CCC_*}` reemplazados con valores de umpclientes0025.properties
 ...
@@ -427,29 +385,23 @@ o abrir el PR si no hay residuales HIGH.
 8. **Config is not an output port.** Si ves `*ConfigOutputPort` o un adapter
    que solo lee env/YAML/properties, reemplazar por `@ConfigurationProperties`
    o bean de config; los output ports son para dependencias externas.
-9. **Spring Boot baseline — nunca bajar.** `build.gradle` debe quedar con
-   `id 'org.springframework.boot' version '4.1.1'` o superior (baseline SB4,
-   MCP `v20260827161016`); una versión mayor emitida por el MCP se conserva.
-   Si aparece una versión menor dentro de su misma línea, subir solo ese
-   literal sin reemplazar el scaffold del MCP. Un proyecto existente en
-   `3.5.15+` no se salta a 4.x en el doublecheck: se reporta el upgrade como
-   pendiente (Paso 1.9).
+9. **Spring Boot baseline.** `build.gradle` debe quedar con
+   `id 'org.springframework.boot' version '3.5.15'` o superior aprobado. Si
+   aparece una versión menor, actualizar el literal del plugin sin reemplazar
+   el scaffold del MCP.
 10. **Pipeline/catalog namespace.** `KUBERNETES_NAMESPACE` en
     `azure-pipelines.yml` debe coincidir con `metadata.namespace` de
     `catalog-info.yaml`.
 11. **Gradle seguridad.** No debe quedar `spring-boot-starter-undertow`,
     `io.undertow:*` ni `undertowVersion`; usar default embebido
     Tomcat para MVC/Spring WS o Netty para WebFlux. **No quitar Netty en
-    WebFlux SB3:** en proyectos Spring Boot 3.5.x WebFlux
-    (`spring-boot-starter-webflux` presente) el doublecheck NO debe eliminar el
-    pin `io.netty:*:4.1.136.Final` del `dependencyManagement`. Es el CVE-fix Snyk
-    2026-05 aprobado (excepcion oficial v0.27.0 del Check 8.7); el autofix
-    `fix_remove_netty_pin` ya lo preserva y el doublecheck manual tampoco debe
-    tocarlo. En MVC/SOAP no se permite pin manual de `io.netty:*` de ninguna
-    version, y en WebFlux SB3 cualquier otra version (`4.1.132.Final`, etc.)
-    sigue bloqueada por el Check 8.7. **En Spring Boot 4 es al reves:** el BOM
-    trae Netty 4.2.x y cualquier pin `4.1.x` es un downgrade que se remueve; no
-    agregar los pins Snyk de SB3 (8.8/8.10 no aplican).
+    WebFlux:** el doublecheck NO debe eliminar el pin `io.netty:*:4.1.136.Final`
+    del `dependencyManagement` en proyectos WebFlux (`spring-boot-starter-webflux`
+    presente). Es el CVE-fix Snyk 2026-05 aprobado (excepcion oficial v0.27.0 del
+    Check 8.7); el autofix `fix_remove_netty_pin` ya lo preserva y el doublecheck
+    manual tampoco debe tocarlo. En MVC/SOAP no se permite pin manual de
+    `io.netty:*` de ninguna version, y en WebFlux cualquier otra version
+    (`4.1.132.Final`, etc.) sigue bloqueada por el Check 8.7.
 12. **WAS Hikari.** Si WAS usa JPA/Hikari, validar query por motor:
     SQL Server=`SELECT 1`; Oracle=`SELECT 1 from dual`.
 10. **Helm env limpio.** En `helm/dev.yml`, `helm/test.yml` y `helm/prod.yml`,

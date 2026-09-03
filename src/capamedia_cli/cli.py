@@ -58,9 +58,6 @@ from capamedia_cli.commands import (
     validate,
 )
 from capamedia_cli.commands import (
-    configurables as configurables_cmd,
-)
-from capamedia_cli.commands import (
     info as info_cmd,
 )
 from capamedia_cli.commands import (
@@ -138,8 +135,6 @@ app.add_typer(fabrics.app, name="fabrics", help="Gestion del MCP Fabrics del ban
 app.add_typer(canonical.app, name="canonical", help="Gestion del canonical de prompts/skills/agents/context")
 app.add_typer(validate.app, name="validate-hexagonal", help="Validador oficial del banco (9 checks formales)")
 app.command("doctor")(doctor.doctor)
-# v0.42.0: lookup del CSV de configurables con el encoding correcto (ISO-8859-1).
-app.command("configurables")(configurables_cmd.configurables)
 app.command("upgrade")(upgrade.upgrade_project)
 
 

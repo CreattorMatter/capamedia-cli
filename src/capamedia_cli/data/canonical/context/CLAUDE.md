@@ -33,7 +33,7 @@ Migracion de servicios legacy a Java 21 + Spring Boot + arquitectura hexagonal O
 
 **Patrones legacy IIB de configuración:**
 - `GestionarRecursoXML('carpeta', 'archivo', ...)` → archivos XML en repos `sqb-cfg-<archivo>-<carpeta>` (ej: `sqb-cfg-codigosBackend-config`, `sqb-cfg-errores-errors`) — ya commiteados en este repo.
-- `GestionarRecursoConfigurable('OmniServiceConfig', ...)` → servicios configurables cacheados en `Environment.cache.<Name>`; origen histórico: XLSX en SharePoint. **Fuente operativa:** CSV local `PromptCapaMedia/ConfigurablesBusOmni*.csv`, que se consulta con **`capamedia configurables <Nombre>`** (`--yaml` para el bloque listo). **Nunca con `grep`**: es ISO-8859-1 y en locale UTF-8 el grep sale con codigo 1 y sin salida, indistinguible de "no encontrado". Solo dejar `TBD` si el comando sale con codigo 1 (leido y ausente); con codigo 2 no se concluye nada.
+- `GestionarRecursoConfigurable('OmniServiceConfig', ...)` → servicios configurables cacheados en `Environment.cache.<Name>`; origen histórico: XLSX en SharePoint. **Fuente operativa en este repo:** `prompts/ConfigurablesBusOmniTest_Transfor(ConfigurablesBusOmniTest_Transf).csv`. Resolver allí los campos usados y poblar `application.yml` / Helm. Solo dejar `TBD` si el configurable o el campo no existe en el CSV local.
 
 **Patrones legacy WAS de configuración:**
 - Properties: `/apps/proy/OMNICANALIDAD_SERVICIOS/conf/{<servicio>,generalServices,CatalogoAplicaciones}.properties`

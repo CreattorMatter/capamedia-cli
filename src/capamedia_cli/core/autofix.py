@@ -25,18 +25,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 from capamedia_cli.core.version_policy import (
-    ACTUATOR_LIVENESS_PATH,
-    ACTUATOR_PROBES_ENV_VAR,
-    ACTUATOR_READINESS_PATH,
     SPRING_BOOT_BASELINE_VERSION,
-    SPRING_BOOT_LEGACY_BASELINE_VERSION,
     is_version_lower,
-    lib_event_logs_version,
-    lib_trace_logger_coord,
-    spring_boot_target_version,
 )
 
 # -- Constantes -------------------------------------------------------------
@@ -787,16 +778,7 @@ _SPRING_BOOT_PLUGIN_DECL_RE = re.compile(
 
 
 def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixResult:
-    """8.1 - Sube el plugin Spring Boot al minimo de SU linea mayor.
-
-    Politica 2026-09 (nunca bajar, subir solo si hace falta):
-      - `3.5.x < 3.5.15` -> `3.5.15` (linea SB3, proyectos existentes).
-      - `4.x < 4.1.1`    -> `4.1.1` (baseline SB4).
-      - Igual o mayor al minimo de su linea -> se conserva tal cual (incluida
-        cualquier version mas alta que emita el MCP Fabrics).
-    El salto 3.x -> 4.x NO se automatiza: cambia artifactIds
-    (`lib-trace-logger-sb4`) y librerias (event-logs 2.0.0, lib-bnc 3.0.0), lo
-    decide el migrador (proyecto nuevo) o un PR de librerias (existente).
+    """8.1 - Actualiza el plugin Spring Boot cuando la version literal es vieja.
 
     Tambien actualiza `spring_boot_version` en `migration-context.json` para
     mantener consistencia entre el build y el contexto declarado del servicio
@@ -804,7 +786,6 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
     """
     modified: list[Path] = []
     before_versions: list[str] = []
-    after_versions: set[str] = set()
 
     gradle_files = [
         f
@@ -822,15 +803,13 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
         def _replace(match: re.Match[str], rel_path: Path = rel_gradle) -> str:
             nonlocal replacements
             current = match.group("version")
-            target = spring_boot_target_version(current)
-            if target is None:
+            if not is_version_lower(current, SPRING_BOOT_BASELINE_VERSION):
                 return match.group(0)
             replacements += 1
             before_versions.append(f"{rel_path}={current}")
-            after_versions.add(target)
             return (
                 f"{match.group('prefix')}{match.group('quote')}"
-                f"{target}{match.group('quote')}"
+                f"{SPRING_BOOT_BASELINE_VERSION}{match.group('quote')}"
             )
 
         new_text = _SPRING_BOOT_PLUGIN_DECL_RE.sub(_replace, text)
@@ -852,17 +831,10 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
         )
         if ctx_match:
             current = ctx_match.group("version").strip()
-            # El contexto sigue al build.gradle: si el build quedo en una version
-            # concreta, el contexto se alinea a esa; si no, sube dentro de su linea.
-            ctx_target = (
-                max(after_versions, key=lambda v: tuple(int(x) for x in re.findall(r"\d+", v)))
-                if after_versions
-                else spring_boot_target_version(current)
-            )
-            if current and ctx_target and is_version_lower(current, ctx_target):
+            if current and is_version_lower(current, SPRING_BOOT_BASELINE_VERSION):
                 new_ctx = (
                     ctx_text[: ctx_match.start("version")]
-                    + ctx_target
+                    + SPRING_BOOT_BASELINE_VERSION
                     + ctx_text[ctx_match.end("version") :]
                 )
                 _write(ctx_file, new_ctx)
@@ -870,24 +842,18 @@ def fix_spring_boot_plugin_version(root: Path, violation: Violation) -> AutofixR
                 before_versions.append(
                     f"migration-context.json:spring_boot_version={current}"
                 )
-                after_versions.add(ctx_target)
 
     if not modified:
         return AutofixResult(
             applied=False,
-            notes=(
-                "org.springframework.boot ya cumple el minimo de su linea "
-                f"(SB3 >= {SPRING_BOOT_LEGACY_BASELINE_VERSION}, SB4 >= "
-                f"{SPRING_BOOT_BASELINE_VERSION}); nunca se baja una version"
-            ),
+            notes="no se encontro version literal vieja de org.springframework.boot",
         )
-    after = ", ".join(sorted(after_versions)) or SPRING_BOOT_BASELINE_VERSION
     return AutofixResult(
         applied=True,
         files_modified=modified,
         before=", ".join(before_versions),
-        after=f"org.springframework.boot={after}",
-        notes=f"Spring Boot subido a {after} (minimo de su linea; nunca se baja)",
+        after=f"org.springframework.boot={SPRING_BOOT_BASELINE_VERSION}",
+        notes=f"Spring Boot actualizado a {SPRING_BOOT_BASELINE_VERSION}",
     )
 
 
@@ -974,140 +940,23 @@ def fix_trace_logger_application(root: Path, violation: Violation) -> AutofixRes
     )
 
 
-# Item existente de la lista de env vars (`- name: "CCC_X"`). Es el anclaje mas
-# confiable para insertar: alcanza con copiar su indentacion y queda como
-# hermano, sin tener que adivinar la forma del chart.
-_HELM_ENV_ITEM_RE = re.compile(
-    r"""^(?P<indent>[ \t]*)-[ \t]+name[ \t]*:[ \t]*['"]?(?P<var>[A-Za-z_][\w.-]*)""",
-)
-# Claves que contienen una lista de env vars. `variables:` NO esta: en los charts
-# del MCP es un MAPPING (`variables.own.config`), e insertar un item de lista
-# ahi rompe el YAML (bug real en WSSeguridad0069, 2026-09-03: los 3 helm
-# quedaron con ParserError y el Check 7.8 igual daba PASS).
-_HELM_ENV_CONTAINER_RE = re.compile(r"^(?P<indent>[ \t]*)(config|environment|env)[ \t]*:[ \t]*$")
-
-
-def _next_content_line(lines: list[str], start: int) -> str | None:
-    for line in lines[start:]:
-        if line.strip() and not line.lstrip().startswith("#"):
-            return line
-    return None
-
-
-def _helm_env_insert_point(lines: list[str]) -> tuple[int, str, str] | None:
-    """(indice donde insertar, indent del `-`, indent del `value:`).
-
-    Estrategia por orden de confiabilidad:
-      1. Como hermano del PRIMER item `- name:` existente (todo chart del banco
-         trae al menos `JAVA_OPTIONS`), copiando su indentacion exacta.
-      2. Bajo una clave contenedora (`config:`/`environment:`/`env:`) cuyo
-         contenido siguiente sea una lista o este vacio.
-    Devuelve None si el chart no tiene estructura de env vars reconocible.
-    """
-    for i, line in enumerate(lines):
-        m = _HELM_ENV_ITEM_RE.match(line)
-        if not m:
-            continue
-        item_indent = m.group("indent")
-        value_indent = item_indent + "  "
-        # Copiar la indentacion real del `value:` hermano si esta disponible.
-        for sibling in lines[i + 1 : i + 4]:
-            vm = re.match(r"^(?P<indent>[ \t]+)value[ \t]*:", sibling)
-            if vm:
-                value_indent = vm.group("indent")
-                break
-        return i, item_indent, value_indent
-
-    for i, line in enumerate(lines):
-        m = _HELM_ENV_CONTAINER_RE.match(line)
-        if not m:
-            continue
-        following = _next_content_line(lines, i + 1)
-        # Solo si lo que sigue es una lista (o la clave esta vacia): si es un
-        # mapping (`own:`), insertar un `- item` ahi produce YAML invalido.
-        if following is not None and not following.lstrip().startswith("-"):
-            deeper = len(following) - len(following.lstrip()) > len(m.group("indent"))
-            if deeper:
-                continue
-        item_indent = m.group("indent") + "  "
-        return i + 1, item_indent, item_indent + "  "
-    return None
-
-
-def _misplaced_helm_env_pairs(lines: list[str]) -> list[tuple[int, int, str, str]]:
-    """Items `- name:`/`value:` que son hermanos de una clave de mapping.
-
-    Devuelve `[(inicio, fin_exclusivo, var, valor)]`. Una secuencia mezclada
-    dentro de un mapping es YAML invalido: es la firma exacta del bug del
-    injector viejo, que insertaba `- name: ...` bajo `variables:` cuando ahi
-    vive el mapping `own:`.
-    """
-    found: list[tuple[int, int, str, str]] = []
-    for i, line in enumerate(lines):
-        m = _HELM_ENV_ITEM_RE.match(line)
-        if not m:
-            continue
-        indent = len(m.group("indent"))
-        end = i + 1
-        value = ""
-        while end < len(lines):
-            candidate = lines[end]
-            if not candidate.strip():
-                break
-            if len(candidate) - len(candidate.lstrip()) <= indent:
-                break
-            vm = re.match(r"^[ \t]*value[ \t]*:[ \t]*['\"]?(?P<value>[^'\"#]*)", candidate)
-            if vm:
-                value = vm.group("value").strip()
-            end += 1
-        following = _next_content_line(lines, end)
-        if following is None:
-            continue
-        same_level = len(following) - len(following.lstrip()) == indent
-        is_mapping_key = bool(re.match(r"^[ \t]*[\w.-]+[ \t]*:", following))
-        if same_level and is_mapping_key:
-            found.append((i, end, m.group("var"), value))
-    return found
-
-
-def repair_helm_env_structure(text: str) -> tuple[str, dict[str, str]]:
-    """Quita los env vars mal ubicados de un helm que NO parsea.
-
-    Devuelve `(texto_limpio, {var: valor})` para que el llamador los re-inserte
-    en la lista correcta. Conservador a proposito: si el chart parsea bien no
-    toca nada, asi que no puede danar un chart sano.
-    """
-    try:
-        yaml.safe_load(text)
-        return text, {}
-    except yaml.YAMLError:
-        pass
-    lines = text.splitlines(keepends=True)
-    misplaced = _misplaced_helm_env_pairs([line.rstrip("\n") for line in lines])
-    if not misplaced:
-        return text, {}
-    removed: dict[str, str] = {}
-    for start, end, var, value in reversed(misplaced):
-        removed[var] = value
-        del lines[start:end]
-    return "".join(lines), dict(reversed(list(removed.items())))
-
-
 def _inject_helm_env_vars(text: str, missing: dict[str, str]) -> str:
     """Inserta pares `- name: <var>` / `value: <val>` en la lista de env vars del
-    helm, como hermanos de los items que ya existen (ver
-    `_helm_env_insert_point`). Si el chart no tiene ninguna estructura de env
-    vars, crea un bloque `environment:` al final. Solo AGREGA: para corregir un
-    valor existente usar `_set_helm_env_value`."""
+    helm. Si existe `environment:`/`variables:`, los agrega como primeros items
+    (el orden en YAML no importa). Si no existe, crea el bloque `environment:` al
+    final. Solo AGREGA: no reescribe valores existentes."""
     lines = text.splitlines()
-    point = _helm_env_insert_point(lines)
-    if point is not None:
-        index, item_indent, value_indent = point
+    for i, line in enumerate(lines):
+        m = re.match(r"^([ \t]*)(environment|variables)[ \t]*:[ \t]*$", line)
+        if not m:
+            continue
+        item_indent = m.group(1) + "  "
+        value_indent = item_indent + "  "
         block: list[str] = []
         for var, val in missing.items():
             block.append(f'{item_indent}- name: "{var}"')
             block.append(f'{value_indent}value: "{val}"')
-        new_lines = lines[:index] + block + lines[index:]
+        new_lines = lines[: i + 1] + block + lines[i + 1 :]
         result = "\n".join(new_lines)
         return result + "\n" if text.endswith("\n") else result
     block = ["environment:"]
@@ -1119,34 +968,6 @@ def _inject_helm_env_vars(text: str, missing: dict[str, str]) -> str:
         return suffix + "\n"
     sep = "" if text.endswith("\n") else "\n"
     return text + sep + suffix + "\n"
-
-
-def _set_helm_env_value(text: str, var: str, value: str) -> str:
-    """Reescribe el `value:` de una env var ya declarada, preservando indentacion.
-
-    Necesario porque los 7 flags del trace-logger tienen UN solo valor valido por
-    ambiente y `CCC_PAYLOAD_MODE=NONE` es requisito de seguridad (no loguear
-    payload/PII). Dejar un `FULL` heredado del scaffold significa payloads con
-    PII en los logs, asi que el autofix lo corrige en vez de solo reportarlo.
-    """
-    lines = text.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if not re.match(
-            rf"^[ \t]*(?:-[ \t]+)?name[ \t]*:[ \t]*['\"]?{re.escape(var)}['\"]?[ \t]*(#.*)?$",
-            line.rstrip("\n"),
-        ):
-            continue
-        for j in range(i + 1, min(len(lines), i + 5)):
-            candidate = lines[j]
-            vm = re.match(r"^(?P<prefix>[ \t]*value[ \t]*:[ \t]*)(?P<quote>['\"]?)", candidate)
-            if vm:
-                newline = "\n" if candidate.endswith("\n") else ""
-                quote = vm.group("quote") or '"'
-                lines[j] = f"{vm.group('prefix')}{quote}{value}{quote}{newline}"
-                return "".join(lines)
-            if re.match(r"^[ \t]*[-\w].*?:", candidate):
-                break
-    return text
 
 
 def fix_trace_logger_helm(root: Path, violation: Violation) -> AutofixResult:
@@ -1187,422 +1008,29 @@ def fix_trace_logger_helm(root: Path, violation: Violation) -> AutofixResult:
             continue
         expected = _trace_logger_expected(env)
         text = _read(f)
-        # Auto-sanacion: si una version vieja del injector dejo env vars en un
-        # nivel invalido (chart que no parsea), se sacan de ahi y se re-insertan
-        # abajo en la lista correcta.
-        text, relocated = repair_helm_env_structure(text)
-        current = {var: _helm_env_var_value(text, var) for var in TRACE_LOGGER_ENV_VARS}
-        missing = {var: expected[var] for var, value in current.items() if value is None}
-        # Valores presentes pero distintos del unico valido para el ambiente.
-        # Se corrigen (antes solo se reportaban): `CCC_PAYLOAD_MODE=FULL` que
-        # trae el scaffold deja payloads con PII en los logs.
-        wrong = {
+        missing = {
             var: expected[var]
-            for var, value in current.items()
-            if value is not None and value != expected[var]
+            for var in TRACE_LOGGER_ENV_VARS
+            if _helm_env_var_value(text, var) is None
         }
-        if not missing and not wrong and not relocated:
+        if not missing:
             continue
-        new_text = _inject_helm_env_vars(text, missing) if missing else text
-        for var, value in wrong.items():
-            new_text = _set_helm_env_value(new_text, var, value)
+        new_text = _inject_helm_env_vars(text, missing)
         if new_text == text:
             continue
         _write(f, new_text)
         modified.append(f)
-        detail = []
-        if relocated:
-            detail.append("reubicadas " + ", ".join(sorted(relocated)) + " (YAML invalido)")
-        if missing:
-            detail.append(f"+{len(missing)} env vars")
-        if wrong:
-            detail.append(
-                "corregidas " + ", ".join(f"{v}={wrong[v]}" for v in sorted(wrong))
-            )
-        changes.append(f"{name}: " + "; ".join(detail))
+        changes.append(f"{name}: +{len(missing)} env vars")
     if not modified:
         return AutofixResult(
             applied=False,
-            notes="env vars trace-logger ya correctas o sin helm por-entorno",
+            notes="env vars trace-logger ya presentes o sin helm por-entorno",
         )
     return AutofixResult(
         applied=True,
         files_modified=modified,
         after="; ".join(changes),
-        notes="env vars trace-logger inyectadas/corregidas en helm",
-    )
-
-
-# -- Spring Boot 4: probes, trace-logger-sb4, event-logs, sondas fuera del
-#    trace-logger (doc BPTPSRE-SpringBoot4-probes-actuator-logs, 2026-09) --------
-
-_ENV_HELM_NAMES: tuple[str, ...] = (
-    "dev.yml",
-    "test.yml",
-    "prod.yml",
-    "values-dev.yml",
-    "values-test.yml",
-    "values-prod.yml",
-    "values-dev.yaml",
-    "values-test.yaml",
-    "values-prod.yaml",
-)
-
-
-def _env_helm_paths(root: Path) -> list[Path]:
-    helm_dir = root / "helm"
-    if not helm_dir.exists():
-        return []
-    return [helm_dir / n for n in _ENV_HELM_NAMES if (helm_dir / n).exists()]
-
-
-def _detected_spring_boot_version_for_fix(root: Path) -> str:
-    from capamedia_cli.core.checklist_rules import _detected_spring_boot_version
-
-    return _detected_spring_boot_version(root)
-
-
-def _project_gradle_files(root: Path) -> list[Path]:
-    return [
-        f
-        for f in list(root.rglob("build.gradle")) + list(root.rglob("build.gradle.kts"))
-        if "build" not in f.parts and "test" not in [p.lower() for p in f.parts]
-    ]
-
-
-# `/actuator/health` NO seguido de `/` ni letra (el agregado): es lo que hay que
-# cambiar dentro de cada bloque de probe. Cubre `curl -s http://...:8080/actuator/health |`,
-# `.../actuator/health"`, `path: /actuator/health` y `.../actuator/health )`.
-_AGGREGATE_HEALTH_RE = re.compile(r"/actuator/health(?![/A-Za-z])")
-
-
-def _rewrite_probe_block(text: str, probe: str, expected_path: str) -> tuple[str, int]:
-    """Reemplaza `/actuator/health` por `expected_path` SOLO dentro del bloque
-    `<probe>:`. Devuelve (texto, reemplazos). No toca initialDelaySeconds & co."""
-    lines = text.splitlines(keepends=True)
-    replacements = 0
-    i = 0
-    while i < len(lines):
-        m = re.match(rf"^(?P<indent>[ \t]*){probe}[ \t]*:[ \t]*(#.*)?\r?\n?$", lines[i])
-        if not m:
-            i += 1
-            continue
-        indent = len(m.group("indent"))
-        j = i + 1
-        while j < len(lines):
-            line = lines[j]
-            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
-                break
-            new_line, n = _AGGREGATE_HEALTH_RE.subn(expected_path, line)
-            if n:
-                lines[j] = new_line
-                replacements += n
-            j += 1
-        i = j
-    return "".join(lines), replacements
-
-
-def fix_helm_probe_paths(root: Path, violation: Violation) -> AutofixResult:
-    """7.10 - livenessProbe -> /actuator/health/liveness y readinessProbe ->
-    /actuator/health/readiness en helm/{dev,test,prod}.yml. Solo reescribe el
-    path del agregado `/actuator/health` dentro de cada bloque de probe;
-    conserva la forma de shell (grep -q o cut) y los timings. Idempotente."""
-    modified: list[Path] = []
-    changes: list[str] = []
-    for f in _env_helm_paths(root):
-        text = _read(f)
-        new_text, n_live = _rewrite_probe_block(text, "livenessProbe", ACTUATOR_LIVENESS_PATH)
-        new_text, n_ready = _rewrite_probe_block(new_text, "readinessProbe", ACTUATOR_READINESS_PATH)
-        if new_text != text:
-            _write(f, new_text)
-            modified.append(f)
-            changes.append(f"{f.name}: liveness x{n_live}, readiness x{n_ready}")
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes="probes ya apuntan a liveness/readiness o sin helm por-entorno",
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after="; ".join(changes),
-        notes=(
-            f"probes Helm reescritos a {ACTUATOR_LIVENESS_PATH} / {ACTUATOR_READINESS_PATH} "
-            f"(Spring Boot 4; requiere {ACTUATOR_PROBES_ENV_VAR}=true)"
-        ),
-    )
-
-
-def fix_helm_probes_enabled_env(root: Path, violation: Violation) -> AutofixResult:
-    """7.11 - Inyecta `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` en cada helm
-    por-entorno donde falte. Solo agrega; un valor distinto existente queda
-    para revision (no se pisa)."""
-    from capamedia_cli.core.checklist_rules import _helm_env_value_any
-
-    modified: list[Path] = []
-    for f in _env_helm_paths(root):
-        text = _read(f)
-        text, relocated = repair_helm_env_structure(text)
-        pending = dict(relocated)
-        if _helm_env_value_any(text, ACTUATOR_PROBES_ENV_VAR) is None:
-            pending[ACTUATOR_PROBES_ENV_VAR] = "true"
-        if not pending:
-            continue
-        new_text = _inject_helm_env_vars(text, pending)
-        if new_text != text:
-            _write(f, new_text)
-            modified.append(f)
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes=(
-                f"{ACTUATOR_PROBES_ENV_VAR} ya declarada (o sin helm por-entorno); "
-                "valores distintos de true se revisan a mano"
-            ),
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after=", ".join(f.name for f in modified),
-        notes=f"{ACTUATOR_PROBES_ENV_VAR}=true inyectada en helm",
-    )
-
-
-_LIB_TRACE_LOGGER_DECL_FIX_RE = re.compile(
-    r"(?P<prefix>com\.pichincha\.common:lib-trace-logger)(?P<sfx>-sb4)?:(?P<ver>[0-9][\w.\-]*)"
-)
-
-
-def fix_trace_logger_sb4_artifact(root: Path, violation: Violation) -> AutofixResult:
-    """8.13 - Alinea la coordenada de lib-trace-logger al major de Spring Boot.
-
-    SB4: `lib-trace-logger:<v>` -> `lib-trace-logger-sb4:1.2.0`; `-sb4:<v<1.2.0>`
-    -> `1.2.0`. SB3: `lib-trace-logger:<v<1.4.0>` -> `1.4.0`. Nunca baja una
-    version mayor y NO revierte `-sb4` en SB3 (eso es senal de que el proyecto
-    debe ir a SB4: revision manual). Solo reescribe declaraciones existentes.
-    """
-    sb_version = _detected_spring_boot_version_for_fix(root)
-    coord, target_ver = lib_trace_logger_coord(sb_version)
-    target_sfx = "-sb4" if coord.endswith("-sb4") else ""
-    modified: list[Path] = []
-    changes: list[str] = []
-    for gf in _project_gradle_files(root):
-        text = _read(gf)
-        if "lib-trace-logger" not in text:
-            continue
-
-        def _sub(m: re.Match[str], name: str = gf.name) -> str:
-            sfx = m.group("sfx") or ""
-            ver = m.group("ver")
-            if sfx == target_sfx:
-                if is_version_lower(ver, target_ver):
-                    changes.append(f"{name}: {m.group(0)} -> {coord}:{target_ver}")
-                    return f"{coord}:{target_ver}"
-                return m.group(0)
-            if target_sfx == "-sb4":
-                changes.append(f"{name}: {m.group(0)} -> {coord}:{target_ver}")
-                return f"{coord}:{target_ver}"
-            return m.group(0)  # SB3 con -sb4: no revertir (revision manual)
-
-        new_text = _LIB_TRACE_LOGGER_DECL_FIX_RE.sub(_sub, text)
-        if new_text != text:
-            _write(gf, new_text)
-            modified.append(gf)
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes=(
-                f"lib-trace-logger ya en {coord}:{target_ver} o superior para Spring Boot "
-                f"{sb_version or 'baseline'} (un -sb4 en SB3 se revisa a mano)"
-            ),
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after="; ".join(changes),
-        notes=f"lib-trace-logger alineado a Spring Boot {sb_version or 'baseline'}",
-    )
-
-
-_LIB_EVENT_LOGS_DECL_FIX_RE = re.compile(
-    r"(?P<prefix>com\.pichincha\.common:lib-event-logs-(?:webflux|mvc)):(?P<ver>[0-9][\w.\-]*)"
-)
-
-
-def fix_event_logs_sb4_version(root: Path, violation: Violation) -> AutofixResult:
-    """8.14 - Sube lib-event-logs-* a la version minima del major de Spring Boot
-    (2.0.0 en SB4). Nunca baja. Solo reescribe declaraciones existentes."""
-    sb_version = _detected_spring_boot_version_for_fix(root)
-    target_ver = lib_event_logs_version(sb_version)
-    modified: list[Path] = []
-    changes: list[str] = []
-    for gf in _project_gradle_files(root):
-        text = _read(gf)
-        if "lib-event-logs" not in text:
-            continue
-
-        def _sub(m: re.Match[str], name: str = gf.name) -> str:
-            if is_version_lower(m.group("ver"), target_ver):
-                changes.append(f"{name}: {m.group(0)} -> {m.group('prefix')}:{target_ver}")
-                return f"{m.group('prefix')}:{target_ver}"
-            return m.group(0)
-
-        new_text = _LIB_EVENT_LOGS_DECL_FIX_RE.sub(_sub, text)
-        if new_text != text:
-            _write(gf, new_text)
-            modified.append(gf)
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes=(
-                f"lib-event-logs ya >= {target_ver} para Spring Boot "
-                f"{sb_version or 'baseline'} (o no declarada)"
-            ),
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after="; ".join(changes),
-        notes=f"lib-event-logs subida a {target_ver}",
-    )
-
-
-_LOGGING_BLOCK_RE = re.compile(
-    r"^(?P<lindent>[ \t]*)logging[ \t]*:[ \t]*\n(?P<body>(?:(?P=lindent)[ \t]+.*\n?)*)",
-    re.MULTILINE,
-)
-
-
-def fix_event_logs_excluded_paths(root: Path, violation: Violation) -> AutofixResult:
-    """17.8 - Agrega `excluded-paths: /actuator/**,/health,/metrics,/prometheus`
-    bajo `logging.event` en application.yml si falta. Si ya existe (aunque sin
-    /actuator/**) no se toca: queda para revision humana. Idempotente."""
-    from capamedia_cli.core.checklist_rules import ORQ_EVENT_LOGS_EXCLUDED_PATHS
-
-    modified: list[Path] = []
-    for rel in ("src/main/resources/application.yml", "src/main/resources/application.yaml"):
-        f = root / rel
-        if not f.exists():
-            continue
-        text = _read(f)
-        if re.search(r"^[ \t]*excluded-paths[ \t]*:", text, re.MULTILINE):
-            continue
-        m = _LOGGING_BLOCK_RE.search(text)
-        if not m:
-            continue
-        em = re.search(r"^(?P<eindent>[ \t]+)event[ \t]*:[ \t]*(#.*)?$", m.group("body"), re.MULTILINE)
-        if not em:
-            continue
-        child_indent = em.group("eindent") + "  "
-        insert_at = m.start("body") + em.end()
-        nl = text.find("\n", insert_at)
-        line = f"{child_indent}excluded-paths: {ORQ_EVENT_LOGS_EXCLUDED_PATHS}\n"
-        new_text = text + "\n" + line if nl == -1 else text[: nl + 1] + line + text[nl + 1 :]
-        _write(f, new_text)
-        modified.append(f)
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes=(
-                "excluded-paths ya declarado (se revisa a mano si no incluye /actuator/**) "
-                "o falta el bloque logging.event (Check 17.2)"
-            ),
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after=f"logging.event.excluded-paths: {ORQ_EVENT_LOGS_EXCLUDED_PATHS}",
-        notes="excluded-paths inyectado bajo logging.event",
-    )
-
-
-def _base_package(root: Path) -> str:
-    """Paquete base del proyecto: el de la clase @SpringBootApplication; si no,
-    el primer `package` bajo src/main/java recortado a la raiz hexagonal;
-    default com.pichincha.sp."""
-    src_java = root / "src" / "main" / "java"
-    fallback = ""
-    for f in _iter_java_files(src_java):
-        text = _read(f)
-        m = re.search(r"^package\s+([\w.]+)\s*;", text, re.MULTILINE)
-        if not m:
-            continue
-        if "@SpringBootApplication" in text:
-            return m.group(1)
-        if not fallback:
-            pkg = m.group(1)
-            for layer in (".infrastructure", ".application", ".domain"):
-                if layer in pkg:
-                    pkg = pkg.split(layer)[0]
-                    break
-            fallback = pkg
-    return fallback or "com.pichincha.sp"
-
-
-def fix_add_trace_logger_management_config(root: Path, violation: Violation) -> AutofixResult:
-    """2.10 / 2.11 - Crea `infrastructure/config/TraceLoggerManagementPathConfig.java`
-    (variante MVC o WebFlux segun `spring-boot-starter-webflux`) y su test si
-    no existen. No sobreescribe archivos existentes (si la clase esta pero con
-    la variante equivocada, queda para revision: el Check 2.10 lo reporta)."""
-    from capamedia_cli.core.checklist_rules import (
-        TRACE_LOGGER_MGMT_CONFIG_CLASS,
-        _find_java_class_file,
-        _project_uses_webflux,
-        _root_gradle_files,
-    )
-    from capamedia_cli.core.sb4_templates import (
-        MGMT_CONFIG_MVC,
-        MGMT_CONFIG_TEST_MVC,
-        MGMT_CONFIG_TEST_WEBFLUX,
-        MGMT_CONFIG_WEBFLUX,
-    )
-
-    uses_webflux = _project_uses_webflux(_root_gradle_files(root))
-    base_pkg = _base_package(root)
-    pkg_path = Path(*base_pkg.split("."))
-    src_java = root / "src" / "main" / "java"
-    test_java = root / "src" / "test" / "java"
-    cfg_dir = Path("infrastructure") / "config"
-
-    modified: list[Path] = []
-    existing = (
-        _find_java_class_file(src_java, TRACE_LOGGER_MGMT_CONFIG_CLASS) if src_java.exists() else None
-    )
-    if existing is None:
-        target = src_java / pkg_path / cfg_dir / f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}.java"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        template = MGMT_CONFIG_WEBFLUX if uses_webflux else MGMT_CONFIG_MVC
-        _write(target, template.replace("__PKG__", base_pkg))
-        modified.append(target)
-
-    existing_test = (
-        _find_java_class_file(test_java, f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}Test")
-        if test_java.exists()
-        else None
-    )
-    if existing_test is None:
-        target_test = test_java / pkg_path / cfg_dir / f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}Test.java"
-        target_test.parent.mkdir(parents=True, exist_ok=True)
-        template = MGMT_CONFIG_TEST_WEBFLUX if uses_webflux else MGMT_CONFIG_TEST_MVC
-        _write(target_test, template.replace("__PKG__", base_pkg))
-        modified.append(target_test)
-
-    if not modified:
-        return AutofixResult(
-            applied=False,
-            notes=(
-                f"{TRACE_LOGGER_MGMT_CONFIG_CLASS} y su test ya existen "
-                "(variante equivocada se revisa a mano)"
-            ),
-        )
-    return AutofixResult(
-        applied=True,
-        files_modified=modified,
-        after=", ".join(str(p.relative_to(root)).replace("\\", "/") for p in modified),
-        notes=(
-            f"{TRACE_LOGGER_MGMT_CONFIG_CLASS} ({'WebFlux' if uses_webflux else 'MVC'}) creado en "
-            f"{base_pkg}.infrastructure.config (Regla 9e.3)"
-        ),
+        notes="env vars trace-logger inyectadas en helm",
     )
 
 
@@ -1615,12 +1043,8 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "0.2e": [fix_bancs_autoconfigure_exclude_adapter],
     "1.3": [fix_abstract_to_interface],
     "2.5": [fix_slf4j_to_bplogger, fix_lombok_slf4j_removal],
-    "2.10": [fix_add_trace_logger_management_config],
-    "2.11": [fix_add_trace_logger_management_config],
     "5.1": [fix_bancs_exception_wrapping],
     "8.1": [fix_spring_boot_plugin_version],
-    "8.13": [fix_trace_logger_sb4_artifact],
-    "8.14": [fix_event_logs_sb4_version],
     "15.1": [fix_empty_mensajeNegocio_setter],
     "15.2": [fix_recurso_format],
     "15.3": [fix_componente_from_catalog],
@@ -1628,9 +1052,6 @@ AUTOFIX_REGISTRY: dict[str, list[AutofixFn]] = {
     "16.1": [fix_add_test_annotation],
     "7.7": [fix_trace_logger_application],
     "7.8": [fix_trace_logger_helm],
-    "7.10": [fix_helm_probe_paths],
-    "7.11": [fix_helm_probes_enabled_env],
-    "17.8": [fix_event_logs_excluded_paths],
 }
 
 

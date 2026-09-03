@@ -12,10 +12,7 @@ summary: Log transaccional (lib-event-logs) — EXCLUSIVO de orquestadores (ORQ)
 - `prompts/documentacion/BPTPSRE-Librería Log Transaccional-220426-202920.pdf` (librería, dependencias, config)
 
 **Característica oficial de la librería** (PDF 2, sección "Características"):
-- Agnóstica a la versión de Spring Boot (no la hereda — convive con cualquier
-  versión compatible). Dos líneas: **`2.0.0` para Spring Boot 4** (baseline
-  vigente `4.1.1`, correo BPTPSRE 2026-08) y `1.0.x` para proyectos SB3
-  existentes (`3.5.15+`). Check 8.14 exige `>= 2.0.0` cuando el plugin es `>= 4`.
+- Agnóstica a **Spring Boot 3.5.15** (no la hereda — convive con cualquier versión compatible).
 - Compilada en **Java 21**.
 - Existen dos variantes de artefacto (`-webflux` y `-mvc`), pero en el marco
   de esta migración **solo aplica la variante `-webflux`** porque por regla del
@@ -92,19 +89,15 @@ final ni conocer `WSTecnicos0038`. Solo necesita:
 programa de migración no hay ORQs MVC — todos van WebFlux por regla del banco):
 
 ```gradle
-// Spring Boot 4 (baseline vigente 4.1.1) — Check 8.14
-implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'
-// Proyectos SB3 existentes (3.5.15+)
 implementation 'com.pichincha.common:lib-event-logs-webflux:1.0.0'
 ```
 
 **Prerrequisitos del proyecto** (PDF 2, sección "Características" / "Prerequisitos"):
 - **Lib compilada contra Spring Boot `3.5.12` y agnóstica a esa versión**
   (cita literal PDF 2026-05-26: _"Librería agnóstica a Spring boot 3.5.12"_).
-  La línea `1.0.x` es compatible con cualquier 3.5.x
-  (`SPRING_BOOT_LEGACY_BASELINE_VERSION = 3.5.15` en `core/version_policy.py`).
-  Con el baseline **Spring Boot `4.1.1`** (`SPRING_BOOT_BASELINE_VERSION`) va
-  **`2.0.0`** (`LIB_EVENT_LOGS_VERSION`). Nunca bajar la versión que trae el MCP.
+  El baseline del proyecto sigue siendo **`3.5.15`**
+  (`SPRING_BOOT_BASELINE_VERSION` en `core/version_policy.py`) — la lib es
+  compatible con cualquier 3.5.x del baseline.
 - Java 21.
 
 **Nota sobre la variante MVC**: el PDF 2 documenta también
@@ -161,7 +154,7 @@ logging:
     kafka:
       topic:
         name: ${KAFKA_TOPIC_AUDITOR}    # env var sin default — apunta a CE_EVENTOS
-    excluded-paths: /actuator/**,/health,/metrics,/prometheus   # MUST (Check 17.8) — LoggingWebFilter loguea cada request; sin esto las sondas salen como TRANSACTIONAL
+    excluded-paths: /actuator/**,/health,/metrics,/prometheus
     executor:
       isDefault: false
       corePoolSize: ${THREAD_CORE_POOL_SIZE}
@@ -189,7 +182,7 @@ xml:
 | `logging.event.mode` | `EXTERNAL` | |
 | `logging.event.kafka.topic.name` | `${KAFKA_TOPIC_AUDITOR}` | |
 | `logging.event.executor.isDefault` | `false` | |
-| `logging.event.excluded-paths` | `${EXCLUDE_PATH}` | **MUST desde v0.40.0**: literal `/actuator/**,/health,/metrics,/prometheus` (Check 17.8, HIGH). `LoggingWebFilter` (event-logs 1.0.1 y 2.0.0) emite un registro por request y honra la propiedad (`"Path excluido del filtro de logging: {}"`); sin `/actuator/**` liveness/readiness/prometheus aparecen como `"type":"TRANSACTIONAL"` (hallazgo TO 2026-08-25). Autofix `fix_event_logs_excluded_paths`. |
+| `logging.event.excluded-paths` | `${EXCLUDE_PATH}` | |
 
 **Niveles de log externalizados** (referencia: orqproductos0061, commit
 `5e92bfa`): los 3 `${CCC_LOG_LEVEL_*}` se declaran en los 3 Helm
@@ -209,8 +202,6 @@ poder subir la verbosidad en runtime via ConfigMap sin rebuild. En
   tamaños de threadpool.
 - Usar `spring.kafka.*` sin `logging.event.*` — van juntos, el uno sin el otro
   no enciende la librería.
-- Omitir `logging.event.excluded-paths` con `/actuator/**` (Check 17.8, HIGH):
-  las sondas de Kubernetes se loguean como eventos transaccionales.
 - Omitir el bloque `xml.template.templates` si el ORQ invoca downstream (sin
   templates, el mensaje final queda sin `lotElastico`).
 

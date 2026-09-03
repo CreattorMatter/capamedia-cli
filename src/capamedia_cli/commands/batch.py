@@ -73,11 +73,6 @@ from capamedia_cli.core.self_correction import (
     load_failure_context,
     stash_failure_context,
 )
-from capamedia_cli.core.version_policy import (
-    MCP_MIN_VERSION,
-    SPRING_BOOT_BASELINE_VERSION,
-    SPRING_BOOT_LEGACY_BASELINE_VERSION,
-)
 
 console = Console()
 
@@ -653,11 +648,8 @@ def _build_batch_migrate_prompt(
         - Verifica que el `.gitignore` del proyecto migrado ignore artefactos
           locales CapaMedia/AI que no van a Azure DevOps: {", ".join(DEPLOYMENT_GITIGNORE_ENTRIES)}.
         - Verifica que `build.gradle` declare `id 'org.springframework.boot'
-          version '{SPRING_BOOT_BASELINE_VERSION}'` o superior (baseline SB4, MCP {MCP_MIN_VERSION}).
-          NUNCA bajes una version que haya emitido el MCP. Si hay una version
-          menor dentro de su misma linea, sube solo ese literal sin reemplazar
-          el build.gradle del MCP; un proyecto SB3 existente (>= {SPRING_BOOT_LEGACY_BASELINE_VERSION})
-          se conserva y el salto a SB4 se documenta como pendiente.
+          version '3.5.15'` o superior aprobado. Si hay una version menor,
+          actualiza solo ese literal sin reemplazar el build.gradle del MCP.
         - Verifica Gradle seguridad: no dejes spring-boot-starter-undertow,
           io.undertow:* ni undertowVersion; usar servidor embebido default
           Tomcat para MVC/Spring WS o Netty para WebFlux.

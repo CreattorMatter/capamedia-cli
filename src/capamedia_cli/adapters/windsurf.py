@@ -29,12 +29,9 @@ class WindsurfAdapter(HarnessAdapter):
         if globs:
             fm["globs"] = globs
         hint = model_hint_comment(asset)
-        raw_body, parts = (
-            self.prompt_body(asset, target_dir) if asset.asset_type == "prompt" else (asset.body, [])
-        )
-        body = f"{hint}\n\n{raw_body}" if hint else raw_body
+        body = f"{hint}\n\n{asset.body}" if hint else asset.body
         dest.write_text(serialize_frontmatter(fm, body), encoding="utf-8")
-        return [dest, *parts]
+        return [dest]
 
     def render_prompt(self, asset: CanonicalAsset, target_dir: Path) -> list[Path]:
         return self._write_rule(asset, target_dir)
@@ -49,6 +46,8 @@ class WindsurfAdapter(HarnessAdapter):
         self, assets: list[CanonicalAsset], target_dir: Path
     ) -> list[Path]:
         dest = target_dir / ".windsurfrules"
-        text, on_demand = self.context_text(assets, target_dir, "# SpecAPI APIM context")
-        dest.write_text(text, encoding="utf-8")
-        return [dest, *on_demand]
+        parts = ["# SpecAPI APIM context\n"]
+        for a in assets:
+            parts.append(f"\n## {a.title}\n\n{a.body}")
+        dest.write_text("\n".join(parts), encoding="utf-8")
+        return [dest]

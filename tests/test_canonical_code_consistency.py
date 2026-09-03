@@ -65,8 +65,7 @@ CODE_WITHOUT_DOC_BASELINE = {
 #      a implementar (ver hallazgos del review: Block 4, codigos fuera catalogo).
 DOC_WITHOUT_CHECK_BASELINE = {
     # (a) solo-doc semantico
-    # 2.6 salio del baseline en v0.40.0: ahora tiene check (logs INFO diagnosticos)
-    "1.6", "2.2", "2.7", "3.1", "3.2", "3.3", "3.4",
+    "1.6", "2.2", "2.6", "2.7", "3.1", "3.2", "3.3", "3.4",
     "5.2", "5.3", "5.4", "5.6", "6.1", "6.2", "6.3", "6.4",
     "8.3", "8.4", "8.5", "8.6",
     # nota: 0.2 y 7.5 NO van aca — tienen check via sub-checks (0.2a-g, 7.5c-f)

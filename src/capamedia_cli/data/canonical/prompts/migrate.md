@@ -40,29 +40,6 @@ Este prompt **no implementa codigo**. Es un router que:
 
 `<namespace>` es el codigo de tribu (`tnd`, `csg`, `tia`, etc.) que sale de `.capamedia/config.yaml`, `spring.application.name` o el nombre del repo/carpeta que ya genero Fabrics. Nunca asumir `tnd-`; `catalog-info.yaml` `metadata.name` queda fijo en `tpl-middleware`.
 
-## Paso 0 — Presupuesto de contexto (obligatorio)
-
-El modelo objetivo del CLI es Opus y su ventana es finita: `CLAUDE.md` se carga
-en cada sesion y en cada subagente, asi que todo lo que se lea de mas se paga
-dos veces. Reglas:
-
-1. **Los canonicals de `.capamedia/context/` se leen bajo demanda**, uno por
-   uno, cuando el bloque en curso los necesita (la tabla "Contexto bajo
-   demanda" de `CLAUDE.md` dice cuando). Nunca cargar los 20 al inicio ni
-   pegarlos en el prompt del `migrador`: pasar el **path**.
-2. **`migrate-rest-full.md` es un indice**: sus partes viven en
-   `.capamedia/prompts/migrate-rest-full/NN-*.md`. Leer las partes `inicio`
-   antes de empezar y cada parte `bloque` recien al llegar a ese bloque
-   (leer, ejecutar, pasar el GATE, seguir). `migrate-soap-full.md` es chico y
-   se lee entero.
-3. **Un subagente por bloque, no uno para toda la migracion.** Al lanzar
-   `migrador`, darle solo: el path de la parte del bloque, el path del legacy
-   que ese bloque necesita, `migration-context.json` y el resumen (5 lineas)
-   del GATE anterior. Cada bloque arranca con contexto limpio.
-4. Si un subagente muere con `Prompt is too long`, NO reintentar con el mismo
-   prompt: partir el bloque (ej. Block 4 en 4.1-4.6 / 4.7-4.11 / 4.12-4.17) y
-   relanzar.
-
 ## Paso 1 — Detectar modo (matriz MCP)
 
 Leer `bank-mcp-matrix.md`, `COMPLEXITY_<servicio>.md` y `migration-context.json` en `destino/`. La matriz manda sobre cualquier heuristica local:
@@ -96,7 +73,6 @@ Usar el sub-agente `migrador` con este contexto minimo:
 - `COMPLEXITY_<servicio>.md` — analisis previo
 - `bank-mcp-matrix.md` — fuente unica de la decision REST/WebFlux, REST/MVC, SOAP/MVC
 - `migrate-rest-full.md` **o** `migrate-soap-full.md` — el que corresponda segun Paso 1
-  (REST: pasar el path de la **parte** del bloque en curso, no el prompt entero — Paso 0)
 
 El agente ejecuta los bloques definidos en ese prompt full (no se redefinen aqui).
 
@@ -173,5 +149,3 @@ Estas pocas reglas son las que decide este router:
 3. **BANCS no se infiere por nombre, template ni "ejemplo similar".** Solo BUS/IIB con `invocaBancs=true` puede agregar `lib-bnc-api-client`, `BancsService`, `BancsClientHelper`, `bancs.webclients`, `CCC_BANCS_*` o `dependsOn: lib-bnc-api-client`. En WAS, ORQ y BUS sin BANCS, son error de migracion. (Detalle en el prompt full.)
 4. **Endpoint WAS:** en `source_type=was`, no reescribir rutas a `/IntegrationBus/soap/...`; WAS conserva su path del legacy/MCP. (Detalle en el prompt full.)
 5. **Config is not an output port.** Env/YAML/properties van por `@ConfigurationProperties` o bean de config; NUNCA crear `*ConfigOutputPort` ni adapter de infraestructura solo para leer config. (Regla operativa que afecta el ruteo de adapters; detalle en el prompt full.)
-6. **Versiones: subir si hace falta, NUNCA bajar lo que emitio el MCP.** Baseline Spring Boot `4.1.1` (todos los proyectos nuevos en SB4; el MCP `v20260827161016` ya lo emite). Si el scaffold trae una version igual o mayor del plugin o de las libs del banco, se conserva tal cual. Si un MCP viejo scaffoldeo `3.5.x`, el migrador sube a `4.1.1` en el Block 1 junto con el set SB4 (`lib-trace-logger-sb4:1.2.0`, `lib-event-logs-webflux:2.0.0` en ORQ, `lib-bnc-api-client:3.0.0` solo BANCS). Un proyecto SB3 ya construido se deja en `3.5.15+` y se reporta el upgrade como pendiente. `capamedia fabrics generate` avisa (`WARN`) cuando el build del MCP es anterior al minimo. (Detalle: `bank-official-rules.md` Regla 8.5 y Block 1 del prompt full.)
-7. **Sondas y logs (TO 2026-08-25).** Probes Helm a `/actuator/health/liveness` y `/readiness`; `TraceLoggerManagementPathConfig` obligatoria (variante segun stack); ORQ con `logging.event.excluded-paths: /actuator/**,...`; logs INFO sin correlador van a DEBUG; README con un cURL por operacion antes de asignar al TO. (Detalle en el prompt full y Regla 9e.)

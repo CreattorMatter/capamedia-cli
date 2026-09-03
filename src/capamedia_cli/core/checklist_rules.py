@@ -16,25 +16,16 @@ from pathlib import Path
 
 import yaml
 
-from capamedia_cli.core.ola_policy import LIB_BNC_API_CLIENT_SB4
 from capamedia_cli.core.version_policy import (
-    ACTUATOR_LIVENESS_PATH,
-    ACTUATOR_PROBES_ENV_VAR,
-    ACTUATOR_READINESS_PATH,
-    MCP_MIN_VERSION,
     NETTY_CORE_MODULES,
     NETTY_WEBFLUX_ALLOWED_VERSION,
     PEER_REVIEW_PLUGIN_ID,
     PEER_REVIEW_PLUGIN_VERSION,
     SPRING_BOOT_BASELINE_VERSION,
-    SPRING_BOOT_LEGACY_BASELINE_VERSION,
     SPRING_FRAMEWORK_BOM_COORD,
     SPRING_FRAMEWORK_BOM_VERSION,
     WEBFLUX_SECURITY_DEPENDENCY_PINS,
-    is_spring_boot_4,
     is_version_lower,
-    lib_event_logs_version,
-    lib_trace_logger_coord,
 )
 
 # -- Result dataclass -------------------------------------------------------
@@ -665,34 +656,11 @@ def _application_trace_logger_issues(app_yml_text: str) -> list[str]:
     return issues
 
 
-def _helm_yaml_parse_error(path: Path) -> str | None:
-    """Mensaje de error si el helm no parsea como YAML, o None si esta bien.
-
-    Existe por el bug de v0.34.0-v0.41.0 (detectado en WSSeguridad0069,
-    2026-09-03): el autofix de env vars insertaba un item de lista bajo
-    `variables:`, que en los charts del MCP es un mapping (`variables.own.config`).
-    Los 3 helm quedaban con `ParserError` — Helm no los renderiza — y como el
-    resto de los checks lee valores con regex y no con el parser, el Check 7.8
-    seguia dando PASS. Un chart roto nunca mas puede pasar en silencio.
-    """
-    try:
-        yaml.safe_load(_read_or_empty(path))
-    except yaml.YAMLError as exc:
-        return str(exc).splitlines()[0][:160]
-    return None
-
-
 def _helm_trace_logger_issues(helm_files: list[Path], root: Path) -> list[str]:
     """Check 7.8 helper: cada helm por-entorno (dev/test/prod) debe declarar las
     7 env vars CCC_* del trace-logger con el valor esperado del ambiente."""
     issues: list[str] = []
     for f in helm_files:
-        # Un helm que no parsea no puede declarar nada: sin esto el 7.8 daba
-        # PASS sobre un chart que Helm rechaza.
-        parse_error = _helm_yaml_parse_error(f)
-        if parse_error:
-            issues.append(f"{_relative_display(f, root)} - YAML invalido: {parse_error}")
-            continue
         env = _helm_env_of(f)
         if not env:
             continue
@@ -762,9 +730,6 @@ _LIBBNC_DECL_RE = re.compile(
     r"(?:implementation|api|compileOnly|runtimeOnly|testImplementation)\s+"
     r"['\"]com\.pichincha\.bnc:lib-bnc-api-client"
 )
-
-
-_LIBBNC_VERSION_RE = re.compile(r"com\.pichincha\.bnc:lib-bnc-api-client:([0-9][\w.\-]*)")
 
 
 def _gradle_declares_libbnc(gradle_text: str) -> bool:
@@ -1038,185 +1003,6 @@ def _project_uses_webflux(gradle_files: list[Path]) -> bool:
         if "spring-boot-starter-webflux" in _read_or_empty(gf):
             return True
     return False
-
-
-def _root_gradle_files(root: Path) -> list[Path]:
-    """build.gradle / build.gradle.kts de la raiz del proyecto (los que existan)."""
-    return [f for f in (root / "build.gradle", root / "build.gradle.kts") if f.exists()]
-
-
-def _detected_spring_boot_version(root: Path) -> str:
-    """Version literal del plugin `org.springframework.boot` del build.gradle
-    raiz. Fallback: `spring_boot_version` de `migration-context.json`. Cadena
-    vacia si no se puede determinar. Es la llave que decide, en varios checks,
-    si el proyecto esta en la linea SB3 (3.5.x) o SB4 (>= 4)."""
-    for gf in _root_gradle_files(root):
-        versions = _spring_boot_plugin_versions(_read_or_empty(gf))
-        if versions:
-            return versions[0]
-    ctx_file = root / "migration-context.json"
-    if ctx_file.exists():
-        try:
-            data = json.loads(_read_or_empty(ctx_file) or "{}")
-        except json.JSONDecodeError:
-            return ""
-        if isinstance(data, dict):
-            value = data.get("spring_boot_version")
-            if not value and isinstance(data.get("scaffolding"), dict):
-                value = data["scaffolding"].get("spring_boot_version")
-            if isinstance(value, str):
-                return value.strip()
-    return ""
-
-
-# -- Probes Kubernetes (Spring Boot 4) ---------------------------------------
-#
-# Correo BPTPSRE 2026-08 + hallazgo TO 2026-08-25: los probes Helm deben apuntar
-# a `/actuator/health/liveness` y `/actuator/health/readiness` (no al agregado
-# `/actuator/health`). Se acepta cualquier forma de shell (grep -q canonica,
-# `cut` que emite el MCP v20260827161016, httpGet.path): lo que se valida es el
-# path. Obligatorio en SB4; recomendado (MEDIUM) en SB3.
-_PROBE_HEALTH_URL_RE = re.compile(r"/actuator/health(?:/[A-Za-z]+)?")
-
-
-def _helm_probe_block(text: str, probe: str) -> str | None:
-    """Bloque YAML completo de `<probe>:` (livenessProbe/readinessProbe) con
-    cualquier indentacion, o None si el helm no lo declara."""
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        m = re.match(rf"^(?P<indent>\s*){probe}\s*:\s*(#.*)?$", line)
-        if not m:
-            continue
-        indent = len(m.group("indent"))
-        block = [line]
-        for nxt in lines[i + 1 :]:
-            if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= indent:
-                break
-            block.append(nxt)
-        return "\n".join(block)
-    return None
-
-
-def _helm_probe_path_issues(helm_files: list[Path], root: Path) -> list[str]:
-    """Check 7.10 helper: livenessProbe -> ACTUATOR_LIVENESS_PATH y
-    readinessProbe -> ACTUATOR_READINESS_PATH en cada helm por-entorno. Un
-    probe ausente no se reporta aca (lo cubre 7.3)."""
-    issues: list[str] = []
-    expected_by_probe = (
-        ("livenessProbe", ACTUATOR_LIVENESS_PATH),
-        ("readinessProbe", ACTUATOR_READINESS_PATH),
-    )
-    for f in helm_files:
-        text = _read_or_empty(f)
-        rel = _relative_display(f, root)
-        for probe, expected in expected_by_probe:
-            block = _helm_probe_block(text, probe)
-            if block is None:
-                continue
-            paths = sorted({m.group(0) for m in _PROBE_HEALTH_URL_RE.finditer(block)})
-            if not paths:
-                issues.append(f"{rel} - {probe} sin path /actuator/health/* (debe usar {expected})")
-            elif expected not in paths:
-                issues.append(f"{rel} - {probe} usa {', '.join(paths)} -> debe ser {expected}")
-    return issues
-
-
-_HELM_ENV_MAPPING_RE_TMPL = r"^\s*{var}\s*:\s*['\"]?(?P<value>[^'\"#]*?)['\"]?\s*(#.*)?$"
-
-
-def _helm_env_value_any(text: str, var_name: str) -> str | None:
-    """Valor de una env var en un helm aceptando las dos formas: lista
-    `- name: VAR / value: X` (via _helm_env_var_value) o mapping `VAR: X`."""
-    value = _helm_env_var_value(text, var_name)
-    if value is not None:
-        return value
-    m = re.search(_HELM_ENV_MAPPING_RE_TMPL.format(var=re.escape(var_name)), text, re.MULTILINE)
-    return m.group("value").strip() if m else None
-
-
-def _helm_probes_enabled_issues(helm_files: list[Path], root: Path) -> list[str]:
-    """Check 7.11 helper: `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` en cada
-    helm por-entorno. Sin el, /actuator/health/{liveness,readiness} solo existen
-    si Spring Boot detecta el cluster; el valor explicito evita depender de eso."""
-    issues: list[str] = []
-    for f in helm_files:
-        value = _helm_env_value_any(_read_or_empty(f), ACTUATOR_PROBES_ENV_VAR)
-        rel = _relative_display(f, root)
-        if value is None:
-            issues.append(f"{rel} - env var {ACTUATOR_PROBES_ENV_VAR} no declarada")
-        elif value.lower() != "true":
-            issues.append(f"{rel} - {ACTUATOR_PROBES_ENV_VAR}: '{value}' -> debe ser 'true'")
-    return issues
-
-
-# -- Sondas fuera del trace-logger (Regla 9e.3) --------------------------------
-#
-# `ServletRequestInformationExtractor` / `ReactiveRequestInformationExtractor`
-# de lib-trace-logger vuelcan cada request en un `RequestInformationContextHolder`
-# SINGLETON: las sondas liveness/readiness/prometheus pisan el contexto del
-# request de negocio (el TO vio `"type":"TRANSACTIONAL"` con
-# `requestUri=/actuator/health/readiness`). Un filtro extra no lo evita: hay que
-# envolver el bean con un BeanPostProcessor. Variante MVC (servlet) o WebFlux
-# segun el stack del proyecto. Compila igual en lib-trace-logger 1.4.0 y
-# lib-trace-logger-sb4 1.2.0.
-TRACE_LOGGER_MGMT_CONFIG_CLASS = "TraceLoggerManagementPathConfig"
-TRACE_LOGGER_SERVLET_EXTRACTOR = "ServletRequestInformationExtractor"
-TRACE_LOGGER_REACTIVE_EXTRACTOR = "ReactiveRequestInformationExtractor"
-TRACE_LOGGER_MGMT_CONFIG_MIN_TESTS = 6
-
-# Check 2.6: patrones de `log.info` diagnostico que el TO rechazo (2026-08-25).
-# No identifican inequivocamente la transaccion (sin guid/requestId) -> DEBUG,
-# activable por env var (CCC_CUSTOM_LEVEL_DEBUG_ENABLED / TPL_LOG_DEBUG).
-DIAGNOSTIC_INFO_LOG_PATTERNS: tuple[str, ...] = (
-    "Request received",
-    "Input validation passed",
-    "Validation passed",
-    "Received request",
-)
-_DIAGNOSTIC_INFO_LOG_RE = re.compile(
-    r"(?:\.info\s*\(|CustomLogLevel\.INFO)[^;]{0,400}?\"[^\"]*?("
-    + "|".join(re.escape(pat) for pat in DIAGNOSTIC_INFO_LOG_PATTERNS)
-    + r")",
-    re.DOTALL,
-)
-
-
-def _find_java_class_file(root: Path, class_name: str) -> Path | None:
-    for f in root.rglob(f"{class_name}.java"):
-        if any(part in {"build", "target", ".git"} for part in f.parts):
-            continue
-        return f
-    return None
-
-
-_GIVEN_WHEN_THEN_RE = re.compile(r"\bvoid\s+given\w*_when\w*_then\w*\s*\(")
-
-
-def _project_docs_text(root: Path) -> str:
-    """README.md raiz + docs/**/*.md del proyecto migrado (para el Check 0.6)."""
-    parts: list[str] = []
-    for name in ("README.md", "readme.md", "README.MD"):
-        f = root / name
-        if f.exists():
-            parts.append(_read_or_empty(f))
-            break
-    docs = root / "docs"
-    if docs.is_dir():
-        for f in sorted(docs.rglob("*.md")):
-            parts.append(_read_or_empty(f))
-    return "\n".join(parts)
-
-
-_FENCED_BLOCK_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-
-
-def _curl_blocks(doc_text: str) -> list[str]:
-    """Bloques de codigo (fenced) que contienen un `curl`. Si el documento tiene
-    cURLs fuera de fences, se devuelve el texto completo como unico bloque."""
-    blocks = [m.group(1) for m in _FENCED_BLOCK_RE.finditer(doc_text) if "curl" in m.group(1).lower()]
-    if not blocks and re.search(r"\bcurl\b", doc_text, re.IGNORECASE):
-        return [doc_text]
-    return blocks
 
 
 def _netty_dependency_management_pins(
@@ -1784,58 +1570,6 @@ def run_block_0(ctx: CheckContext) -> list[CheckResult]:
     else:
         results.append(CheckResult("0.5", "Block 0", "XSDs referenciados presentes", "pass"))
 
-    # 0.6 - cURL por operacion del WSDL en README.md / docs/**/*.md. Hallazgo TO
-    # 2026-08-25 (§1.3): la documentacion es insumo de los consumidores y debe
-    # estar completa ANTES de asignar la tarjeta al TO. Se cruza con las
-    # operaciones del portType (mismas que el Check 0.3).
-    op_names = list(migrated_info.operation_names)
-    if op_names:
-        curl_blocks = _curl_blocks(_project_docs_text(ctx.migrated_path))
-        missing_ops = [
-            op
-            for op in op_names
-            if not any(op.lower() in block.lower() for block in curl_blocks)
-        ]
-        if not curl_blocks:
-            results.append(
-                CheckResult(
-                    "0.6", "Block 0", "cURL por operacion WSDL en README/docs",
-                    "fail", severity="medium",
-                    detail=(
-                        "README.md/docs sin ningun bloque `curl`; operaciones sin ejemplo: "
-                        + ", ".join(op_names[:10])
-                    ),
-                    suggested_fix=(
-                        "Agregar en README.md (o docs/) un cURL completo por operacion del "
-                        "WSDL: envelope SOAP de ejemplo (headerIn + bodyIn), "
-                        "`Content-Type: text/xml;charset=utf-8`, SOAPAction si aplica, "
-                        "respuesta de exito (error.codigo=0, tipo=INFO) y al menos un "
-                        "caso de error de negocio (tipo=ERROR). Con invocaBancs=true, "
-                        "sumar el header sin <bancs> (9927, tipo=FATAL). Gate previo al TO."
-                    ),
-                )
-            )
-        elif missing_ops:
-            results.append(
-                CheckResult(
-                    "0.6", "Block 0", "cURL por operacion WSDL en README/docs",
-                    "fail", severity="medium",
-                    detail=f"operaciones sin cURL documentado: {', '.join(missing_ops[:10])}",
-                    suggested_fix=(
-                        "Agregar un bloque ```bash con `curl` por cada operacion faltante "
-                        "(nombrar la operacion en el envelope/SOAPAction del ejemplo)."
-                    ),
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "0.6", "Block 0", "cURL por operacion WSDL en README/docs",
-                    "pass",
-                    detail=f"{len(op_names)} operacion(es) con cURL en README/docs",
-                )
-            )
-
     return results
 
 
@@ -2288,187 +2022,6 @@ def run_block_2(ctx: CheckContext) -> list[CheckResult]:
             "pass",
             detail=f"{len(key_files)} componentes clave validados"
         ))
-
-    # 2.6 - Logs INFO sin valor de monitoreo (hallazgo TO 2026-08-25 §1.1).
-    # "Request received for operation: {}" / "Input validation passed for: {}"
-    # no identifican la transaccion (sin guid/requestId): van a DEBUG y se
-    # activan por env var (CCC_CUSTOM_LEVEL_DEBUG_ENABLED / TPL_LOG_DEBUG).
-    diagnostic_info_hits: list[str] = []
-    if src_java.exists():
-        for f in src_java.rglob("*.java"):
-            if any(part in {"build", "target", ".git"} for part in f.parts):
-                continue
-            text = _read_or_empty(f)
-            for m in _DIAGNOSTIC_INFO_LOG_RE.finditer(text):
-                line_no = text.count("\n", 0, m.start(1)) + 1
-                diagnostic_info_hits.append(
-                    f"{_relative_display(f, ctx.migrated_path)}:{line_no} \"{m.group(1)}\""
-                )
-    if diagnostic_info_hits:
-        results.append(
-            CheckResult(
-                "2.6",
-                "Block 2",
-                "Logs INFO diagnosticos (deben ser DEBUG)",
-                "fail",
-                severity="medium",
-                detail=(
-                    f"{len(diagnostic_info_hits)} log(s) INFO sin correlador de transaccion: "
-                    + "; ".join(diagnostic_info_hits[:8])
-                ),
-                suggested_fix=(
-                    "Bajar a `log.debug(...)` (ServiceLogHelper) los mensajes "
-                    + ", ".join(f"`{p}`" for p in DIAGNOSTIC_INFO_LOG_PATTERNS)
-                    + ". Criterio del TO: un INFO debe identificar inequivocamente la "
-                    "transaccion (guid/requestId); si no lo incluye, no va en INFO."
-                ),
-            )
-        )
-    else:
-        results.append(
-            CheckResult(
-                "2.6",
-                "Block 2",
-                "Logs INFO diagnosticos (deben ser DEBUG)",
-                "pass",
-            )
-        )
-
-    # 2.10 - TraceLoggerManagementPathConfig (Regla 9e.3): BeanPostProcessor que
-    # envuelve el extractor de lib-trace-logger para que las sondas de management
-    # (liveness/readiness/prometheus) NO pisen el RequestInformationContextHolder
-    # singleton. Variante servlet (MVC) o reactive (WebFlux) segun el stack.
-    gradle_files = _root_gradle_files(ctx.migrated_path)
-    uses_webflux = _project_uses_webflux(gradle_files) if gradle_files else None
-    expected_extractor = (
-        TRACE_LOGGER_REACTIVE_EXTRACTOR if uses_webflux else TRACE_LOGGER_SERVLET_EXTRACTOR
-    )
-    wrong_extractor = (
-        TRACE_LOGGER_SERVLET_EXTRACTOR if uses_webflux else TRACE_LOGGER_REACTIVE_EXTRACTOR
-    )
-    stack_label = "WebFlux" if uses_webflux else "MVC"
-    config_file = _find_java_class_file(src_java, TRACE_LOGGER_MGMT_CONFIG_CLASS) if src_java.exists() else None
-    title_210 = "Sondas de management fuera del trace-logger (TraceLoggerManagementPathConfig)"
-    if config_file is None:
-        results.append(
-            CheckResult(
-                "2.10",
-                "Block 2",
-                title_210,
-                "fail",
-                severity="high",
-                detail=(
-                    f"falta infrastructure/config/{TRACE_LOGGER_MGMT_CONFIG_CLASS}.java "
-                    f"(variante {stack_label}: instanceof {expected_extractor})"
-                ),
-                suggested_fix=(
-                    f"Crear `{TRACE_LOGGER_MGMT_CONFIG_CLASS}` en infrastructure/config/ que "
-                    f"implemente BeanPostProcessor + EnvironmentAware y envuelva el bean "
-                    f"`{expected_extractor}` para dejar pasar sin capturar los paths bajo "
-                    "`management.endpoints.web.base-path` (default /actuator). Ver "
-                    "bank-official-rules.md Regla 9e.3. Autofix: "
-                    "fix_add_trace_logger_management_config."
-                ),
-            )
-        )
-    else:
-        cfg_text = _read_or_empty(config_file)
-        cfg_issues: list[str] = []
-        if "BeanPostProcessor" not in cfg_text:
-            cfg_issues.append("no implementa BeanPostProcessor (un filtro extra no evita que el extractor capture)")
-        if uses_webflux is not None:
-            if f"instanceof {expected_extractor}" not in cfg_text:
-                cfg_issues.append(f"sin `instanceof {expected_extractor}` (stack {stack_label})")
-            if f"instanceof {wrong_extractor}" in cfg_text:
-                cfg_issues.append(f"variante equivocada: envuelve {wrong_extractor} en un proyecto {stack_label}")
-        elif not (
-            f"instanceof {TRACE_LOGGER_SERVLET_EXTRACTOR}" in cfg_text
-            or f"instanceof {TRACE_LOGGER_REACTIVE_EXTRACTOR}" in cfg_text
-        ):
-            cfg_issues.append("no envuelve ningun *RequestInformationExtractor por instanceof")
-        rel_parts = [p.lower() for p in config_file.parts]
-        if "infrastructure" not in rel_parts or "config" not in rel_parts:
-            cfg_issues.append(
-                f"ubicacion {_relative_display(config_file, ctx.migrated_path)} -> debe vivir en infrastructure/config/ (Regla 1)"
-            )
-        if cfg_issues:
-            results.append(
-                CheckResult(
-                    "2.10",
-                    "Block 2",
-                    title_210,
-                    "fail",
-                    severity="high",
-                    detail="; ".join(cfg_issues),
-                    suggested_fix=(
-                        f"Alinear `{TRACE_LOGGER_MGMT_CONFIG_CLASS}` a la variante {stack_label} "
-                        "de bank-official-rules.md Regla 9e.3 (BeanPostProcessor + instanceof "
-                        f"{expected_extractor}, seleccion por tipo, no por beanName)."
-                    ),
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "2.10",
-                    "Block 2",
-                    title_210,
-                    "pass",
-                    detail=f"variante {stack_label} ({expected_extractor}) en {_relative_display(config_file, ctx.migrated_path)}",
-                )
-            )
-
-    # 2.11 - Test unitario del BeanPostProcessor (JUnit 5 + Mockito, given_when_then).
-    test_root = ctx.migrated_path / "src" / "test" / "java"
-    test_file = (
-        _find_java_class_file(test_root, f"{TRACE_LOGGER_MGMT_CONFIG_CLASS}Test")
-        if test_root.exists()
-        else None
-    )
-    title_211 = f"Test de {TRACE_LOGGER_MGMT_CONFIG_CLASS} (>= {TRACE_LOGGER_MGMT_CONFIG_MIN_TESTS} casos given_when_then)"
-    if test_file is None:
-        results.append(
-            CheckResult(
-                "2.11",
-                "Block 2",
-                title_211,
-                "fail",
-                severity="medium",
-                detail=f"falta {TRACE_LOGGER_MGMT_CONFIG_CLASS}Test.java en src/test/java",
-                suggested_fix=(
-                    "Cubrir: /actuator/prometheus, /actuator/health/liveness y "
-                    "/actuator/health/readiness saltan al chain (delegate nunca invocado); "
-                    "request de negocio delega; base-path custom /management; base-path "
-                    "vacio cae a /actuator; bean ajeno no se envuelve (isSameAs). MVC: "
-                    "MockHttpServletRequest + mock(FilterChain); WebFlux: "
-                    "MockServerWebExchange + mock(WebFilterChain) + StepVerifier."
-                ),
-            )
-        )
-    else:
-        n_tests = len(_GIVEN_WHEN_THEN_RE.findall(_read_or_empty(test_file)))
-        if n_tests < TRACE_LOGGER_MGMT_CONFIG_MIN_TESTS:
-            results.append(
-                CheckResult(
-                    "2.11",
-                    "Block 2",
-                    title_211,
-                    "fail",
-                    severity="medium",
-                    detail=f"{n_tests} metodo(s) given*_when*_then* en {test_file.name} (minimo {TRACE_LOGGER_MGMT_CONFIG_MIN_TESTS})",
-                    suggested_fix="Completar los casos de la tabla de tests de la Regla 9e.3 (bank-official-rules.md).",
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "2.11",
-                    "Block 2",
-                    title_211,
-                    "pass",
-                    detail=f"{n_tests} casos given_when_then en {test_file.name}",
-                )
-            )
 
     return results
 
@@ -3605,110 +3158,6 @@ def run_block_7(ctx: CheckContext) -> list[CheckResult]:
                     )
                 )
 
-            # 7.10 - Probes liveness/readiness a los endpoints dedicados de
-            # actuator (Spring Boot 4, correo BPTPSRE 2026-08). Se aceptan las
-            # formas `grep -q` (canonica) y `cut` (MCP v20260827161016). El
-            # agregado /actuator/health sin sufijo es HIGH en SB4 y MEDIUM en
-            # SB3 (ambas rutas funcionan en 3.5.x; migrar en el PR de librerias).
-            sb_version_7 = _detected_spring_boot_version(ctx.migrated_path)
-            probes_are_sb4 = is_spring_boot_4(sb_version_7)
-            probe_issues = _helm_probe_path_issues(env_helm_files, ctx.migrated_path)
-            title_710 = "Helm probes a /actuator/health/liveness y /readiness"
-            if probe_issues:
-                results.append(
-                    CheckResult(
-                        "7.10",
-                        "Block 7",
-                        title_710,
-                        "fail",
-                        severity="high" if probes_are_sb4 else "medium",
-                        detail="; ".join(probe_issues[:12]),
-                        suggested_fix=(
-                            f"livenessProbe -> curl {ACTUATOR_LIVENESS_PATH}; readinessProbe -> "
-                            f"curl {ACTUATOR_READINESS_PATH} en helm/dev.yml, test.yml y prod.yml "
-                            "(forma canonica `if ! curl -s <url> | grep -q '\"status\":\"UP\"'; then exit 1; fi`; "
-                            "la forma `cut` del MCP es equivalente). Conservar initialDelaySeconds/"
-                            "periodSeconds/timeoutSeconds. Autofix: fix_helm_probe_paths."
-                            + ("" if probes_are_sb4 else " Recomendado en SB3, obligatorio al subir a SB4.")
-                        ),
-                    )
-                )
-            else:
-                results.append(
-                    CheckResult(
-                        "7.10",
-                        "Block 7",
-                        title_710,
-                        "pass",
-                        detail=f"probes en {len(env_helm_files)} helm(s) apuntan a liveness/readiness",
-                    )
-                )
-
-            # 7.11 - CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true" en los 3 Helm.
-            # Prerrequisito de 7.10: sin `management.endpoint.health.probes.enabled`
-            # los endpoints dedicados solo existen si Spring detecta el cluster.
-            probes_env_issues = _helm_probes_enabled_issues(env_helm_files, ctx.migrated_path)
-            title_711 = f"Helm {ACTUATOR_PROBES_ENV_VAR}=true (probes actuator habilitados)"
-            if probes_env_issues:
-                results.append(
-                    CheckResult(
-                        "7.11",
-                        "Block 7",
-                        title_711,
-                        "fail",
-                        severity="medium",
-                        detail="; ".join(probes_env_issues[:6]),
-                        suggested_fix=(
-                            f"Declarar `{ACTUATOR_PROBES_ENV_VAR}: \"true\"` en helm/dev.yml, "
-                            "test.yml y prod.yml y referenciarla en application.yml como "
-                            f"`management.endpoint.health.probes.enabled: ${{{ACTUATOR_PROBES_ENV_VAR}}}`. "
-                            "Autofix: fix_helm_probes_enabled_env."
-                        ),
-                    )
-                )
-            else:
-                results.append(CheckResult("7.11", "Block 7", title_711, "pass"))
-
-            # 7.12 - Los helm por-entorno deben parsear como YAML. Es la red de
-            # seguridad estructural: cualquier edicion (autofix o a mano) que
-            # rompa el chart se ve aca, en vez de pasar desapercibida porque los
-            # demas checks leen valores con regex.
-            broken = [
-                f"{_relative_display(f, ctx.migrated_path)}: {err}"
-                for f, err in ((f, _helm_yaml_parse_error(f)) for f in env_helm_files)
-                if err
-            ]
-            title_712 = "Helm por-entorno parsea como YAML"
-            if broken:
-                results.append(
-                    CheckResult(
-                        "7.12",
-                        "Block 7",
-                        title_712,
-                        "fail",
-                        severity="high",
-                        detail="; ".join(broken[:6]),
-                        suggested_fix=(
-                            "Helm no puede renderizar un values file invalido: el deploy "
-                            "falla. Causa tipica: un item `- name:` insertado bajo una "
-                            "clave que es mapping (`variables:` en los charts del MCP tiene "
-                            "`own.config`). Mover las env vars a la lista "
-                            "`variables.own.config` y re-validar con "
-                            "`python -c \"import yaml,sys;yaml.safe_load(open(sys.argv[1]))\" helm/dev.yml`."
-                        ),
-                    )
-                )
-            else:
-                results.append(
-                    CheckResult(
-                        "7.12",
-                        "Block 7",
-                        title_712,
-                        "pass",
-                        detail=f"{len(env_helm_files)} helm(s) parsean correctamente",
-                    )
-                )
-
     return results
 
 
@@ -3731,16 +3180,6 @@ KEDA_METRICS_GRADLE_DEPS: dict[str, str] = {
 
 # Plugin de peer review del banco. Acepta las dos sintaxis de Gradle:
 # Groovy `id 'x' version '1.1.2'` y Kotlin DSL `id("x") version "1.1.2"`.
-# Declaraciones gradle de las libs del banco cuya version depende del major de
-# Spring Boot (Checks 8.13 / 8.14). Group 1: sufijo `-sb4` o vacio; group 2:
-# version.
-_LIB_TRACE_LOGGER_DECL_RE = re.compile(
-    r"com\.pichincha\.common:lib-trace-logger(-sb4)?:([0-9][\w.\-]*)"
-)
-_LIB_EVENT_LOGS_DECL_RE = re.compile(
-    r"com\.pichincha\.common:lib-event-logs-(webflux|mvc):([0-9][\w.\-]*)"
-)
-
 _PEER_REVIEW_PLUGIN_RE = re.compile(
     r"id\s*(?:\(\s*[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"']\s*\)"
     r"|[\"']" + re.escape(PEER_REVIEW_PLUGIN_ID) + r"[\"'])"
@@ -3790,11 +3229,6 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
             (gradle_file, version) for version in _spring_boot_plugin_versions(text)
         )
 
-    # Version del plugin que gobierna los checks dependientes del major
-    # (8.7/8.8/8.10 Netty, 8.9 lib-bnc, 8.13 trace-logger, 8.14 event-logs).
-    sb_version = detected_versions[0][1] if detected_versions else ""
-    sb4 = is_spring_boot_4(sb_version)
-
     if not detected_versions:
         detail = "no se detecto plugin org.springframework.boot con version literal"
         if files_with_boot_token:
@@ -3809,35 +3243,16 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 detail=detail,
                 suggested_fix=(
                     "Dejar version literal aprobada en build.gradle: "
-                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'` "
-                    f"(MCP Fabrics {MCP_MIN_VERSION} ya la emite). Nunca bajar una version "
-                    "que el MCP haya generado mas alta."
+                    f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
+                    "Mantener Spring Boot en el baseline aprobado por el banco."
                 ),
             )
         )
     else:
-        # Politica de versiones (2026-09): NUNCA bajar; subir solo dentro de la
-        # misma linea mayor. Tres estados:
-        #   - < 3.5.15 o 4.x < 4.1.1  -> HIGH (scaffold viejo; autofix sube al
-        #     minimo de su linea).
-        #   - 3.5.15 <= v < 4         -> MEDIUM (linea SB3 aceptada solo para
-        #     proyectos existentes; el baseline vigente es SB4 y el salto lo
-        #     decide un PR de librerias, no un autofix).
-        #   - >= 4.1.1                -> PASS (incluye versiones mayores que el
-        #     MCP emita: se conservan).
         outdated = [
             f"{_relative_display(path, ctx.migrated_path)}={version}"
             for path, version in detected_versions
-            if (
-                is_version_lower(version, SPRING_BOOT_LEGACY_BASELINE_VERSION)
-                or (is_spring_boot_4(version) and is_version_lower(version, SPRING_BOOT_BASELINE_VERSION))
-            )
-        ]
-        legacy_line = [
-            f"{_relative_display(path, ctx.migrated_path)}={version}"
-            for path, version in detected_versions
-            if not is_spring_boot_4(version)
-            and not is_version_lower(version, SPRING_BOOT_LEGACY_BASELINE_VERSION)
+            if is_version_lower(version, SPRING_BOOT_BASELINE_VERSION)
         ]
         if outdated:
             results.append(
@@ -3848,40 +3263,15 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     "fail",
                     severity="high",
                     detail=(
-                        f"Spring Boot menor al minimo de su linea (SB3 >= "
-                        f"{SPRING_BOOT_LEGACY_BASELINE_VERSION}, SB4 >= {SPRING_BOOT_BASELINE_VERSION}): "
+                        f"Spring Boot menor a {SPRING_BOOT_BASELINE_VERSION} "
                         + ", ".join(outdated)
                     ),
                     suggested_fix=(
-                        "Subir el plugin Gradle al minimo de su linea: proyectos nuevos a "
-                        f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'` "
-                        f"(baseline SB4, MCP {MCP_MIN_VERSION}); proyectos SB3 existentes al menos a "
-                        f"'{SPRING_BOOT_LEGACY_BASELINE_VERSION}'. Nunca bajar la version que emitio el "
-                        "MCP. Actualizar tambien `spring_boot_version` en `migration-context.json`. "
-                        "Autofix: fix_spring_boot_plugin_version."
-                    ),
-                )
-            )
-        elif legacy_line:
-            results.append(
-                CheckResult(
-                    "8.1",
-                    "Block 8",
-                    "Spring Boot baseline",
-                    "fail",
-                    severity="medium",
-                    detail=(
-                        f"linea Spring Boot 3.5.x ({', '.join(legacy_line)}); baseline vigente "
-                        f"{SPRING_BOOT_BASELINE_VERSION} (todos los proyectos nuevos en SB4, "
-                        f"MCP {MCP_MIN_VERSION})"
-                    ),
-                    suggested_fix=(
-                        "Aceptado solo para proyectos SB3 existentes (no romper el pasado). "
-                        f"Planificar el upgrade a Spring Boot {SPRING_BOOT_BASELINE_VERSION} en el "
-                        "mismo PR que sube librerias: lib-trace-logger -> lib-trace-logger-sb4:1.2.0 "
-                        "(Check 8.13), lib-event-logs 2.0.0 en ORQ (8.14), lib-bnc-api-client 3.0.0 "
-                        "si invocaBancs (8.9) y probes liveness/readiness (7.10). Un proyecto NUEVO "
-                        "no debe quedar en 3.5.x."
+                        "Actualizar el plugin Gradle a "
+                        f"`id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'`. "
+                        "Tambien actualizar `spring_boot_version` en "
+                        "`migration-context.json` y eliminar pins explicitos de "
+                        "jackson-* y io.netty:* del template."
                     ),
                 )
             )
@@ -3945,55 +3335,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                 gradle_file, ctx.migrated_path, allow_webflux_pin=allow_webflux_pin
             )
         )
-    if sb4:
-        # Spring Boot 4 trae Reactor Netty 1.3.x / Netty 4.2.x de fabrica. El pin
-        # 4.1.136.Final de la linea SB3 seria un DOWNGRADE que rompe Reactor
-        # Netty; los pins CVE de SB3 (8.8/8.10) no aplican. Criterio unico
-        # Netty/Jackson 3 en SB4: <pendiente_validar> BPTPSRE (§2.3 del doc).
-        all_pins: list[str] = []
-        for gradle_file in gradle_files:
-            all_pins.extend(
-                _netty_dependency_management_pins(
-                    gradle_file, ctx.migrated_path, allow_webflux_pin=False
-                )
-            )
-        downgrade_pins = [pin for pin in all_pins if ":4.1." in pin]
-        if downgrade_pins:
-            results.append(
-                CheckResult(
-                    "8.7",
-                    "Block 8",
-                    "Sin pins manuales de io.netty:* (CVE-driven)",
-                    "fail",
-                    severity="medium",
-                    detail=(
-                        f"Spring Boot {sb_version} con {len(downgrade_pins)} pin(s) io.netty 4.1.x "
-                        "(downgrade del BOM SB4, que trae Netty 4.2.x): "
-                        + "; ".join(downgrade_pins[:6])
-                    ),
-                    suggested_fix=(
-                        "Eliminar los pins `io.netty:*:4.1.x` heredados de la linea SB3: en SB4 el "
-                        "BOM ya trae Netty 4.2.x / Reactor Netty 1.3.x y bajarlos rompe Reactor "
-                        "Netty. Nunca bajar una version que trae el BOM. Criterio Netty/Jackson 3 "
-                        "en SB4: pendiente_validar BPTPSRE."
-                    ),
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "8.7",
-                    "Block 8",
-                    "Sin pins manuales de io.netty:* (CVE-driven)",
-                    "pass",
-                    detail=(
-                        f"Spring Boot {sb_version}: sin pins 4.1.x; los pins CVE de SB3 "
-                        "(8.7/8.8/8.10) no aplican en SB4 (pendiente_validar BPTPSRE)"
-                        + (f"; {len(all_pins)} pin(s) io.netty declarados" if all_pins else "")
-                    ),
-                )
-            )
-    elif netty_pins:
+    if netty_pins:
         suggested_fix = (
             "Eliminar todos los `dependency 'io.netty:*:VERSION'` del "
             "bloque dependencyManagement. Pins manuales se quedan atras al "
@@ -4045,22 +3387,8 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     # cuando ya hay un pin io.netty en la version permitida: el BOM de Spring Boot
     # 3.5.x trae 4.1.121.Final vulnerable, y pinear solo `netty-codec*` deja
     # transitivos cercanos (netty-handler-proxy...) en version vulnerable
-    # (WSClientes0013, 9 CVEs). NO 4.2.x: rompe Reactor Netty. SOLO SB3: en SB4
-    # el BOM ya trae 4.2.x y el arbol 4.1.136 seria un downgrade (ver 8.7).
-    if allow_webflux_pin and sb4:
-        results.append(
-            CheckResult(
-                "8.8",
-                "Block 8",
-                f"Arbol Netty completo en WebFlux ({len(NETTY_CORE_MODULES)} modulos, doble pin)",
-                "pass",
-                detail=(
-                    f"no aplica en Spring Boot {sb_version}: el BOM SB4 trae Netty 4.2.x / "
-                    "Reactor Netty 1.3.x (pendiente_validar BPTPSRE)"
-                ),
-            )
-        )
-    if allow_webflux_pin and not sb4:
+    # (WSClientes0013, 9 CVEs). NO 4.2.x: rompe Reactor Netty.
+    if allow_webflux_pin:
         combined = "\n".join(_read_or_empty(gf) for gf in gradle_files)
         dep_mods = _netty_modules_pinned_cl(combined, _NETTY_DEPENDENCY_LINE_RE)
         if NETTY_WEBFLUX_ALLOWED_VERSION in dep_mods.values():
@@ -4130,41 +3458,12 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     else:
         requires_bancs = _matrix_requires_bancs(ctx)
     if libbnc_present and requires_bancs:
-        # Version: SB4 exige la final 3.0.0 (reemplaza 3.0.0-alpha.20260825120715);
-        # en SB3 la version la fija el OLA (autofix Regla 8). Pre-releases
-        # prohibidas en ambas lineas. Nunca se pide bajar una version mayor.
-        combined_all = "\n".join(_read_or_empty(gf) for gf in all_gradle)
-        libbnc_versions = sorted(set(_LIBBNC_VERSION_RE.findall(combined_all)))
-        libbnc_issues: list[str] = []
-        for ver in libbnc_versions:
-            if re.search(r"-(alpha|beta|rc|snapshot)", ver, re.IGNORECASE):
-                libbnc_issues.append(f"pre-release {ver} prohibida en proyectos migrados")
-            elif sb4 and is_version_lower(ver, LIB_BNC_API_CLIENT_SB4):
-                libbnc_issues.append(
-                    f"{ver} < {LIB_BNC_API_CLIENT_SB4} (version final para Spring Boot {sb_version})"
-                )
-        if libbnc_issues:
-            results.append(
-                CheckResult(
-                    "8.9", "Block 8", title_89, "fail", severity="high",
-                    detail="; ".join(libbnc_issues),
-                    suggested_fix=(
-                        f"En Spring Boot 4 usar `implementation 'com.pichincha.bnc:lib-bnc-api-client:"
-                        f"{LIB_BNC_API_CLIENT_SB4}'` (final; reemplaza la alpha). En SB3 la version del "
-                        "OLA (1.1.0 OLA1 / 2.0.0 OLA2). Autofix: fix_add_libbnc_dependency (Regla 8)."
-                    ),
-                )
+        results.append(
+            CheckResult(
+                "8.9", "Block 8", title_89, "pass",
+                detail="lib declarada y el servicio es BUS/IIB con invocaBancs=true",
             )
-        else:
-            results.append(
-                CheckResult(
-                    "8.9", "Block 8", title_89, "pass",
-                    detail=(
-                        "lib declarada y el servicio es BUS/IIB con invocaBancs=true"
-                        + (f" ({', '.join(libbnc_versions)})" if libbnc_versions else "")
-                    ),
-                )
-            )
+        )
     elif libbnc_present and not requires_bancs:
         results.append(
             CheckResult(
@@ -4201,22 +3500,7 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
     # spring-framework-bom (mavenBom). Mismo gate que 8.8 (WebFlux con Netty ya
     # pineado en la version permitida): toda la remediacion CVE WebFlux se exige
     # como una unidad. MVC/SOAP no aplican (reactor-netty/spring-kafka no existen).
-    # SOLO SB3: spring-framework-bom 6.2.x / reactor-netty 1.2.x serian un
-    # downgrade sobre Spring Framework 7 / Reactor Netty 1.3 de SB4.
-    if allow_webflux_pin and sb4:
-        results.append(
-            CheckResult(
-                "8.10",
-                "Block 8",
-                "Pins de seguridad WebFlux NO-Netty (Snyk 2026-06)",
-                "pass",
-                detail=(
-                    f"no aplica en Spring Boot {sb_version}: los pins del Snyk 2026-06 son de "
-                    "la linea SB3 (pendiente_validar BPTPSRE)"
-                ),
-            )
-        )
-    if allow_webflux_pin and not sb4:
+    if allow_webflux_pin:
         combined = "\n".join(_read_or_empty(gf) for gf in gradle_files)
         netty_dep_mods = _netty_modules_pinned_cl(combined, _NETTY_DEPENDENCY_LINE_RE)
         if NETTY_WEBFLUX_ALLOWED_VERSION in netty_dep_mods.values():
@@ -4386,88 +3670,6 @@ def run_block_8(ctx: CheckContext) -> list[CheckResult]:
                     title_812,
                     "pass",
                     detail=f"plugin peer-review >= {PEER_REVIEW_PLUGIN_VERSION}: {versions}",
-                )
-            )
-
-    # 8.13 - lib-trace-logger: artifactId segun el major de Spring Boot. SB4 ->
-    # `lib-trace-logger-sb4:1.2.0`; SB3 -> `lib-trace-logger:1.4.0`. Cruzar el
-    # artifact con la otra linea es incompatible en ambos sentidos. Se acepta
-    # una version mayor (nunca se pide bajar).
-    combined_all = "\n".join(_read_or_empty(gf) for gf in all_gradle)
-    expected_coord, expected_ver = lib_trace_logger_coord(sb_version)
-    tl_decls = _LIB_TRACE_LOGGER_DECL_RE.findall(combined_all)
-    title_813 = "lib-trace-logger acorde al major de Spring Boot (-sb4 en SB4)"
-    if not tl_decls:
-        results.append(
-            CheckResult(
-                "8.13", "Block 8", title_813, "fail", severity="high",
-                detail="lib-trace-logger no declarada en build.gradle (observabilidad por defecto en TODO servicio)",
-                suggested_fix=(
-                    f"Agregar `implementation '{expected_coord}:{expected_ver}'` "
-                    f"(Spring Boot {sb_version or SPRING_BOOT_BASELINE_VERSION}). "
-                    "Autofix: fix_trace_logger_sb4_artifact solo reescribe declaraciones existentes."
-                ),
-            )
-        )
-    else:
-        tl_issues: list[str] = []
-        for suffix, ver in tl_decls:
-            coord = f"com.pichincha.common:lib-trace-logger{suffix}"
-            if coord != expected_coord:
-                tl_issues.append(
-                    f"{coord}:{ver} -> debe ser {expected_coord}:{expected_ver} "
-                    f"(Spring Boot {sb_version or 'baseline'})"
-                )
-            elif is_version_lower(ver, expected_ver):
-                tl_issues.append(f"{coord}:{ver} < {expected_ver}")
-        if tl_issues:
-            results.append(
-                CheckResult(
-                    "8.13", "Block 8", title_813, "fail", severity="high",
-                    detail="; ".join(tl_issues),
-                    suggested_fix=(
-                        "Spring Boot 4 cambia el artifactId: `lib-trace-logger` -> "
-                        "`lib-trace-logger-sb4` (1.2.0). SB3 sigue en `lib-trace-logger:1.4.0`. "
-                        "Mismos FQCN de extractores/anotaciones; solo cambia el paquete de "
-                        "RequestInformationContextHolder (tests). Autofix: fix_trace_logger_sb4_artifact."
-                    ),
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "8.13", "Block 8", title_813, "pass",
-                    detail=", ".join(f"{expected_coord}:{ver}" for _, ver in tl_decls),
-                )
-            )
-
-    # 8.14 - lib-event-logs-* (ORQ) >= 2.0.0 en Spring Boot 4. Solo se evalua si
-    # la lib esta declarada (Block 17/18 gobiernan si debe estarlo).
-    el_decls = _LIB_EVENT_LOGS_DECL_RE.findall(combined_all)
-    if el_decls:
-        min_el = lib_event_logs_version(sb_version)
-        el_issues = [
-            f"lib-event-logs-{variant}:{ver} < {min_el}"
-            for variant, ver in el_decls
-            if is_version_lower(ver, min_el)
-        ]
-        title_814 = "lib-event-logs acorde al major de Spring Boot (2.0.0 en SB4)"
-        if el_issues:
-            results.append(
-                CheckResult(
-                    "8.14", "Block 8", title_814, "fail", severity="high",
-                    detail=f"Spring Boot {sb_version or 'baseline'}: " + "; ".join(el_issues),
-                    suggested_fix=(
-                        f"Subir a `implementation 'com.pichincha.common:lib-event-logs-webflux:{min_el}'` "
-                        "(ORQ siempre WebFlux). Autofix: fix_event_logs_sb4_version."
-                    ),
-                )
-            )
-        else:
-            results.append(
-                CheckResult(
-                    "8.14", "Block 8", title_814, "pass",
-                    detail=", ".join(f"lib-event-logs-{v}:{ver}" for v, ver in el_decls),
                 )
             )
 
@@ -4995,37 +4197,6 @@ ORQ_LOG_LEVEL_ENV_VARS: dict[str, str] = {
 # servicio ORQ reales son `orq`+dominio, ej. `orqclientes0027`).
 _ORQ_TOKEN_RE = re.compile(r"(?:^|[-_/.\s])orq")
 
-# Valor canonico de `logging.event.excluded-paths` (log-transaccional-orq.md
-# LT-2, MUST desde v0.40.0). Lo consume el Check 17.8 y el autofix
-# fix_event_logs_excluded_paths.
-ORQ_EVENT_LOGS_EXCLUDED_PATHS = "/actuator/**,/health,/metrics,/prometheus"
-
-_EXCLUDED_PATHS_LINE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)excluded-paths[ \t]*:[ \t]*(?P<value>[^#\n]*)", re.MULTILINE
-)
-
-
-def _yaml_excluded_paths_value(yml_text: str) -> str | None:
-    """Valor de `excluded-paths` (forma escalar o lista YAML) o None si falta."""
-    m = _EXCLUDED_PATHS_LINE_RE.search(yml_text)
-    if not m:
-        return None
-    value = m.group("value").strip().strip("'\"")
-    if value:
-        return value
-    # Forma lista: items `- /path` mas indentados que la clave.
-    indent = len(m.group("indent"))
-    items: list[str] = []
-    for line in yml_text[m.end() :].splitlines()[1:]:
-        if not line.strip():
-            continue
-        if (len(line) - len(line.lstrip())) <= indent:
-            break
-        stripped = line.strip()
-        if stripped.startswith("-"):
-            items.append(stripped[1:].strip().strip("'\""))
-    return ",".join(items)
-
 
 def _looks_like_orq(ctx: CheckContext) -> bool:
     """Heuristica: el proyecto es ORQ si el nombre contiene el token 'orq'.
@@ -5081,18 +4252,13 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
             continue
     has_webflux_logs = "lib-event-logs-webflux" in gradle_text
     has_mvc_logs = "lib-event-logs-mvc" in gradle_text
-    # Version minima segun el major de Spring Boot (2.0.0 en SB4, 1.0.x en SB3);
-    # el Check 8.14 valida la version declarada, aca solo la presencia.
-    expected_el_version = lib_event_logs_version(_detected_spring_boot_version(root))
     if has_webflux_logs or has_mvc_logs:
         variant = "webflux" if has_webflux_logs else "mvc"
-        declared = _LIB_EVENT_LOGS_DECL_RE.findall(gradle_text)
-        declared_txt = ", ".join(f"lib-event-logs-{v}:{ver}" for v, ver in declared) or f"lib-event-logs-{variant}"
         results.append(
             CheckResult(
                 "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
                 "pass",
-                detail=f"{declared_txt} presente (variante {variant})",
+                detail=f"lib-event-logs-{variant}:1.0.0 presente",
             )
         )
     else:
@@ -5101,12 +4267,12 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
                 "17.1", "Block 17", "Dependencia lib-event-logs (ORQ)",
                 "fail", severity="high",
                 detail=(
-                    f"ORQ sin `com.pichincha.common:lib-event-logs-webflux:{expected_el_version}` "
+                    "ORQ sin `com.pichincha.common:lib-event-logs-webflux:1.0.0` "
                     "(o -mvc) en build.gradle"
                 ),
                 suggested_fix=(
                     "Agregar implementation 'com.pichincha.common:"
-                    f"lib-event-logs-webflux:{expected_el_version}' al bloque dependencies"
+                    "lib-event-logs-webflux:1.0.0' al bloque dependencies"
                 ),
             )
         )
@@ -5352,45 +4518,6 @@ def run_block_17(ctx: CheckContext) -> list[CheckResult]:
                     "logger.annotation.BpLogger) al metodo @EventAudit de "
                     "cada adapter downstream"
                 ),
-            )
-        )
-
-    # 17.8 - logging.event.excluded-paths con /actuator/** (LT-2 pasa a MUST).
-    # `LoggingWebFilter` de lib-event-logs (1.0.1 y 2.0.0) SI emite un registro
-    # por request: sin excluir las sondas, liveness/readiness/prometheus
-    # aparecen como `"type":"TRANSACTIONAL"` (hallazgo TO 2026-08-25 §1.2).
-    excluded_value = _yaml_excluded_paths_value(full_yml)
-    title_178 = "logging.event.excluded-paths excluye /actuator/**"
-    if excluded_value is None:
-        results.append(
-            CheckResult(
-                "17.8", "Block 17", title_178,
-                "fail", severity="high",
-                detail="`logging.event.excluded-paths` no declarado en application.yml",
-                suggested_fix=(
-                    "Agregar bajo `logging.event`: "
-                    f"`excluded-paths: {ORQ_EVENT_LOGS_EXCLUDED_PATHS}`. "
-                    "Autofix: fix_event_logs_excluded_paths."
-                ),
-            )
-        )
-    elif "/actuator" not in excluded_value:
-        results.append(
-            CheckResult(
-                "17.8", "Block 17", title_178,
-                "fail", severity="high",
-                detail=f"excluded-paths presente pero sin /actuator/**: `{excluded_value[:120]}`",
-                suggested_fix=(
-                    f"Sumar `/actuator/**` (canonico: `{ORQ_EVENT_LOGS_EXCLUDED_PATHS}`); "
-                    "sin el, las sondas se loguean como eventos TRANSACTIONAL."
-                ),
-            )
-        )
-    else:
-        results.append(
-            CheckResult(
-                "17.8", "Block 17", title_178,
-                "pass", detail=f"excluded-paths: {excluded_value[:120]}",
             )
         )
 

@@ -29,9 +29,8 @@ harness invoca este skill como `/migrar`, tratarlo como alias legacy de `/migrat
 
 2. **Bloque 1: Scaffolding**
    - Crear proyecto Gradle copiando patrones del proyecto referencia
-   - Versiones: baseline Spring Boot `4.1.1` (MCP `v20260827161016`). **Nunca bajar** lo que emitio el MCP; si el scaffold vino en 3.5.x (MCP viejo), subir a `4.1.1` + `lib-trace-logger-sb4:1.2.0` (+ `lib-event-logs-webflux:2.0.0` en ORQ, `lib-bnc-api-client:3.0.0` solo BANCS). Un proyecto SB3 ya construido se conserva en `3.5.15+`.
    - Copiar WSDL/XSD, fix schemaLocation
-   - GATE: verificar estructura y `grep "org.springframework.boot' version" build.gradle` (>= 4.1.1 o la version mayor del MCP)
+   - GATE: verificar estructura
 
 3. **Bloque 2: Domain**
    - Crear records, exceptions
@@ -43,12 +42,11 @@ harness invoca este skill como `/migrar`, tratarlo como alias legacy de `/migrat
 
 5. **Bloque 4: Infrastructure**
    - Input adapter correcto segun matriz (REST `@RestController` o SOAP `@Endpoint`), DTOs, mappers, BANCS adapters (stubs si TX desconocida), config, error resolvers, application.yml
-   - `infrastructure/config/TraceLoggerManagementPathConfig.java` (BeanPostProcessor; variante WebFlux `ReactiveRequestInformationExtractor` o MVC `ServletRequestInformationExtractor` segun stack) + su test (>= 6 casos given_when_then). ORQ: `logging.event.excluded-paths: /actuator/**,/health,/metrics,/prometheus`. Logs INFO solo con correlador; diagnosticos a DEBUG.
-   - GATE: grep @Autowired (debe ser 0), verificar adapters implementan ports, `find . -name TraceLoggerManagementPathConfig.java` (1 archivo)
+   - GATE: grep @Autowired (debe ser 0), verificar adapters implementan ports
 
 6. **Bloque 5: Helm + Docker**
-   - helm/dev.yml, test.yml, prod.yml con probes a `/actuator/health/liveness` (liveness) y `/actuator/health/readiness` (readiness), nunca el agregado `/actuator/health`; `CCC_ACTUATOR_HEALTH_PROBES_ENABLED: "true"` en los 3
-   - GATE: grep liveness/readiness en todos los Helm
+   - helm/dev.yml, test.yml, prod.yml con probes
+   - GATE: grep probes en todos los Helm
 
 7. **Bloque 6: Tests**
    - Unit tests JUnit 5 + Mockito + StepVerifier
@@ -58,7 +56,7 @@ harness invoca este skill como `/migrar`, tratarlo como alias legacy de `/migrat
    - Si falla: identificar → analizar → corregir → re-verificar
    - Max 3 intentos antes de escalar al usuario
 
-9. **Generar MIGRATION_REPORT.md** con seccion GenAI, y **README.md con un cURL por operacion del WSDL** (envelope, `Content-Type: text/xml;charset=utf-8`, respuesta OK y al menos un error de negocio) — gate previo a asignar al TO
+9. **Generar MIGRATION_REPORT.md** con seccion GenAI
 
 10. **Generar NO_VERIFICABLE_LOCAL.md** con lo que no se pudo probar
 

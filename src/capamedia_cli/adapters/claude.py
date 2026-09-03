@@ -35,9 +35,8 @@ class ClaudeCodeAdapter(HarnessAdapter):
         model = _resolve_model(asset)
         if model:
             fm["model"] = model
-        body, parts = self.prompt_body(asset, target_dir)
-        dest.write_text(serialize_frontmatter(fm, body), encoding="utf-8")
-        return [dest, *parts]
+        dest.write_text(serialize_frontmatter(fm, asset.body), encoding="utf-8")
+        return [dest]
 
     def render_agent(self, asset: CanonicalAsset, target_dir: Path) -> list[Path]:
         out_dir = target_dir / ".claude" / "agents"
@@ -73,9 +72,11 @@ class ClaudeCodeAdapter(HarnessAdapter):
         self, assets: list[CanonicalAsset], target_dir: Path
     ) -> list[Path]:
         dest = target_dir / "CLAUDE.md"
-        text, on_demand = self.context_text(assets, target_dir, "# Contexto del proyecto")
-        dest.write_text(text, encoding="utf-8")
-        return [dest, *on_demand]
+        parts = ["# Contexto del proyecto\n"]
+        for a in assets:
+            parts.append(f"\n## {a.title}\n\n{a.body}")
+        dest.write_text("\n".join(parts), encoding="utf-8")
+        return [dest]
 
     def render_settings(self, target_dir: Path) -> list[Path]:
         settings_dir = target_dir / ".claude"

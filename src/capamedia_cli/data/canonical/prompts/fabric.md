@@ -148,7 +148,7 @@ Escribir `destino/<namespace>-msa-sp-<servicio>/migration-context.json`:
   "operationsCount": 1,
   "umps": [{"name": "UMPClientes0002", "tx": "060480"}],
   "scaffolding": {
-    "mcp_version": "<versión reportada — mínimo v20260827161016, emite Spring Boot 4.1.1>",
+    "mcp_version": "<versión reportada>",
     "scaffold_date": "<ISO8601>",
     "gaps_fixed_by_mcp": ["gap1", "gap2"],
     "workarounds_applied": []

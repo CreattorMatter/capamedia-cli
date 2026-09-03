@@ -175,27 +175,6 @@ def _post_process_agent_docs(target_dir: Path, service_name: str, cli_version: s
         path.write_text(header + existing, encoding="utf-8")
 
 
-def _print_context_budget(target_dir: Path, harnesses: list[str]) -> None:
-    """Muestra cuanto pesa lo que el harness carga solo en cada sesion/subagente."""
-    from capamedia_cli.core.context_budget import (
-        INLINE_CONTEXT_BUDGET_BYTES,
-        context_budget_report,
-    )
-
-    report = context_budget_report(target_dir, harnesses)
-    console.print()
-    console.print("[bold]Presupuesto de contexto[/bold] (modelo objetivo: Opus)")
-    for line in report.lines():
-        style = "yellow" if "SUPERA" in line else "dim"
-        console.print(f"  [{style}]{line}[/{style}]")
-    if report.over_budget:
-        console.print(
-            f"  [yellow]WARN[/yellow] el archivo auto-cargado supera "
-            f"{INLINE_CONTEXT_BUDGET_BYTES // 1000} KB: cada subagente lo hereda y puede "
-            "morir con 'Prompt is too long'. Regenera sin --inline-context."
-        )
-
-
 def _save_config(target_dir: Path, service_name: str, harnesses: list[str]) -> None:
     config = {
         "version": __version__,
@@ -214,15 +193,8 @@ def scaffold_project(
     service_name: str,
     harnesses: list[str],
     artifact_token: str | None = None,
-    inline_context: bool = False,
 ) -> tuple[int, list[str]]:
-    """Render the non-interactive project scaffold into an explicit target dir.
-
-    `inline_context=True` reproduce el render previo a v0.41.0 (todo el contexto
-    concatenado en CLAUDE.md/AGENTS.md y prompts sin partir). El default deja el
-    archivo auto-cargado dentro del presupuesto de contexto de Opus y pone el
-    resto bajo demanda en `.capamedia/context/` (ver `core/context_budget.py`).
-    """
+    """Render the non-interactive project scaffold into an explicit target dir."""
     target_dir = target_dir.resolve()
     token_val = artifact_token or "${CAPAMEDIA_ARTIFACT_TOKEN}"
 
@@ -235,9 +207,7 @@ def scaffold_project(
     all_warnings: list[str] = []
     for harness_name in harnesses:
         adapter = get_adapter(harness_name)
-        written, warnings = adapter.render_all(
-            assets, target_dir, inline_context=inline_context
-        )
+        written, warnings = adapter.render_all(assets, target_dir)
         total_files += len(written)
         all_warnings.extend(warnings)
 
@@ -273,17 +243,6 @@ def init_project(
             help="Token de Azure Artifacts para el MCP Fabrics. Si se omite, usa el placeholder ${CAPAMEDIA_ARTIFACT_TOKEN}",
         ),
     ] = None,
-    inline_context: Annotated[
-        bool,
-        typer.Option(
-            "--inline-context",
-            help=(
-                "Comportamiento previo a v0.41.0: concatena TODO el contexto en CLAUDE.md/"
-                "AGENTS.md (~200 KB) y no parte los prompts grandes. Por defecto el archivo "
-                "auto-cargado queda slim y el resto va bajo demanda en .capamedia/context/."
-            ),
-        ),
-    ] = False,
 ) -> None:
     """Inicializa un workspace CapaMedia con assets del harness elegido."""
     # v0.20.1: auto-padding a 4 digitos segun convencion del banco
@@ -358,7 +317,6 @@ def init_project(
         service_name=service_name,
         harnesses=harnesses,
         artifact_token=artifact_token,
-        inline_context=inline_context,
     )
 
     for harness_name in harnesses:
@@ -366,9 +324,6 @@ def init_project(
         console.print(
             f"  [green]OK[/green] {adapter.display_name}: scaffold listo"
         )
-
-    if harnesses:
-        _print_context_budget(target_dir, harnesses)
 
     if all_warnings:
         console.print()

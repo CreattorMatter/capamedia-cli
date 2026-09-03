@@ -51,11 +51,6 @@ from capamedia_cli.core.self_correction import (
     build_correction_appendix,
     load_failure_context,
 )
-from capamedia_cli.core.version_policy import (
-    MCP_MIN_VERSION,
-    SPRING_BOOT_BASELINE_VERSION,
-    SPRING_BOOT_LEGACY_BASELINE_VERSION,
-)
 
 console = Console()
 
@@ -223,10 +218,8 @@ def _build_doublecheck_prompt(
         "- No ejecutes `capamedia ai migrate`, `capamedia batch migrate`, `/migrate` ni `capamedia review`.\n"
         "- Nunca agregues ni mantengas `org.gradle.java.home` en `gradle.properties`; rompe CI si apunta a un JDK local.\n"
         f"- Verifica que el `.gitignore` del proyecto migrado ignore artefactos locales CapaMedia/AI que no van a Azure DevOps: {', '.join(DEPLOYMENT_GITIGNORE_ENTRIES)}.\n"
-        f"- Verifica que `build.gradle` declare `id 'org.springframework.boot' version '{SPRING_BOOT_BASELINE_VERSION}'` "
-        f"o superior (baseline SB4, MCP {MCP_MIN_VERSION}). NUNCA bajes una version emitida por el MCP; "
-        "si hay una menor dentro de su linea, sube solo ese literal sin reemplazar el scaffold. "
-        f"Un SB3 existente (>= {SPRING_BOOT_LEGACY_BASELINE_VERSION}) se conserva y el salto a SB4 queda como pendiente.\n"
+        "- Verifica que `build.gradle` declare `id 'org.springframework.boot' version '3.5.15'` "
+        "o superior aprobado; si hay una version menor, actualiza solo ese literal sin reemplazar el scaffold del MCP.\n"
         "- Verifica Gradle seguridad: no dejes `spring-boot-starter-undertow`, "
         "`io.undertow:*` ni `undertowVersion`; usar servidor embebido default "
         "Tomcat para MVC/Spring WS o Netty para WebFlux.\n"
