@@ -993,10 +993,10 @@ dependencies {
     // The artifactId changed: lib-trace-logger -> lib-trace-logger-sb4.
     implementation 'com.pichincha.common:lib-trace-logger-sb4:1.2.0'
     // lib-bnc-api-client: ONLY for BUS/IIB with invocaBancs=true. Spring Boot 4
-    // requires 3.0.0-alpha.20260825120715. Legacy Spring Boot 3.5.x projects keep
-    // the OLA version (1.1.0 OLA 1 / 2.0.0 OLA 2, core/ola_policy.py); the
-    // `capamedia ai doublecheck` autofix (Regla 8) preserves a declared 3.x.
-    implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0-alpha.20260825120715'
+    // requires the stable 3.0.0. Legacy Spring Boot 3.5.x projects keep the OLA
+    // version (1.1.0 OLA 1 / 2.0.0 OLA 2, core/ola_policy.py); the
+    // `capamedia ai doublecheck` autofix (Regla 8) never lowers a declared 3.x.
+    implementation 'com.pichincha.bnc:lib-bnc-api-client:3.0.0'
     // ORQ only (deploymentType=orquestador):
     // implementation 'com.pichincha.common:lib-event-logs-webflux:2.0.0'
 

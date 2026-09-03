@@ -318,8 +318,8 @@ def fix_add_libbnc_dependency(
     """Fija `lib-bnc-api-client` en la version que corresponde al servicio.
 
     Version (ver `core/ola_policy.py`):
-      - Spring Boot 4: `LIB_BNC_API_CLIENT_SB4` — si ya esta declarada, se
-        CONSERVA (no se reescribe a la version del OLA).
+      - Spring Boot 4: `LIB_BNC_API_CLIENT_SB4` (`3.0.0`) — una `3.x` declarada
+        nunca se baja al OLA; una pre-release `3.x` se normaliza a esa estable.
       - OLA 1 (default): 1.1.0
       - OLA 2 (servicios de `OLA2_SERVICES`): 2.0.0
 
@@ -370,26 +370,35 @@ def fix_add_libbnc_dependency(
         # Cubre pre-releases (1.1.0-alpha.*, 2.0.0-SNAPSHOT) y la version de la
         # otra OLA (1.1.0 en un servicio OLA 2, o 2.0.0 en uno OLA 1).
         present_versions = {m.group(2) for m in _LIBBNC_COORD_RE.finditer(text)}
-        # Linea Spring Boot 4 (`3.x`, requisito del banco 2026-09): se CONSERVA.
-        # El split por OLA (1.1.0 / 2.0.0) es de la linea SB3; reescribir un
-        # `3.0.0-alpha.*` a `1.1.0` desharia el requisito.
-        kept_sb4 = sorted(v for v in present_versions if v.split(".")[0] == "3")
-        wrong_versions = sorted(present_versions - {target_version} - set(kept_sb4))
-        if kept_sb4:
+        # Linea Spring Boot 4 (`3.x`, requisito del banco 2026-09): NUNCA se baja
+        # a la version del OLA. Solo se normaliza dentro de la linea, para que
+        # una pre-release (`3.0.0-alpha.*`) pase a la estable `3.0.0` — la
+        # Regla 8 prohibe mantener pre-releases.
+        sb4_line = {v for v in present_versions if v.split(".")[0] == "3"}
+        sb4_wrong = sorted(sb4_line - {LIB_BNC_API_CLIENT_SB4})
+        ola_wrong = sorted(present_versions - sb4_line - {target_version})
+        if sb4_line and not sb4_wrong:
             result.notes = (
-                f"lib-bnc-api-client {', '.join(kept_sb4)} conservada "
+                f"lib-bnc-api-client {LIB_BNC_API_CLIENT_SB4} conservada "
                 f"(linea Spring Boot 4; el default del OLA seria {target_version})"
             )
-        if wrong_versions:
-            wrong = set(wrong_versions)
+        if sb4_wrong or ola_wrong:
+            rewrite = dict.fromkeys(sb4_wrong, LIB_BNC_API_CLIENT_SB4)
+            rewrite.update(dict.fromkeys(ola_wrong, target_version))
             text = _LIBBNC_COORD_RE.sub(
-                lambda m: m.group(1) + (target_version if m.group(2) in wrong else m.group(2)),
-                text,
+                lambda m, r=rewrite: m.group(1) + r.get(m.group(2), m.group(2)), text
             )
-            result.changes.append(
-                f"{gf.relative_to(project_root)}: lib-bnc-api-client "
-                f"{', '.join(wrong_versions)} -> {target_version} ({label})"
-            )
+            rel_path = gf.relative_to(project_root)
+            if sb4_wrong:
+                result.changes.append(
+                    f"{rel_path}: lib-bnc-api-client {', '.join(sb4_wrong)} -> "
+                    f"{LIB_BNC_API_CLIENT_SB4} (Spring Boot 4)"
+                )
+            if ola_wrong:
+                result.changes.append(
+                    f"{rel_path}: lib-bnc-api-client {', '.join(ola_wrong)} -> "
+                    f"{target_version} ({label})"
+                )
 
         # Paso 2: si la libreria no esta y la matriz la requiere, insertarla.
         # La deteccion es por nombre de artefacto, no por version.
@@ -415,7 +424,7 @@ def fix_add_libbnc_dependency(
                     f"{gf.relative_to(project_root)}: "
                     f"+lib-bnc-api-client:{target_version} ({label})"
                 )
-            elif not wrong_versions:
+            elif not (sb4_wrong or ola_wrong):
                 result.notes = (
                     "Regla 8 omitida: lib-bnc-api-client solo aplica a "
                     "BUS/IIB con invocaBancs=true; sin contexto explicito no se agrega"
