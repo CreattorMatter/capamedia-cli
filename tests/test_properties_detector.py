@@ -472,3 +472,21 @@ def test_analyze_legacy_wires_ump_to_properties_detector(tmp_path: Path) -> None
         if p.file_name == "umpclientes0025.properties"
     )
     assert set(ump_entry.keys_used) >= {"GRUPO_CENTRALIZADA", "COD_DATOS_VACIOS"}
+
+
+def test_find_ms_module_repo(tmp_path: Path) -> None:
+    """Modulos legados `ms` se resuelven en ms-<dep>-was."""
+    umps_root = tmp_path / "umps"
+    (umps_root / "ms-msadministracion0048-was").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "msadministracion0048", "was")
+    assert found is not None
+    assert found.name == "ms-msadministracion0048-was"
+
+
+def test_find_ms_module_repo_from_iib_parent(tmp_path: Path) -> None:
+    """El patron ms-<dep>-was gana aunque el consumidor sea IIB."""
+    umps_root = tmp_path / "umps"
+    (umps_root / "ms-msadministracion0048-was").mkdir(parents=True)
+    found = _find_ump_repo(umps_root, "msadministracion0048", "iib")
+    assert found is not None
+    assert found.name == "ms-msadministracion0048-was"

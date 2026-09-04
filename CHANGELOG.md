@@ -6,6 +6,35 @@ versioning [SemVer](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-03
+
+### Added — `capamedia clone` tambien trae los modulos legados `ms-<dep>-was`
+
+Hasta v0.45.0 el clone solo resolvia dependencias con prefijo `ump`. Un WAS que
+depende de un modulo `ms` (ej. `msadministracion0048`, repo
+`tpl-integration-services-was/_git/ms-msadministracion0048-was`) se clonaba
+incompleto: el modulo no bajaba, y sin el no se extraen sus TX ni se resuelven
+sus `.properties`.
+
+- **Deteccion** (`detect_ump_references_was`): `pom.xml` e imports Java ahora
+  reconocen los dos prefijos de `DEPENDENCY_PREFIXES` (`ump`, `ms`). El regex
+  Maven acepta tanto el artifactId corto (`msadministracion0048-dominio`) como
+  el nombre completo del repo (`ms-msadministracion0048-was`).
+- **Clonado** (`_resolve_ump_repo`): los nombres con prefijo `ms` prueban
+  `ms-<dep>-was` primero, sin importar si el consumidor es WAS o IIB/ORQ.
+  `ms-{ump}-was` se agrego tambien a los fallbacks de IIB.
+- **Resolucion en disco** (`_find_ump_repo`): mismo criterio, para que el
+  detector de properties encuentre el modulo ya clonado.
+- **Helper publico** `dependency_prefix()` en `legacy_analyzer`; los variants de
+  nombre preservan el casing del legacy para cualquier prefijo (`MSAdmin...` ->
+  `msAdmin...` -> `msadmin...`).
+- `capamedia info` sugiere el clonado manual apuntando al repo correcto
+  (`ms-<dep>-was` vs `ump-<ump>-was`).
+
+Los modulos `ms` se clonan en `umps/` y siguen el mismo pipeline que las UMP
+(extraccion de TX, properties, dossier). No cuentan como evidencia BANCS: esa
+senal sigue restringida a `BANCS_UMP_PREFIXES`.
+
 ## [0.45.0] - 2026-09-03
 
 ### Added — Check 2.10 + autofix: `TraceLoggerManagementPathConfig`

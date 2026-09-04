@@ -528,6 +528,10 @@ Corregido en v0.17.1. El detector WAS ahora soporta:
 
 Actualizá al CLI >= 0.17.2.
 
+Desde v0.46.0 el clone también trae los módulos legados con prefijo `ms`
+(`msadministracion0048` → `tpl-integration-services-was/ms-msadministracion0048-was`),
+detectados igual que las UMPs en `pom.xml` e `import` Java y clonados en `umps/`.
+
 ### ❌ MIGRATION_REPORT.md reporta "blocker: OMNI_COD_SERVICIO_OK falta"
 
 Corregido en v0.18.0 embebiendo el catálogo de `generalservices.properties` + `catalogoaplicaciones.properties`. El agente ahora usa los valores literales (`"0"`, `"9999"`, `"00633"`, etc.) en vez de marcar env vars faltantes.

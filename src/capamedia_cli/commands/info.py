@@ -231,7 +231,8 @@ def _detect_ump_gap(
         for p in umps_root.iterdir():
             if not p.is_dir() or p.name.startswith("."):
                 continue
-            m = _re.search(r"(ump[a-z]+\d{4})", p.name, _re.IGNORECASE)
+            # Cubre ump-<ump>-was, sqb-msa-<ump> y ms-<dep>-was (modulos `ms`).
+            m = _re.search(r"((?:ump|ms)[a-z]+\d{4})", p.name, _re.IGNORECASE)
             if m:
                 cloned.add(m.group(1).lower())
 
@@ -293,12 +294,21 @@ def _render_umps_section(
             "\n  [cyan]Opcion B[/cyan] - git clone manual una por una "
             "(si solo faltan UMPs, no quieres re-clonar todo):"
         )
+        from capamedia_cli.core.legacy_analyzer import dependency_prefix
+
         for ump in sorted(missing_umps):
             if source_type == "was":
+                # Los modulos legados `ms` (msadministracion0048) viven en
+                # ms-<dep>-was; las UMP clasicas en ump-<ump>-was.
+                repo = (
+                    f"ms-{ump}-was"
+                    if dependency_prefix(ump) == "ms"
+                    else f"ump-{ump}-was"
+                )
                 console.print(
                     f"    [dim]git clone https://dev.azure.com/BancoPichinchaEC/"
-                    f"tpl-integration-services-was/_git/ump-{ump}-was "
-                    f"umps/ump-{ump}-was[/dim]"
+                    f"tpl-integration-services-was/_git/{repo} "
+                    f"umps/{repo}[/dim]"
                 )
             else:
                 console.print(

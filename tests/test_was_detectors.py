@@ -219,3 +219,69 @@ def test_analyze_legacy_was_finds_everything(tmp_path: Path) -> None:
     assert analysis.wsdl.operation_count == 2
     assert len(analysis.umps) == 1
     assert analysis.umps[0].name == "umptecnicos0023"
+
+
+# ---------------------------------------------------------------------------
+# Modulos legados con prefijo `ms` (ms-<dep>-was)
+# ---------------------------------------------------------------------------
+
+
+def test_ms_module_detected_in_pom(tmp_path: Path) -> None:
+    """`msadministracion0048` vive en ms-msadministracion0048-was y se declara
+    como dependencia Maven igual que una UMP."""
+    (tmp_path / "pom.xml").write_text(
+        '<project><dependencies>'
+        '<dependency><artifactId>msadministracion0048-dominio</artifactId></dependency>'
+        '</dependencies></project>',
+        encoding="utf-8",
+    )
+    assert detect_ump_references_was(tmp_path) == ["msadministracion0048"]
+
+
+def test_ms_module_detected_with_repo_style_artifact_id(tmp_path: Path) -> None:
+    """Algunos poms declaran el artifactId con el nombre completo del repo."""
+    (tmp_path / "pom.xml").write_text(
+        '<project><dependencies>'
+        '<dependency><artifactId>ms-msadministracion0048-was</artifactId></dependency>'
+        '</dependencies></project>',
+        encoding="utf-8",
+    )
+    assert detect_ump_references_was(tmp_path) == ["msadministracion0048"]
+
+
+def test_ms_module_detected_in_java_imports(tmp_path: Path) -> None:
+    java_dir = tmp_path / "src"
+    java_dir.mkdir()
+    (java_dir / "Svc.java").write_text(
+        "import com.pichincha.administracion.msadministracion0048.pojo.Foo;\n",
+        encoding="utf-8",
+    )
+    assert detect_ump_references_was(tmp_path) == ["msadministracion0048"]
+
+
+def test_ms_and_ump_detected_together(tmp_path: Path) -> None:
+    (tmp_path / "pom.xml").write_text(
+        '<project><dependencies>'
+        '<dependency><artifactId>umptecnicos0023-dominio</artifactId></dependency>'
+        '<dependency><artifactId>msadministracion0048-dominio</artifactId></dependency>'
+        '<dependency><artifactId>spring-boot-starter-web</artifactId></dependency>'
+        '</dependencies></project>',
+        encoding="utf-8",
+    )
+    assert detect_ump_references_was(tmp_path) == [
+        "msadministracion0048",
+        "umptecnicos0023",
+    ]
+
+
+def test_regular_maven_artifacts_are_not_detected(tmp_path: Path) -> None:
+    """Dependencias de terceros no deben confundirse con modulos del banco."""
+    (tmp_path / "pom.xml").write_text(
+        '<project><dependencies>'
+        '<dependency><artifactId>commons-lang3</artifactId></dependency>'
+        '<dependency><artifactId>mysql-connector-java</artifactId></dependency>'
+        '<dependency><artifactId>jackson-databind</artifactId></dependency>'
+        '</dependencies></project>',
+        encoding="utf-8",
+    )
+    assert detect_ump_references_was(tmp_path) == []

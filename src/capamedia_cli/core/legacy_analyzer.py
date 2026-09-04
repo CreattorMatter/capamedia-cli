@@ -187,26 +187,42 @@ def detect_ump_references(legacy_root: Path) -> list[str]:
     return sorted(refs)
 
 
-# WAS declara UMPs como Maven dependencies (artifactId = umpXxx0000-*) y las
-# usa via imports Java. El regex captura ambos casos.
+# Prefijos de dependencia compartida que un WAS puede declarar. Ademas de las
+# UMP clasicas (`umpXxx0000`), el banco publica modulos legados con prefijo
+# `ms` (`msadministracion0048`), que viven en
+# `tpl-integration-services-was/_git/ms-<dep>-was`. Ambos se clonan igual
+# (a `umps/`) y se les extraen TX/properties con el mismo pipeline.
+DEPENDENCY_PREFIXES: tuple[str, ...] = ("ump", "ms")
+
+_DEP_PREFIX_ALT = "|".join(DEPENDENCY_PREFIXES)
+
+# WAS declara estas dependencias como Maven dependencies
+# (artifactId = umpXxx0000-* / msXxx0000-*, a veces con el nombre completo del
+# repo `ms-msXxx0000-was`) y las usa via imports Java. Los regex cubren ambos.
 RE_UMP_WAS_MAVEN = re.compile(
-    r"<artifactId>\s*(ump[a-z]+\d{4})[-a-z]*\s*</artifactId>",
+    rf"<artifactId>\s*(?:(?:{_DEP_PREFIX_ALT})-)?"
+    rf"((?:{_DEP_PREFIX_ALT})[a-z]+\d{{4}})[-a-z]*\s*</artifactId>",
     re.IGNORECASE,
 )
 RE_UMP_WAS_JAVA_IMPORT = re.compile(
-    r"import\s+com\.pichincha\.[a-z]+\.(ump[a-z]+\d{4})\.",
+    rf"import\s+com\.pichincha\.[a-z]+\.((?:{_DEP_PREFIX_ALT})[a-z]+\d{{4}})\.",
     re.IGNORECASE,
 )
 
 
 def detect_ump_references_was(legacy_root: Path) -> list[str]:
-    """Scan pom.xml + Java sources for UMP references in WAS projects.
+    """Scan pom.xml + Java sources for shared-module references in WAS projects.
 
-    WAS no usa ESQL — las UMPs se referencian como:
+    WAS no usa ESQL — las dependencias se referencian como:
       1. Maven dependencies en pom.xml (<artifactId>umpXxx0000-dominio</artifactId>)
       2. Imports Java (`import com.pichincha.<dominio>.umpXxx0000.pojo.*`)
 
-    Returns deduplicated UMP names (lowercase), sorted. Ej: ["umptecnicos0023"].
+    Cubre los dos prefijos de `DEPENDENCY_PREFIXES`: UMPs clasicas (`ump*`) y
+    modulos legados `ms*` (ej. `msadministracion0048`, repo
+    `ms-msadministracion0048-was`).
+
+    Returns deduplicated names (lowercase), sorted.
+    Ej: ["msadministracion0048", "umptecnicos0023"].
     """
     refs: set[str] = set()
 
@@ -534,10 +550,12 @@ _ROOT_PATTERNS = [
     re.compile(r"^sqb-msa-([a-z]+\d{4})$", re.IGNORECASE),
 ]
 
-# Patrones para buscar repos UMP ya clonados en disco. Ordenados segun el
-# source_kind del servicio consumidor:
+# Patrones para buscar repos de dependencias ya clonados en disco. Ordenados
+# segun el source_kind del servicio consumidor:
 #   - WAS:     UMPs suelen estar en ump-<ump>-was (fallback ms-/sqb-msa-)
 #   - IIB/ORQ: UMPs suelen estar en sqb-msa-<ump> (fallback ump-/ms-)
+# Excepcion: las dependencias con prefijo `ms` (msadministracion0048) viven
+# siempre en ms-<dep>-was, y ese patron se prueba primero (ver _find_ump_repo).
 _UMP_REPO_PATTERNS_WAS = [
     "ump-{ump}-was",
     "ms-{ump}-was",
@@ -550,6 +568,19 @@ _UMP_REPO_PATTERNS_NON_WAS = [
 ]
 
 
+def dependency_prefix(dep_name: str) -> str:
+    """Prefijo de `DEPENDENCY_PREFIXES` con el que arranca la dependencia.
+
+    `UMPClientes0020` -> "ump"; `msadministracion0048` -> "ms"; "" si ninguno.
+    Se prueba "ump" antes que "ms" para no confundir prefijos solapados.
+    """
+    lower = dep_name.strip().lower()
+    for prefix in DEPENDENCY_PREFIXES:
+        if lower.startswith(prefix):
+            return prefix
+    return ""
+
+
 def _ump_name_variants(ump_name: str) -> list[str]:
     raw = ump_name.strip()
     lower = raw.lower()
@@ -560,8 +591,9 @@ def _ump_name_variants(ump_name: str) -> list[str]:
             variants.append(value)
 
     add(raw)
-    if raw[:3].lower() == "ump" and len(raw) > 3:
-        add("ump" + raw[3:])
+    prefix = dependency_prefix(raw)
+    if prefix and len(raw) > len(prefix):
+        add(prefix + raw[len(prefix):])
     add(lower)
     return variants
 
@@ -582,16 +614,20 @@ def _existing_child_case_insensitive(parent: Path, name: str) -> Path | None:
 
 
 def _find_ump_repo(umps_root: Path, ump_name: str, source_kind: str) -> Path | None:
-    """Busca el repo de un UMP ya clonado en disco probando los 3 patterns
-    conocidos. Respeta el `source_kind` para priorizar el patron mas probable.
+    """Busca el repo de una dependencia ya clonada en disco probando los 3
+    patterns conocidos. Respeta el `source_kind` para priorizar el patron mas
+    probable, salvo que el nombre tenga prefijo `ms` (esos viven siempre en
+    `ms-<dep>-was`, asi que ese patron va primero).
 
     Returns el Path si existe, None si no.
     """
-    patterns = (
+    patterns = list(
         _UMP_REPO_PATTERNS_WAS
         if source_kind == "was"
         else _UMP_REPO_PATTERNS_NON_WAS
     )
+    if dependency_prefix(ump_name) == "ms":
+        patterns.sort(key=lambda tmpl: tmpl != "ms-{ump}-was")
     for tmpl in patterns:
         for ump in _ump_name_variants(ump_name):
             candidate = _existing_child_case_insensitive(umps_root, tmpl.format(ump=ump))

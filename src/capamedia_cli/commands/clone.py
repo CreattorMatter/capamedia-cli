@@ -6,6 +6,7 @@ Trae solo lo especifico del servicio:
     legacy/_repo/<servicio>-aplicacion/   (codigo legacy WAS clasico)
     legacy/_repo/<servicio>-infraestructura/
     umps/sqb-msa-umpclientes<NNNN>/       (dependencias directas)
+    umps/ms-msadministracion<NNNN>-was/   (modulos legados `ms` del WAS)
     tx/sqb-cfg-<NNNNNN>-TX/               (contratos BANCS de cada TX invocado)
     config/sqb-cfg-*-configuraciones/     (catalogos globales referenciados)
     COMPLEXITY_<servicio>.md              (reporte de analisis)
@@ -41,7 +42,7 @@ from capamedia_cli.core.dossier import (
     render_dossier_prompt_appendix,
     write_dossier,
 )
-from capamedia_cli.core.legacy_analyzer import analyze_legacy
+from capamedia_cli.core.legacy_analyzer import analyze_legacy, dependency_prefix
 from capamedia_cli.core.ola_policy import BANK_NAMESPACES
 
 console = Console()
@@ -118,22 +119,29 @@ WAS_SPLIT_REPO_SUFFIXES = ("aplicacion", "infraestructura")
 # consume:
 #   - IIB/ORQ: UMPs en `tpl-bus-omnicanal/sqb-msa-<ump>` (patron clasico)
 #   - WAS:     UMPs en `tpl-integration-services-was/ump-<ump>-was`
+#   - WAS:     modulos legados `ms` en `tpl-integration-services-was/ms-<dep>-was`
+#              (ej. msadministracion0048 -> ms-msadministracion0048-was)
 # El CLI intenta primero el patron correspondiente al source_kind del servicio
 # principal, despues los otros como fallback.
 UMP_AZURE_FALLBACK_PATTERNS_IIB: list[tuple[str, str]] = [
     ("bus", "sqb-msa-{ump}"),                # IIB/ORQ clasico
     ("was", "ump-{ump}-was"),                # por si una UMP se movio a WAS
+    ("was", "ms-{ump}-was"),                 # modulos legados `ms` (ms-<dep>-was)
 ]
 
 UMP_AZURE_FALLBACK_PATTERNS_WAS: list[tuple[str, str]] = [
     ("was", "ump-{ump}-was"),                # WAS (caso wstecnicos0008/umptecnicos0023)
-    ("was", "ms-{ump}-was"),                 # variante "ms"
+    ("was", "ms-{ump}-was"),                 # variante "ms" (ms-msadministracion0048-was)
     ("bus", "sqb-msa-{ump}"),                # fallback IIB (por si la UMP vive aun alla)
 ]
 
+# Patron canonico de los modulos legados con prefijo `ms`
+# (ej. msadministracion0048 -> tpl-integration-services-was/ms-msadministracion0048-was).
+MS_DEPENDENCY_PATTERN: tuple[str, str] = ("was", "ms-{ump}-was")
+
 
 def _ump_name_variants(ump_name: str) -> list[str]:
-    """Return UMP repo-name variants preserving the legacy reference casing."""
+    """Return dependency repo-name variants preserving the legacy casing."""
     raw = ump_name.strip()
     lower = raw.lower()
     variants: list[str] = []
@@ -143,8 +151,9 @@ def _ump_name_variants(ump_name: str) -> list[str]:
             variants.append(value)
 
     add(raw)
-    if raw[:3].lower() == "ump" and len(raw) > 3:
-        add("ump" + raw[3:])
+    prefix = dependency_prefix(raw)
+    if prefix and len(raw) > len(prefix):
+        add(prefix + raw[len(prefix):])
     add(lower)
     return variants
 
@@ -285,20 +294,26 @@ def _resolve_ump_repo(
     *,
     parent_kind: str = "iib",
 ) -> tuple[Path | None, str, str]:
-    """Intenta clonar un repo de UMP probando los patrones conocidos.
+    """Intenta clonar el repo de una dependencia probando los patrones conocidos.
 
-    `parent_kind`: tipo del servicio que usa la UMP (iib/was/orq). Determina
-    el orden de prueba. UMPs de servicios WAS suelen vivir en
+    `parent_kind`: tipo del servicio que la usa (iib/was/orq). Determina el
+    orden de prueba. UMPs de servicios WAS suelen vivir en
     `tpl-integration-services-was/ump-<ump>-was`; UMPs de IIB/ORQ en
-    `tpl-bus-omnicanal/sqb-msa-<ump>`.
+    `tpl-bus-omnicanal/sqb-msa-<ump>`. Los modulos legados con prefijo `ms`
+    (ej. msadministracion0048) viven en
+    `tpl-integration-services-was/ms-<dep>-was` y ese patron se prueba primero.
 
     Returns: (path_clonado, project_key, repo_name) o (None, "", "").
     """
-    patterns = (
+    patterns = list(
         UMP_AZURE_FALLBACK_PATTERNS_WAS
         if parent_kind == "was"
         else UMP_AZURE_FALLBACK_PATTERNS_IIB
     )
+    # Las dependencias `ms*` viven siempre en ms-<dep>-was: ese patron primero,
+    # sin importar el tipo del servicio consumidor.
+    if dependency_prefix(ump_name) == "ms":
+        patterns.sort(key=lambda entry: entry != MS_DEPENDENCY_PATTERN)
     tried: set[tuple[str, str]] = set()
     for project_key, pattern in patterns:
         for ump in _ump_name_variants(ump_name):
@@ -1087,7 +1102,8 @@ def clone_service(
     pre_kind = detect_source_kind(legacy_dest, service_name)
     if pre_kind == "was":
         console.print(
-            "\n[bold]2. Detectando UMPs en pom.xml + imports Java (WAS)...[/bold]"
+            "\n[bold]2. Detectando UMPs/modulos `ms` en pom.xml + "
+            "imports Java (WAS)...[/bold]"
         )
         ump_names = detect_ump_references_was(legacy_dest)
     else:
@@ -1097,13 +1113,16 @@ def clone_service(
         ump_names = detect_ump_references(legacy_dest)
 
     if ump_names:
-        console.print(f"[green]OK[/green] {len(ump_names)} UMP(s) detectado(s): {', '.join(ump_names)}")
+        console.print(
+            f"[green]OK[/green] {len(ump_names)} dependencia(s) detectada(s): "
+            f"{', '.join(ump_names)}"
+        )
     else:
-        console.print("[dim]No se detectaron UMPs[/dim]")
+        console.print("[dim]No se detectaron UMPs ni modulos `ms`[/dim]")
 
-    # --- Step 3: Clone UMPs (fallback multi-patron segun tipo del servicio) ---
+    # --- Step 3: Clone deps (fallback multi-patron segun tipo del servicio) ---
     if ump_names:
-        console.print("\n[bold]3. Clonando UMPs...[/bold]")
+        console.print("\n[bold]3. Clonando UMPs/modulos `ms`...[/bold]")
         for ump in ump_names:
             resolved, proj, repo_name = _resolve_ump_repo(
                 ump, ws, shallow=shallow, parent_kind=pre_kind
